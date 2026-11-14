@@ -1,0 +1,34 @@
+{
+    "name": "open-pcb-workspace",
+    "private": true,
+    "type": "module",
+    "packageManager": "pnpm@10.28.0",
+    "description": "OpenPCB workspace: PCB layout, inspection, fabrication and assembly documents, and agent skills",
+    "keywords": ["pcb", "embedded", "gerber", "drill", "bom", "drc", "kicad", "board"],
+    "license": "MPL-2.0",
+    "repository": "https://github.com/nyar-os/OpenPCB",
+    "scripts": {
+        "doc": "cargo doc --no-deps --all-features",
+        "test:rust": "cargo test --release",
+        "fmt": "cargo fmt --all",
+        "p": "git push && git push --tags --prune",
+        "reset": "git reset Head~ --soft",
+        "u": "cargo upgrade --workspace",
+        "check:rust": "cargo fmt -p open-pcb-model -p open-pcb-napi -- --check && cargo clippy -p open-pcb-model -p open-pcb-napi --all-targets -- -D warnings && cargo test -p open-pcb-model -p open-pcb-napi",
+        "build:napi": "wae native build",
+        "build:ts": "pnpm --filter @wae/open-pcb run build",
+        "build:ui": "pnpm --filter @wae/open-pcb-ui run build",
+        "build": "wae build",
+        "stage:native": "wae native stage",
+        "typecheck": "pnpm -r --filter \"./projects/packages/*\" run typecheck",
+        "test": "pnpm -r --filter \"./projects/packages/*\" run test",
+        "gui": "pnpm run build && pnpm --filter @wae/open-pcb exec node ./dist/cli.js gui"
+    },
+    "devDependencies": {
+        "@doki-land/nifty": "^0.1.15",
+        "@types/node": "^22.20.4",
+        "@wae/wae": "0.0.6",
+        "typescript": "^5.9.2"
+    }
+}
+

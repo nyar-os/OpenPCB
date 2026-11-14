@@ -1,0 +1,276 @@
+<template>
+    <header class="site-header">
+        <a class="skip-link" href="#main">Skip to content</a>
+        <div class="site-header__inner">
+            <Link to="IndexPage" class="brand">
+                <span class="brand__mark">P</span>
+                <span class="brand__name">OpenPCB</span>
+            </Link>
+            <span class="status-chip">In development</span>
+            <button
+                type="button"
+                class="menu-toggle"
+                :aria-expanded="open ? 'true' : 'false'"
+                aria-controls="primary-nav"
+                aria-label="Toggle navigation"
+                @click="toggleMenu"
+            >
+                <span class="menu-toggle__bar"></span>
+                <span class="menu-toggle__bar"></span>
+            </button>
+            <nav id="primary-nav" aria-label="Primary" class="nav" :data-open="open ? 'true' : 'false'">
+                <Link to="IndexPage" data-nav="home" :data-active="activeId === 'home' ? 'true' : 'false'">
+                    Home
+                </Link>
+                <Link to="FeaturesPage" data-nav="features" :data-active="activeId === 'features' ? 'true' : 'false'">
+                    Features
+                </Link>
+                <Link to="RoadmapPage" data-nav="roadmap" :data-active="activeId === 'roadmap' ? 'true' : 'false'">
+                    Roadmap
+                </Link>
+            </nav>
+            <a class="nav-source" href="https://github.com/nyar-os/OpenPCB" rel="noopener">
+                Source
+            </a>
+        </div>
+    </header>
+</template>
+
+<style>
+.site-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    border-bottom: 1px solid var(--opb-line);
+    background: rgba(237, 242, 238, 0.92);
+    backdrop-filter: blur(8px);
+}
+
+.skip-link {
+    position: absolute;
+    top: -46px;
+    left: 16px;
+    z-index: 30;
+    padding: 8px 13px;
+    border: 1px solid var(--opb-line);
+    border-radius: 8px;
+    background: var(--opb-surface);
+    color: var(--opb-ink);
+    font-size: 13px;
+    transition: top 0.12s ease;
+}
+
+.skip-link:focus {
+    top: 10px;
+}
+
+.site-header__inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 18px;
+    max-width: var(--opb-maxw);
+    margin: 0 auto;
+    padding: 13px 24px;
+}
+
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--opb-ink);
+}
+
+.brand:hover {
+    text-decoration: none;
+}
+
+.brand__mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--opb-accent);
+    color: #f6faff;
+    font-weight: 700;
+    font-size: 14px;
+}
+
+.brand__name {
+    font-weight: 600;
+    font-size: 17px;
+}
+
+.status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border: 1px solid var(--opb-line);
+    border-radius: 999px;
+    background: var(--opb-surface);
+    color: var(--opb-muted);
+    font-size: 11.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.status-chip::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--opb-copper);
+}
+
+.nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-left: auto;
+}
+
+.nav a {
+    color: var(--opb-muted);
+    font-size: 14.5px;
+    padding: 4px 0;
+    border-bottom: 2px solid transparent;
+}
+
+.nav a:hover {
+    color: var(--opb-ink);
+    text-decoration: none;
+}
+
+.nav a[data-active="true"] {
+    border-bottom-color: var(--opb-accent);
+    color: var(--opb-accent);
+}
+
+.nav-source {
+    padding: 5px 14px;
+    border: 1px solid var(--opb-line);
+    border-radius: 999px;
+    color: var(--opb-ink);
+    font-size: 13.5px;
+    white-space: nowrap;
+}
+
+.nav-source:hover {
+    border-color: var(--opb-accent);
+    text-decoration: none;
+}
+
+.menu-toggle {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    width: 34px;
+    height: 30px;
+    margin-left: auto;
+    padding: 0 7px;
+    border: 1px solid var(--opb-line);
+    border-radius: 7px;
+    background: var(--opb-surface);
+}
+
+.menu-toggle__bar {
+    display: block;
+    width: 100%;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--opb-ink);
+}
+
+.site-header :focus-visible {
+    outline: 2px solid var(--opb-accent);
+    outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+    .site-header__inner {
+        gap: 8px 12px;
+        padding: 11px 18px;
+    }
+
+    .status-chip {
+        order: 1;
+        margin-left: auto;
+    }
+
+    .menu-toggle {
+        display: inline-flex;
+        order: 2;
+        margin-left: 0;
+    }
+
+    .nav {
+        display: none;
+        order: 3;
+        width: 100%;
+        margin-left: 0;
+        padding-top: 8px;
+        border-top: 1px solid var(--opb-line);
+    }
+
+    .nav[data-open="true"] {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .nav a {
+        padding: 8px 2px;
+        border-bottom: 0;
+        border-left: 2px solid transparent;
+        padding-left: 10px;
+    }
+
+    .nav a[data-active="true"] {
+        border-left-color: var(--opb-accent);
+        background: var(--opb-accent-soft);
+    }
+
+    .nav-source {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skip-link {
+        transition: none;
+    }
+}
+</style>
+
+<script client>
+const NAV_BY_PATH = {
+    "/": "home",
+    "/features": "features",
+    "/roadmap": "roadmap",
+};
+
+export default class SiteHeader {
+    public activeId: string = "";
+    public open: boolean = false;
+
+    onMount() {
+        this.resolveActive();
+    }
+
+    resolveActive() {
+        if (typeof window === "undefined" || !window.location) return;
+        const path = (window.location.pathname || "/").replace(/\/+$/, "") || "/";
+        this.activeId = NAV_BY_PATH[path] ?? "";
+    }
+
+    toggleMenu() {
+        this.open = !this.open;
+    }
+}
+</script>
+

@@ -1,0 +1,17 @@
+{
+    "name": "@wae/open-pcb-linux-x64",
+    "version": "0.0.0",
+    "description": "Linux x64 native addon for @wae/open-pcb",
+    "license": "MPL-2.0",
+    "os": ["linux"],
+    "cpu": ["x64"],
+    "main": "open-pcb.linux-x64.node",
+    "files": ["open-pcb.linux-x64.node", "README.md", "License.md"],
+    "engines": { "node": ">=18" },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nyar-os/OpenPCB.git",
+        "directory": "projects/packages/open-pcb-linux-x64"
+    }
+}
+

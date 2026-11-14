@@ -1,0 +1,328 @@
+<template>
+    <SiteShell page="features">
+        <div class="page-head">
+            <h1>Features</h1>
+            <p class="lead">
+                Three lines share one board document: layout, verification and
+                fabrication handoff. Nothing here is assumed from a file
+                extension, and the capability matrix is the only claim that
+                counts.
+            </p>
+        </div>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Contracts</h2>
+                <p>The shared contract every surface builds on.</p>
+            </div>
+            <div class="cards">
+                <article class="contract">
+                    <span class="chip chip--ok">available</span>
+                    <h3>Handles</h3>
+                    <p>
+                        Creating or opening a board returns a handle. Every later
+                        call names that handle, so the studio, CLI and SDK never
+                        guess which document an operation belongs to.
+                    </p>
+                </article>
+                <article class="contract">
+                    <span class="chip chip--ok">available</span>
+                    <h3>Revisions</h3>
+                    <p>
+                        Every mutation increments the document revision and saves
+                        store it. Concurrent-edit conflict handling is not
+                        implemented yet; the revision is the anchor it will use.
+                    </p>
+                </article>
+                <article class="contract">
+                    <span class="chip chip--ok">available</span>
+                    <h3>Error codes</h3>
+                    <p>
+                        Errors are namespaced and stable. A call that cannot run keeps
+                        <code>capability/not-implemented</code> instead of returning a
+                        fabricated success.
+                    </p>
+                </article>
+                <article class="contract">
+                    <span class="chip chip--ok">available</span>
+                    <h3>Capability matrix</h3>
+                    <p>
+                        Board engine, project operations, formats, checks,
+                        renderers and export targets each report their own status.
+                        Unsupported is a first-class answer.
+                    </p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Layout</h2>
+                <span class="chip chip--ok">available</span>
+            </div>
+            <ul>
+                <li>Copper layers, stackup, footprints, nets, tracks and vias live in one board.</li>
+                <li>A new board starts with F.Cu, B.Cu, front and back silkscreen; a rectangular outline is optional and checked by DRC.</li>
+                <li>Layers can be added, renamed, hidden and locked; a rename rewrites footprint and track references in the same edit.</li>
+                <li>Each handle keeps the last 32 snapshots; undo and redo restore them and commit a new revision.</li>
+                <li>Every mutation increments the document revision; saves write a temporary file and rename it into place.</li>
+                <li>Footprints move and update, tracks and vias delete in place, and lock rules block writes to a locked layer.</li>
+                <li>Rejecting duplicate references or undeclared nets keeps one coherent document.</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Verification</h2>
+                <span class="chip chip--ok">available</span>
+            </div>
+            <ul>
+                <li>Checks are named, not implied: DRC, connectivity, clearance, annular rings, stackup, outline and netlist run today.</li>
+                <li>Every finding carries its rule code, revision, layer and object where the rule can name one.</li>
+                <li>A missing or zero-size outline is an error; footprints, tracks and vias outside it are warnings.</li>
+                <li>A board with an outline and no violations passes; errors fail with the objects involved.</li>
+                <li>Silkscreen and courtyard are declared unsupported and report a warning instead of passing.</li>
+                <li>Review is textual today: the interactive viewport renderer is not implemented.</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Fabrication</h2>
+                <span class="chip chip--warn">partial</span>
+            </div>
+            <ul>
+                <li>Gerber RS-274X, drill (Excellon), bill of materials, pick-and-place and SVG are written from the open revision.</li>
+                <li>Gerber writes F_Cu, B_Cu, F_SilkS and Edge_Cuts files into a directory; the outline supplies the edge cuts.</li>
+                <li>STEP, IPC-2581, KiCad and PDF are declared but not implemented.</li>
+                <li>An export reports its format, revision, path, byte count and, for Gerber, every artifact name and size.</li>
+                <li>Unsupported targets reject with <code>capability/not-implemented</code>; writers use board coordinates, never hand-written geometry.</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Assembly</h2>
+                <span class="chip chip--ok">available</span>
+            </div>
+            <ul>
+                <li>Position files carry designator, value, package, mid X, mid Y, rotation and side.</li>
+                <li>The bill of materials groups parts by value and footprint with quantity and designators.</li>
+                <li>Both are derived from the same revision the inspection saw.</li>
+                <li>STEP and IPC-2581 remain declared exchange targets without a writer.</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Command surface</h2>
+                <p>What each entry point actually does today.</p>
+            </div>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Surface</th>
+                            <th>What exists today</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="cell-mono">CLI</td>
+                            <td>
+                                <code>create</code>, <code>list</code>, <code>inspect</code>,
+                                <code>undo</code>, <code>redo</code> and
+                                <code>export gbr|drl|bom|pos|svg</code> run. Footprint add, move, update
+                                and delete, track add and delete, via add and delete, net add,
+                                <code>layer add|rename|visible|lock</code> and <code>outline set</code>
+                                edit a document in place. STEP, IPC-2581, KiCad and PDF exports reject.
+                            </td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                        <tr>
+                            <td class="cell-mono">SDK</td>
+                            <td>
+                                <code>@wae/open-pcb</code> exposes create, open, inspect, save,
+                                export, undo, redo, addFootprint, moveFootprint, updateFootprint,
+                                deleteFootprint, addTrack, deleteTrack, addVia, deleteVia, addNet,
+                                addLayer, updateLayer, setOutline, list and close on one handle.
+                            </td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                        <tr>
+                            <td class="cell-mono">Studio</td>
+                            <td>
+                                The VMZ shell talks to the host over JSON-RPC and shows board
+                                facts, outline, undo and redo, layer visibility and lock toggles,
+                                an add-layer form, export target status, supported checks,
+                                inspection results and diagnostics. The canvas renderer and
+                                viewport tools are not implemented.
+                            </td>
+                            <td><span class="chip chip--warn">shell only</span></td>
+                        </tr>
+                        <tr>
+                            <td class="cell-mono">Skills</td>
+                            <td>
+                                <code>@wae/open-pcb-skills</code> carries executable commands,
+                                preflight and safety rules for create, edit, undo/redo, layers,
+                                outline and the five implemented exports.
+                            </td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Format honesty</h2>
+                <span class="chip chip--idle">10 declared</span>
+            </div>
+            <p>
+                The format registry classifies KiCad board, Gerber, drill,
+                position, bill of materials, STEP, IPC-2581, SVG, PDF and PNG
+                files. Classification is not a support claim: an extension may be
+                listed while the capability matrix still reports it as
+                <code>unsupported</code>.
+            </p>
+            <p class="formats-cell cell-mono">
+                kicad_pcb · gbr · drl · pos · bom · step · ipc2581 · svg · pdf · png
+            </p>
+            <p>
+                Export is implemented for gbr, drl, bom, pos and svg. Checks run for drc,
+                connectivity, clearance, annular_rings, stackup, outline and netlist;
+                silkscreen and courtyard stay unsupported. Renderers are declared as svg,
+                png and pdf, and only svg has a writer.
+            </p>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Current state</h2>
+                <span class="chip chip--idle">no public release</span>
+            </div>
+            <p>
+                The document core, undo and redo, layer management, the outline,
+                in-place CLI editing, rule checks and five output writers are
+                implemented and covered by Rust and TypeScript tests. The interactive
+                renderer, STEP, IPC-2581, KiCad import/export and PDF remain ahead.
+            </p>
+        </section>
+
+        <section class="cta-band">
+            <div>
+                <span class="eyebrow">Order of work</span>
+                <h2>See what is done and what is next.</h2>
+                <p>The roadmap marks each phase with its evidence, not a marketing date.</p>
+            </div>
+            <Link to="RoadmapPage" class="btn btn--primary">
+                Read the roadmap
+            </Link>
+        </section>
+    </SiteShell>
+</template>
+
+<style>
+.cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+}
+
+.contract {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 22px 20px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+}
+
+.contract h3 {
+    margin: 2px 0 4px;
+    font-size: 18px;
+}
+
+.contract p {
+    margin: 0;
+    color: var(--opb-muted);
+    font-size: 14px;
+}
+
+.formats-cell {
+    margin: 4px 0 0;
+    padding: 12px 14px;
+    border: 1px solid var(--opb-line);
+    border-radius: 8px;
+    background: var(--opb-surface-2);
+    color: var(--opb-muted);
+    font-size: 12.5px;
+    word-spacing: 4px;
+}
+
+.cta-band {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px 32px;
+    margin-top: 40px;
+    padding: 28px 26px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: linear-gradient(115deg, var(--opb-accent-soft), var(--opb-surface) 62%);
+}
+
+.cta-band h2 {
+    margin: 6px 0 8px;
+    font-size: 23px;
+}
+
+.cta-band p {
+    max-width: 520px;
+    margin: 0;
+    color: var(--opb-muted);
+    font-size: 14.5px;
+}
+
+.section ul {
+    max-width: 760px;
+}
+
+@media (max-width: 900px) {
+    .cards {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 620px) {
+    .contract {
+        padding: 18px 16px;
+    }
+
+    .cta-band {
+        padding: 22px 18px;
+    }
+
+    .cta-band h2 {
+        font-size: 20px;
+    }
+}
+</style>
+
+<script client>
+export default class FeaturesPage {
+    static meta() {
+        return {
+            title: "Features — OpenPCB",
+            description:
+                "PCB layout, verification and fabrication handoff on one editable board document, with format support disclosed item by item.",
+        };
+    }
+}
+</script>
+

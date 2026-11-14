@@ -1,0 +1,2738 @@
+<template>
+    <div class="studio">
+        <header class="winbar">
+            <div class="winbar__brand" data-drag="true">
+                <span class="winbar__mark">P</span>
+                <span class="winbar__name">OpenPCB Studio</span>
+                <span class="winbar__divider"></span>
+                <span class="winbar__doc">{{ boardTitle() }}</span>
+            </div>
+
+            <div class="winbar__groups">
+                <div class="wgroup">
+                    <span class="wgroup__label">File</span>
+                    <div class="wgroup__row">
+                        <button type="button" class="wbtn" :disabled="!hostReady" title="New board (Ctrl/Cmd+N)" @click="newBoard">New</button>
+                        <button type="button" class="wbtn" :disabled="!hostReady" title="Open board (Ctrl/Cmd+O)" @click="openBoard">Open</button>
+                        <button type="button" class="wbtn" :disabled="!hostReady" title="Save board (Ctrl/Cmd+S)" @click="saveBoard">Save</button>
+                        <button type="button" :class="exportOpen ? 'wbtn wbtn--on' : 'wbtn'" :disabled="!hostReady || !board || !capabilities" :title="exportTitle()" @click="toggleExport">Export</button>
+                    </div>
+                </div>
+                <div class="wgroup">
+                    <span class="wgroup__label">Doc</span>
+                    <div class="wgroup__row">
+                        <button type="button" class="wbtn" :disabled="!hostReady || !board || !board.canUndo" title="Undo (Ctrl+Z)" @click="undoBoard">Undo</button>
+                        <button type="button" class="wbtn" :disabled="!hostReady || !board || !board.canRedo" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" @click="redoBoard">Redo</button>
+                        <button type="button" class="wbtn" :disabled="!hostReady || !board" title="Close board (Ctrl/Cmd+W)" @click="closeBoard">Close board</button>
+                    </div>
+                </div>
+                <div class="wgroup">
+                    <span class="wgroup__label">View</span>
+                    <div class="wgroup__row">
+                        <button type="button" class="wbtn" disabled title="Viewport renderer is not implemented">Fit</button>
+                        <button type="button" class="wbtn" disabled title="Viewport renderer is not implemented">Zoom out</button>
+                        <span class="wgroup__zoom">100%</span>
+                        <button type="button" class="wbtn" disabled title="Viewport renderer is not implemented">Zoom in</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="winbar__spacer" data-drag="true"></div>
+
+            <div class="winbar__status">
+                <button type="button" class="wbtn wbtn--icon" title="Keyboard shortcuts" aria-haspopup="dialog" :aria-expanded="shortcutsOpen ? 'true' : 'false'" @click="toggleShortcuts">?</button>
+                <span :class="hostReady ? 'winbar__led winbar__led--on' : 'winbar__led'" aria-hidden="true"></span>
+                <span :class="hostReady ? 'winbar__mode winbar__mode--on' : 'winbar__mode'">{{ hostReady ? "NATIVE" : "PREVIEW" }}</span>
+            </div>
+
+            <div class="winbar__window" v-if="customChrome">
+                <button type="button" class="winbtn" aria-label="Minimize" title="Minimize" @click="windowMinimize">
+                    <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true" focusable="false"><path d="M1 5h8"></path></svg>
+                </button>
+                <button type="button" class="winbtn" aria-label="Maximize" title="Maximize" @click="windowToggleMaximize">
+                    <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true" focusable="false"><path d="M1.5 1.5h7v7h-7z"></path></svg>
+                </button>
+                <button type="button" class="winbtn winbtn--close" aria-label="Close" title="Close" @click="windowClose">
+                    <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true" focusable="false"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"></path></svg>
+                </button>
+            </div>
+
+            <div class="export-panel" v-if="exportOpen">
+                <div class="export-panel__head">
+                    <b>Export target</b>
+                    <span :class="exportFormatSupported() ? 'chip chip--ok' : 'chip chip--idle'">{{ exportStatusLabel() }}</span>
+                </div>
+                <label class="field">
+                    <span class="field__label">Format</span>
+                    <select class="input" :value="exportFormat" @change="onExportFormat">
+                        <option v-for="target in exportTargetRows()" :key="target.name" :value="target.name">{{ target.name }}</option>
+                    </select>
+                </label>
+                <div class="field">
+                    <span class="field__label">{{ exportTargetLabel() }}</span>
+                    <p class="readout mono">{{ exportTargetReadout() }}</p>
+                </div>
+                <p class="note" v-if="!board">Open a board before projecting an export target.</p>
+                <p class="note" v-else-if="!exportFormatSupported()">
+                    This target is declared but unsupported; exporting rejects with capability/not-implemented.
+                </p>
+                <p class="note" v-else-if="exportTargetIsDirectory()">
+                    Gerber writes a directory with F_Cu, B_Cu, F_SilkS and Edge_Cuts layer files. The board needs an outline.
+                </p>
+                <p class="note" v-else>The writer runs on the open revision and replaces the target file.</p>
+                <div class="export-panel__actions">
+                    <button type="button" class="btn btn--strong" :disabled="!canExport()" @click="exportCurrent">Export</button>
+                    <button type="button" class="btn" @click="closeExport">Cancel</button>
+                </div>
+            </div>
+
+            <div class="shortcuts" v-if="shortcutsOpen" role="dialog" aria-label="Keyboard shortcuts">
+                <div class="shortcuts__head">
+                    <b>Keyboard shortcuts</b>
+                    <button type="button" class="btn btn--small" @click="toggleShortcuts">Close</button>
+                </div>
+                <dl class="shortcuts__list">
+                    <div class="shortcut" v-for="item in shortcutList()" :key="item.label">
+                        <dt>{{ item.label }}</dt>
+                        <dd>{{ item.keys }}</dd>
+                    </div>
+                </dl>
+            </div>
+        </header>
+
+        <section class="context">
+            <label class="path-field">
+                <span class="path-field__label">Path</span>
+                <input class="input input--path" :value="path" placeholder="C:\boards\blinker.opcb" spellcheck="false" aria-label="Board path" @input="onPathInput" />
+            </label>
+            <p class="context__hint">Type a path; the native file picker is not implemented.</p>
+            <div class="context__pills">
+                <span class="pill">{{ hostPillLabel() }}</span>
+                <span :class="enginePillClass()">
+                    <span class="dot" v-if="engineReported()"></span>
+                    <span class="dot dot--idle" v-else></span>
+                    {{ engineLabel() }}
+                </span>
+            </div>
+        </section>
+
+        <div class="banner" v-if="!hostReady">
+            <b>Preview mode.</b>
+            The native WebView host is not attached, so no board can be created or opened.
+        </div>
+
+        <div class="workspace">
+            <aside class="sidebar">
+                <section class="panel">
+                    <div class="panel__head"><h2>Board</h2></div>
+                    <dl class="facts" v-if="board">
+                        <dt>Title</dt>
+                        <dd>{{ board.title || "Untitled board" }}</dd>
+                        <dt>Id</dt>
+                        <dd class="mono">{{ board.id }}</dd>
+                        <dt>Revision</dt>
+                        <dd class="mono">{{ board.revision }}</dd>
+                        <dt>Path</dt>
+                        <dd class="mono ellipsis" :title="pathLine()">{{ pathLine() }}</dd>
+                        <dt>Layers</dt>
+                        <dd class="mono">{{ board.layers.length }}</dd>
+                        <dt>Nets</dt>
+                        <dd class="mono">{{ countOf("nets") }}</dd>
+                        <dt>Footprints</dt>
+                        <dd class="mono">{{ countOf("footprints") }}</dd>
+                        <dt>Tracks</dt>
+                        <dd class="mono">{{ countOf("tracks") }}</dd>
+                        <dt>Vias</dt>
+                        <dd class="mono">{{ countOf("vias") }}</dd>
+                        <dt>Objects</dt>
+                        <dd class="mono">{{ totalObjects() }}</dd>
+                    </dl>
+                    <p class="empty" v-else>No board is open. A board arrives only from the host.</p>
+                </section>
+
+                <section class="panel">
+                    <div class="panel__head">
+                        <h2>Layers</h2>
+                        <span class="panel__count">{{ layerCountLabel() }}</span>
+                    </div>
+                    <div class="layers" v-if="board && board.layers.length">
+                        <div
+                            v-for="layer in board.layers"
+                            :key="layer.id"
+                            :class="layer.id === currentLayerId ? 'layer layer--active' : 'layer'"
+                        >
+                            <button type="button" class="layer__pick" :data-layer-id="layer.id" @click="selectLayer">
+                                <span class="layer__index">{{ layer.index + 1 }}</span>
+                                <span class="layer__body">
+                                    <span class="layer__title">{{ layer.title }}</span>
+                                    <span class="layer__meta">{{ layer.objects }} objects</span>
+                                </span>
+                            </button>
+                            <button
+                                type="button"
+                                :class="layer.visible ? 'layer__mode layer__mode--on' : 'layer__mode'"
+                                :aria-pressed="layer.visible ? 'true' : 'false'"
+                                :data-layer-id="layer.id"
+                                :title="layer.visible ? 'Hide layer' : 'Show layer'"
+                                @click="toggleLayerVisible"
+                            >{{ layer.visible ? "VIS" : "HID" }}</button>
+                            <button
+                                type="button"
+                                :class="layer.locked ? 'layer__mode layer__mode--lock' : 'layer__mode'"
+                                :aria-pressed="layer.locked ? 'true' : 'false'"
+                                :data-layer-id="layer.id"
+                                :title="layer.locked ? 'Unlock layer' : 'Lock layer'"
+                                @click="toggleLayerLocked"
+                            >{{ layer.locked ? "LOCK" : "FREE" }}</button>
+                        </div>
+                    </div>
+                    <p class="empty" v-else-if="board">No layers in this board.</p>
+                    <p class="empty" v-else>No board is open.</p>
+                    <div class="layer-add" v-if="board">
+                        <button v-if="!addLayerOpen" type="button" class="btn btn--small" @click="openAddLayer">Add layer</button>
+                        <div v-else class="layer-add__form">
+                            <input class="input" :value="newLayerName" placeholder="Layer name" aria-label="New layer name" @input="onNewLayerName" />
+                            <select class="input" :value="newLayerKind" aria-label="New layer kind" @change="onNewLayerKind">
+                                <option v-for="kind in layerKinds()" :key="kind.key" :value="kind.key">{{ kind.label }}</option>
+                            </select>
+                            <input class="input" :value="newLayerColor" placeholder="#c87533" aria-label="New layer colour" @input="onNewLayerColor" />
+                            <div class="layer-add__actions">
+                                <button type="button" class="btn btn--small btn--strong" :disabled="!canAddLayer()" @click="commitLayer">Add</button>
+                                <button type="button" class="btn btn--small" @click="cancelAddLayer">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel__head"><h2>Export targets</h2></div>
+                    <div class="targets" v-if="capabilities">
+                        <div class="target" v-for="row in exportTargetRows()" :key="row.name">
+                            <span :class="row.dot"></span>
+                            <span class="target__name mono">{{ row.name }}</span>
+                            <span class="target__state">{{ row.status }}</span>
+                        </div>
+                    </div>
+                    <p class="empty" v-else>Targets are declared by the capability matrix.</p>
+                    <p class="note" v-if="capabilities && supportedTargetCount() === 0">Declared targets. None are implemented yet.</p>
+                    <p class="note" v-else-if="capabilities">
+                        {{ supportedTargetCount() }} of {{ exportTargetNames().length }} export targets are implemented.
+                    </p>
+                </section>
+            </aside>
+
+            <main class="canvas">
+                <div class="canvas__bar">
+                    <span class="canvas__title">Canvas</span>
+                    <span class="canvas__zoom">zoom 100%</span>
+                    <span class="chip chip--warn">renderer offline</span>
+                </div>
+                <div class="rulers">
+                    <div class="ruler-corner"></div>
+                    <div class="ruler ruler--h">
+                        <span class="ruler__tick" v-for="tick in rulerTicks()" :key="'h' + tick.value" :class="{ 'ruler__tick--last': tick.last }">
+                            <span class="ruler__label">{{ tick.value }}</span>
+                        </span>
+                    </div>
+                    <div class="ruler ruler--v">
+                        <span class="ruler__tick" v-for="tick in rulerTicks()" :key="'v' + tick.value" :class="{ 'ruler__tick--last': tick.last }">
+                            <span class="ruler__label">{{ tick.value }}</span>
+                        </span>
+                    </div>
+                    <div class="surface">
+                        <div class="artboard" v-if="board">
+                            <span class="artboard__eyebrow">Artboard</span>
+                            <b class="artboard__title">{{ board.title || "Untitled board" }}</b>
+                            <span class="artboard__id mono">{{ board.id }}</span>
+                            <div class="artboard__facts">
+                                <span>revision {{ board.revision }}</span>
+                                <span>{{ board.layers.length }} layers</span>
+                                <span>{{ countOf("nets") }} nets</span>
+                                <span>{{ countOf("footprints") }} footprints</span>
+                                <span>{{ countOf("tracks") }} tracks</span>
+                                <span>{{ countOf("vias") }} vias</span>
+                            </div>
+                            <p class="artboard__note">
+                                Copper layers, stackup, footprints, tracks and vias stay on this
+                                revision. The viewport renderer is not implemented, so no geometry
+                                is painted.
+                            </p>
+                        </div>
+                        <div class="empty-state" v-else>
+                            <span class="empty-state__mark">P</span>
+                            <b class="empty-state__title">No board open</b>
+                            <p class="empty-state__hint">
+                                Create a board, or open a board at an .opcb path. The canvas stays
+                                empty until the viewport renderer exists.
+                            </p>
+                            <div class="empty-state__actions">
+                                <button type="button" class="btn btn--strong" :disabled="!hostReady" @click="newBoard">New board</button>
+                                <button type="button" class="btn" :disabled="!hostReady" @click="openBoard">Open path</button>
+                            </div>
+                        </div>
+                        <div class="tools">
+                            <span class="tools__label">Tools</span>
+                            <button type="button" class="tool" disabled title="Viewport tooling is not implemented">Select</button>
+                            <button type="button" class="tool" disabled title="Viewport tooling is not implemented">Pan</button>
+                            <button type="button" class="tool" disabled title="Viewport tooling is not implemented">Zoom</button>
+                            <button type="button" class="tool" disabled title="Viewport tooling is not implemented">Measure</button>
+                            <span class="tools__badge">viewport not implemented</span>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <aside class="inspector">
+                <div class="tabs" role="tablist" aria-label="Inspector">
+                    <button type="button" role="tab" :class="tab === 'properties' ? 'tab tab--active' : 'tab'" :aria-selected="tab === 'properties' ? 'true' : 'false'" data-tab="properties" @click="selectTab">Properties</button>
+                    <button type="button" role="tab" :class="tab === 'capabilities' ? 'tab tab--active' : 'tab'" :aria-selected="tab === 'capabilities' ? 'true' : 'false'" data-tab="capabilities" @click="selectTab">Capabilities</button>
+                    <button type="button" role="tab" :class="tab === 'diagnostics' ? 'tab tab--active' : 'tab'" :aria-selected="tab === 'diagnostics' ? 'true' : 'false'" data-tab="diagnostics" @click="selectTab">Diagnostics</button>
+                </div>
+
+                <div class="tab-panel" v-if="tab === 'properties'">
+                    <section class="card">
+                        <h2 class="card__title">Board</h2>
+                        <dl class="facts" v-if="board">
+                            <dt>Title</dt>
+                            <dd>{{ board.title || "Untitled board" }}</dd>
+                            <dt>Id</dt>
+                            <dd class="mono">{{ board.id }}</dd>
+                            <dt>Revision</dt>
+                            <dd class="mono">{{ board.revision }}</dd>
+                            <dt>Path</dt>
+                            <dd class="mono ellipsis" :title="pathLine()">{{ pathLine() }}</dd>
+                            <dt>Layers</dt>
+                            <dd class="mono">{{ board.layers.length }}</dd>
+                            <dt>Outline</dt>
+                            <dd class="mono">{{ outlineLabel() }}</dd>
+                            <dt>Nets</dt>
+                            <dd class="mono">{{ countOf("nets") }}</dd>
+                            <dt>Footprints</dt>
+                            <dd class="mono">{{ countOf("footprints") }}</dd>
+                            <dt>Tracks</dt>
+                            <dd class="mono">{{ countOf("tracks") }}</dd>
+                            <dt>Vias</dt>
+                            <dd class="mono">{{ countOf("vias") }}</dd>
+                            <dt>Objects</dt>
+                            <dd class="mono">{{ totalObjects() }}</dd>
+                        </dl>
+                        <p class="empty" v-else>No board is open, so there are no facts to show.</p>
+                    </section>
+                    <section class="card">
+                        <h2 class="card__title">Selection</h2>
+                        <p class="note">No selection. Selecting footprints and tracks needs the viewport renderer.</p>
+                    </section>
+                    <section class="card">
+                        <h2 class="card__title">Inspection</h2>
+                        <button type="button" class="btn btn--wide" :disabled="!handle" title="Run the declared DRC and connectivity checks" @click="inspectBoard">Run inspection</button>
+                        <p class="note">{{ inspectText() }}</p>
+                    </section>
+                </div>
+
+                <div class="tab-panel" v-if="tab === 'capabilities'">
+                    <section class="card" v-if="capabilities">
+                        <h2 class="card__title">Board engine</h2>
+                        <dl class="facts">
+                            <dt>Package</dt>
+                            <dd class="mono">{{ capabilities.engine.package }}</dd>
+                            <dt>Version</dt>
+                            <dd class="mono">{{ capabilities.engine.version }}</dd>
+                            <dt>Project</dt>
+                            <dd>{{ projectSummary() }}</dd>
+                        </dl>
+                    </section>
+                    <div class="cap-list" v-if="capabilities">
+                        <div class="cap-row" v-for="row in capabilityRows()" :key="row.key">
+                            <span class="cap-row__label">{{ row.label }}</span>
+                            <span class="cap-row__value mono">{{ row.value }}</span>
+                            <span :class="row.tone">{{ row.status }}</span>
+                        </div>
+                    </div>
+                    <section class="card" v-if="capabilities">
+                        <h2 class="card__title">Checks</h2>
+                        <div class="cap-list">
+                            <div class="cap-row" v-for="row in checkRows()" :key="row.key">
+                                <span class="cap-row__label">{{ row.label }}</span>
+                                <span :class="row.tone">{{ row.status }}</span>
+                            </div>
+                        </div>
+                        <p class="note">Silkscreen and courtyard stay unsupported; requesting them reports a warning instead of a pass.</p>
+                    </section>
+                    <section class="card" v-else>
+                        <h2 class="card__title">Capabilities</h2>
+                        <p class="note">The capability matrix loads once the native host answers. Nothing is assumed about board layout in the meantime.</p>
+                    </section>
+                    <p class="note" v-if="capabilities">{{ capabilityNote() }}</p>
+                </div>
+
+                <div class="tab-panel" v-if="tab === 'diagnostics'">
+                    <section class="card">
+                        <h2 class="card__title">Session</h2>
+                        <dl class="facts">
+                            <dt>Host</dt>
+                            <dd>{{ hostLabel() }}</dd>
+                            <dt>Connection</dt>
+                            <dd>{{ connectionLabel() }}</dd>
+                            <dt>Requests</dt>
+                            <dd class="mono">{{ requestsSent }}</dd>
+                            <dt>Last request</dt>
+                            <dd class="mono">{{ lastRequestLabel() }}</dd>
+                            <dt>Last error</dt>
+                            <dd class="mono">{{ lastErrorLabel() }}</dd>
+                        </dl>
+                        <p class="note mono" v-if="lastErrorText">{{ lastErrorText }}</p>
+                    </section>
+                    <section class="card">
+                        <div class="card__head">
+                            <h2 class="card__title">Recent requests</h2>
+                            <div class="card__actions">
+                                <button type="button" class="btn btn--small" @click="copyDiagnostics">Copy</button>
+                                <button type="button" class="btn btn--small" @click="clearDiagnostics">Clear</button>
+                            </div>
+                        </div>
+                        <div class="log" v-if="log.length">
+                            <div class="log__row" v-for="entry in log" :key="entry.key">
+                                <span class="log__time">{{ entry.time }}</span>
+                                <span class="log__type">{{ entry.type }}</span>
+                                <span :class="entry.tone">{{ entry.outcome }}</span>
+                            </div>
+                        </div>
+                        <p class="empty" v-else>No requests sent yet.</p>
+                    </section>
+                </div>
+            </aside>
+        </div>
+
+        <footer class="statusbar">
+            <span :class="errorText ? 'statusbar__text statusbar__text--error' : 'statusbar__text'">{{ statusLine() }}</span>
+            <span class="statusbar__spacer"></span>
+            <span class="statusbar__meta">{{ boardSummary() }}</span>
+            <span class="statusbar__meta">{{ hostPillLabel() }}</span>
+            <span class="statusbar__meta">{{ engineLabel() }}</span>
+            <span class="statusbar__meta">zoom 100%</span>
+        </footer>
+
+        <div class="toast" v-if="toast" :class="toastTone()" role="status">
+            <div class="toast__body">
+                <b class="toast__title">{{ toast.title }}</b>
+                <span class="toast__message">{{ toast.message }}</span>
+            </div>
+            <button type="button" class="btn btn--small" @click="dismissToast">Dismiss</button>
+        </div>
+    </div>
+</template>
+
+<style>
+.studio {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--opb-bg);
+    color: var(--opb-ink);
+    font-size: 12px;
+}
+
+.studio button:focus-visible,
+.studio input:focus-visible,
+.studio select:focus-visible {
+    outline: 2px solid var(--opb-accent);
+    outline-offset: 1px;
+}
+
+.winbar {
+    position: relative;
+    z-index: 20;
+    display: flex;
+    align-items: stretch;
+    height: 38px;
+    padding-left: 10px;
+    border-bottom: 1px solid var(--opb-chrome-line);
+    background: var(--opb-chrome);
+    color: var(--opb-chrome-ink);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.winbar__brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding-right: 10px;
+}
+
+.winbar__mark {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--opb-chrome-muted);
+    border-radius: 0;
+    color: var(--opb-chrome-ink);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.winbar__name {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
+.winbar__divider {
+    flex: 0 0 auto;
+    width: 1px;
+    height: 14px;
+    background: var(--opb-chrome-line);
+}
+
+.winbar__doc {
+    overflow: hidden;
+    max-width: 220px;
+    color: var(--opb-chrome-muted);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.winbar__groups {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.winbar__spacer {
+    flex: 1;
+    min-width: 8px;
+}
+
+.winbar__status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    border-left: 1px solid var(--opb-chrome-line);
+}
+
+.winbar__led {
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 0;
+    background: var(--opb-chrome-muted);
+    opacity: 0.55;
+}
+
+.winbar__led--on {
+    background: var(--opb-accent);
+    opacity: 1;
+}
+
+.winbar__mode {
+    color: var(--opb-chrome-muted);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.winbar__mode--on {
+    color: var(--opb-chrome-ink);
+}
+
+.winbar__window {
+    display: flex;
+    align-items: stretch;
+    border-left: 1px solid var(--opb-chrome-line);
+}
+
+.winbtn {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 38px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--opb-chrome-ink);
+}
+
+.winbtn svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1;
+    shape-rendering: crispEdges;
+}
+
+.winbtn:hover {
+    background: var(--opb-chrome-hover);
+}
+
+.winbtn--close:hover {
+    background: var(--opb-danger);
+    color: #ffffff;
+}
+
+.wbtn {
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--opb-chrome-ink);
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.wbtn:hover:not(:disabled) {
+    background: var(--opb-chrome-hover);
+}
+
+.wbtn:disabled {
+    color: var(--opb-chrome-muted);
+    cursor: default;
+    opacity: 0.55;
+}
+
+.wbtn--on {
+    border-color: var(--opb-accent);
+    background: var(--opb-chrome-hover);
+    color: #ffffff;
+}
+
+.wbtn--icon {
+    width: 24px;
+    padding: 0;
+    font-family: "Cascadia Code", "Consolas", monospace;
+}
+
+.wgroup {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 0 8px;
+    border-left: 1px solid var(--opb-chrome-line);
+}
+
+.wgroup__label {
+    color: var(--opb-chrome-muted);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.wgroup__row {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+}
+
+.wgroup__zoom {
+    padding: 0 4px;
+    color: var(--opb-chrome-muted);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+    padding: 1px 7px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface-2);
+    color: var(--opb-muted);
+    font-size: 10px;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+
+.chip--ok {
+    border-color: rgba(180, 83, 9, 0.35);
+    background: rgba(180, 83, 9, 0.1);
+    color: var(--opb-copper);
+}
+
+.chip--warn {
+    border-color: rgba(21, 115, 71, 0.3);
+    background: var(--opb-accent-soft);
+    color: var(--opb-accent);
+}
+
+.chip--idle {
+    background: var(--opb-surface-2);
+    color: var(--opb-muted);
+}
+
+.chip--accent {
+    border-color: var(--opb-accent);
+    background: var(--opb-accent-soft);
+    color: var(--opb-accent);
+    font-family: "Cascadia Code", "Consolas", monospace;
+}
+
+.btn {
+    padding: 4px 9px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+    color: var(--opb-ink);
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: nowrap;
+    transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.btn:hover:not(:disabled) {
+    border-color: var(--opb-accent);
+}
+
+.btn:disabled {
+    color: var(--opb-muted);
+    cursor: default;
+    opacity: 0.65;
+}
+
+.btn--strong {
+    border-color: var(--opb-accent);
+    background: var(--opb-accent);
+    color: #f6faff;
+}
+
+.btn--strong:hover:not(:disabled) {
+    background: #10603b;
+}
+
+.btn--on {
+    border-color: var(--opb-accent);
+    background: var(--opb-accent-soft);
+    color: var(--opb-accent);
+}
+
+.btn--quiet {
+    background: transparent;
+}
+
+.btn--chip {
+    padding: 3px 7px;
+    font-size: 10.5px;
+}
+
+.btn--small {
+    padding: 2px 7px;
+    font-size: 10.5px;
+}
+
+.btn--wide {
+    width: 100%;
+}
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+    font-size: 10.5px;
+    white-space: nowrap;
+}
+
+.pill--ok {
+    border-color: rgba(180, 83, 9, 0.35);
+    color: var(--opb-copper);
+}
+
+.pill--warn {
+    border-color: rgba(180, 35, 24, 0.3);
+    color: var(--opb-danger);
+}
+
+.pill--idle {
+    color: var(--opb-muted);
+}
+
+.dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 0;
+    background: var(--opb-copper);
+}
+
+.dot--idle {
+    background: var(--opb-muted);
+    opacity: 0.55;
+}
+
+.export-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 8px;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    width: 292px;
+    padding: 13px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+}
+
+.export-panel__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.export-panel__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.field__label {
+    color: var(--opb-muted);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.readout {
+    margin: 0;
+    padding: 5px 8px;
+    border: 1px dashed var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface-2);
+    color: var(--opb-ink);
+    font-size: 10.5px;
+    word-break: break-all;
+    user-select: text;
+}
+
+.input {
+    width: 100%;
+    padding: 5px 8px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+    color: var(--opb-ink);
+    font-size: 11.5px;
+    user-select: text;
+}
+
+.input--path {
+    max-width: 360px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 0;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 11px;
+}
+
+.shortcuts {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 8px;
+    z-index: 40;
+    width: 286px;
+    padding: 12px 13px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+}
+
+.shortcuts__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.shortcuts__list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin: 0;
+}
+
+.shortcut {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--opb-surface-2);
+}
+
+.shortcut:last-child {
+    border-bottom: 0;
+}
+
+.shortcut dt {
+    color: var(--opb-ink);
+    font-size: 11.5px;
+}
+
+.shortcut dd {
+    margin: 0;
+    color: var(--opb-muted);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 10.5px;
+    white-space: nowrap;
+}
+
+.context {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 8px 12px;
+    height: 32px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--opb-line);
+    background: var(--opb-surface-2);
+    overflow: hidden;
+}
+
+.path-field {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+.path-field__label {
+    color: var(--opb-muted);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.context__hint {
+    margin: 0;
+    color: var(--opb-muted);
+    font-size: 10.5px;
+}
+
+.context__pills {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.banner {
+    padding: 7px 14px;
+    border-bottom: 1px solid rgba(21, 115, 71, 0.2);
+    background: var(--opb-accent-soft);
+    color: var(--opb-ink);
+    font-size: 11px;
+}
+
+.workspace {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr) 300px;
+}
+
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    padding: 10px;
+    border-right: 1px solid var(--opb-line);
+    background: var(--opb-surface-2);
+    overflow: auto;
+}
+
+.panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+}
+
+.panel__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.panel__head h2,
+.card__title {
+    margin: 0;
+    color: var(--opb-muted);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+}
+
+.panel__count {
+    color: var(--opb-muted);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.facts {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 5px 9px;
+    margin: 0;
+}
+
+.facts dt {
+    color: var(--opb-muted);
+    font-size: 10.5px;
+}
+
+.facts dd {
+    margin: 0;
+    overflow: hidden;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    user-select: text;
+}
+
+.mono {
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-variant-numeric: tabular-nums;
+    word-break: break-all;
+}
+
+.ellipsis {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.empty {
+    margin: 0;
+    color: var(--opb-muted);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.note {
+    margin: 0;
+    color: var(--opb-muted);
+    font-size: 11px;
+    line-height: 1.5;
+    user-select: text;
+}
+
+.layers {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.layer {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    padding: 4px 5px 4px 0;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+    text-align: left;
+}
+
+.layer__pick {
+    display: flex;
+    flex: 1;
+    align-items: flex-start;
+    gap: 7px;
+    min-width: 0;
+    padding: 2px 2px 2px 7px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.layer:hover {
+    border-color: #9fb3c4;
+}
+
+.layer--active {
+    border-color: var(--opb-accent);
+    background: var(--opb-accent-soft);
+}
+
+.layer__index {
+    min-width: 12px;
+    color: var(--opb-muted);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.layer__body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.layer__title {
+    overflow: hidden;
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.layer__meta {
+    color: var(--opb-muted);
+    font-size: 10px;
+}
+
+.layer__mode {
+    min-width: 34px;
+    padding: 3px 4px;
+    border: 1px solid var(--opb-line);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--opb-muted);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 8.5px;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+}
+
+.layer__mode--on {
+    border-color: var(--opb-accent);
+    color: var(--opb-accent);
+}
+
+.layer__mode--lock {
+    border-color: #b0762a;
+    color: #b0762a;
+}
+
+.layer-add {
+    margin-top: 8px;
+}
+
+.layer-add__form {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.layer-add__actions {
+    display: flex;
+    gap: 5px;
+}
+
+.targets {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.target {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 10.5px;
+}
+
+.target__name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--opb-ink);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.target__state {
+    color: var(--opb-muted);
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.canvas {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: var(--opb-bg);
+}
+
+.canvas__bar {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 5px 11px;
+    border-bottom: 1px solid var(--opb-line);
+    background: var(--opb-surface);
+}
+
+.canvas__title {
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.canvas__zoom {
+    color: var(--opb-muted);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.rulers {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    grid-template-rows: 19px minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+}
+
+.ruler-corner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid var(--opb-line);
+    border-bottom: 1px solid var(--opb-line);
+    background: var(--opb-surface-2);
+    color: var(--opb-muted);
+    font-size: 8.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.ruler {
+    background: var(--opb-surface-2);
+    color: var(--opb-muted);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 8.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ruler--h {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--opb-line);
+    overflow: hidden;
+}
+
+.ruler--h .ruler__tick {
+    flex: 1 1 0;
+    display: flex;
+    align-items: center;
+    padding-left: 3px;
+    border-left: 1px solid var(--opb-line);
+}
+
+.ruler--h .ruler__tick--last {
+    flex: 0 0 0;
+    position: relative;
+    padding: 0;
+}
+
+.ruler--h .ruler__tick--last .ruler__label {
+    position: absolute;
+    top: 50%;
+    right: 2px;
+    transform: translateY(-50%);
+}
+
+.ruler--v {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--opb-line);
+    overflow: hidden;
+}
+
+.ruler--v .ruler__tick {
+    flex: 1 1 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    padding: 1px 3px 0 0;
+    border-top: 1px solid var(--opb-line);
+}
+
+.ruler--v .ruler__tick--last {
+    flex: 0 0 0;
+    position: relative;
+    padding: 0;
+}
+
+.ruler--v .ruler__tick--last .ruler__label {
+    position: absolute;
+    right: 3px;
+    bottom: 1px;
+}
+
+.surface {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 0;
+    padding: 34px 26px 60px;
+    overflow: auto;
+    background: var(--opb-bg);
+}
+
+.artboard {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: min(480px, 100%);
+    padding: 26px 28px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+}
+
+.artboard__eyebrow {
+    color: var(--opb-muted);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.artboard__title {
+    font-size: 16px;
+    line-height: 1.25;
+}
+
+.artboard__id {
+    color: var(--opb-muted);
+    font-size: 10px;
+}
+
+.artboard__facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 10px;
+    margin-top: 6px;
+    color: var(--opb-ink);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.artboard__facts span {
+    padding: 1px 7px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface-2);
+}
+
+.artboard__note {
+    margin: 10px 0 0;
+    padding-top: 9px;
+    border-top: 1px dashed var(--opb-line);
+    color: var(--opb-muted);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    max-width: 320px;
+    text-align: center;
+}
+
+.empty-state__mark {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+    color: var(--opb-accent);
+    font-size: 19px;
+    font-weight: 700;
+}
+
+.empty-state__title {
+    font-size: 14px;
+}
+
+.empty-state__hint {
+    margin: 0;
+    color: var(--opb-muted);
+    font-size: 11px;
+    line-height: 1.55;
+}
+
+.empty-state__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.tools {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 4px 8px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+    transform: translateX(-50%);
+}
+
+.tools__label {
+    padding-right: 4px;
+    color: var(--opb-muted);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.tool {
+    padding: 3px 8px;
+    border: 1px solid transparent;
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface-2);
+    color: var(--opb-muted);
+    font-size: 10px;
+    cursor: default;
+}
+
+.tools__badge {
+    margin-left: 4px;
+    color: var(--opb-copper);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 9px;
+    white-space: nowrap;
+}
+
+.inspector {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    border-left: 1px solid var(--opb-line);
+    background: var(--opb-surface);
+}
+
+.tabs {
+    display: flex;
+    gap: 2px;
+    padding: 6px 6px 0;
+    border-bottom: 1px solid var(--opb-line);
+}
+
+.tab {
+    padding: 5px 8px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--opb-muted);
+    font-size: 10.5px;
+}
+
+.tab:hover {
+    color: var(--opb-ink);
+}
+
+.tab--active {
+    border-bottom-color: var(--opb-accent);
+    color: var(--opb-accent);
+}
+
+.tab-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    min-height: 0;
+    padding: 10px;
+    overflow: auto;
+}
+
+.card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+}
+
+.card__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.card__actions {
+    display: flex;
+    gap: 4px;
+}
+
+.cap-list {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+    overflow: hidden;
+}
+
+.cap-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 9px;
+    border-bottom: 1px solid var(--opb-surface-2);
+    font-size: 10.5px;
+}
+
+.cap-row:last-child {
+    border-bottom: 0;
+}
+
+.cap-row__label {
+    flex: 1;
+    min-width: 0;
+    color: var(--opb-ink);
+}
+
+.cap-row__value {
+    color: var(--opb-muted);
+    font-size: 10px;
+}
+
+.log {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 9.5px;
+}
+
+.log__row {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: baseline;
+}
+
+.log__time {
+    color: var(--opb-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.log__type {
+    overflow: hidden;
+    color: var(--opb-ink);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.log__outcome {
+    color: var(--opb-muted);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.log__outcome--ok {
+    color: var(--opb-copper);
+}
+
+.log__outcome--error {
+    color: var(--opb-danger);
+}
+
+.log__outcome--pending {
+    color: var(--opb-accent);
+}
+
+.statusbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 12px;
+    border-top: 1px solid var(--opb-line);
+    background: var(--opb-surface);
+    color: var(--opb-muted);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.statusbar__text {
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.statusbar__text--error {
+    color: var(--opb-danger);
+}
+
+.statusbar__spacer {
+    flex: 1;
+}
+
+.statusbar__meta {
+    white-space: nowrap;
+}
+
+.toast {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 60;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: min(360px, calc(100vw - 32px));
+    padding: 10px 11px;
+    border: 1px solid var(--opb-line);
+    border-left: 3px solid var(--opb-accent);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+    animation: toast-in 0.16s ease-out;
+}
+
+.toast--error {
+    border-left-color: var(--opb-danger);
+}
+
+.toast--ok {
+    border-left-color: var(--opb-copper);
+}
+
+.toast--warn {
+    border-left-color: var(--opb-accent);
+}
+
+.toast__body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.toast__title {
+    font-size: 11.5px;
+    word-break: break-word;
+}
+
+.toast__message {
+    color: var(--opb-muted);
+    font-size: 10.5px;
+    line-height: 1.45;
+    word-break: break-word;
+    user-select: text;
+}
+
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 1180px) {
+    .workspace {
+        grid-template-columns: 240px minmax(0, 1fr) 260px;
+    }
+
+    .winbar__doc {
+        max-width: 120px;
+    }
+}
+
+@media (max-width: 1000px) {
+    .workspace {
+        grid-template-columns: 240px minmax(0, 1fr);
+    }
+
+    .inspector {
+        display: none;
+    }
+}
+
+@media (max-width: 820px) {
+    .workspace {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .sidebar {
+        display: none;
+    }
+
+    .winbar__doc {
+        display: none;
+    }
+
+    .winbar__groups {
+        overflow: hidden;
+    }
+
+    .export-panel {
+        right: 10px;
+    }
+
+    .context__hint {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .btn,
+    .toast {
+        transition: none;
+        animation: none;
+    }
+}
+
+</style>
+
+<script client>
+export default class IndexPage {
+    static meta() {
+        return {
+            title: "OpenPCB Studio",
+            description:
+                "Desktop shell for one editable PCB board: undo and redo, layer and outline edits, DRC and connectivity checks, and Gerber, drill, BOM, position and SVG export share the native board model.",
+        };
+    }
+
+    hostReady = false;
+    status = "Starting the studio";
+    errorText = "";
+    path = "";
+    board = null;
+    capabilities = null;
+    handle = 0;
+    currentLayerId = "";
+    tab = "properties";
+    exportOpen = false;
+    exportFormat = "";
+    addLayerOpen = false;
+    newLayerName = "";
+    newLayerKind = "copper";
+    newLayerColor = "#c87533";
+    shortcutsOpen = false;
+    toast = null;
+    toastTimer = 0;
+    inspectResult = null;
+    seq = 0;
+    pending = {};
+    log = [];
+    requestsSent = 0;
+    lastRequestType = "";
+    lastRequestId = "";
+    lastErrorCode = "";
+    lastErrorText = "";
+    customChrome = false;
+    dragTimer = 0;
+    winbarObserver = null;
+
+    onMount() {
+        // Static render has no window; the client mount takes over in the
+        // WebView or a regular browser tab.
+        if (typeof window === "undefined") {
+            return;
+        }
+        const webview = window.chrome && window.chrome.webview;
+        if (webview) {
+            this.hostReady = true;
+            webview.addEventListener("message", (event) => this.onHostMessage(event));
+            void this.start();
+        } else {
+            this.status = "Preview mode";
+            this.errorText = "The native host is not attached.";
+        }
+        window.addEventListener("keydown", (event) => this.onKeyDown(event));
+        window.addEventListener("resize", () => this.onWindowResize());
+        this.observeWinbar();
+    }
+
+    async start() {
+        try {
+            const ready = await this.rpc("ready", {});
+            this.customChrome = !!(ready && ready.window && ready.window.customChrome);
+            this.reportDragRegions();
+            // The chrome buttons only enter the DOM after the flag above renders,
+            // so re-measure once the patch has settled.
+            this.onWindowResize();
+            const response = await this.rpc("capabilities", {});
+            this.capabilities = response.capabilities;
+            const targets = this.exportTargetNames();
+            if (!this.exportFormat && targets.length) {
+                const supported = targets.filter((name) => this.capabilities.exportTargets[name] === "supported");
+                this.exportFormat = supported[0] || targets[0];
+            }
+            this.status = "Connected to the native host";
+            this.errorText = "";
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    observeWinbar() {
+        if (this.winbarObserver || typeof ResizeObserver === "undefined" || typeof document === "undefined") {
+            return;
+        }
+        const bar = document.querySelector(".winbar");
+        if (!bar) {
+            return;
+        }
+        this.winbarObserver = new ResizeObserver(() => this.onWindowResize());
+        this.winbarObserver.observe(bar);
+    }
+
+    onWindowResize() {
+        if (this.dragTimer) {
+            clearTimeout(this.dragTimer);
+        }
+        this.dragTimer = setTimeout(() => {
+            this.dragTimer = 0;
+            this.reportDragRegions();
+        }, 120);
+    }
+
+    reportDragRegions() {
+        if (!this.hostReady || !this.customChrome || typeof document === "undefined") {
+            return;
+        }
+        const rects = [];
+        document.querySelectorAll("[data-drag]").forEach((element) => {
+            const box = element.getBoundingClientRect();
+            const width = Math.round(box.width);
+            const height = Math.round(box.height);
+            if (width <= 0 || height <= 0) {
+                return;
+            }
+            rects.push({ x: Math.round(box.left), y: Math.round(box.top), width, height });
+        });
+        if (!rects.length) {
+            return;
+        }
+        void this.fire("window.dragRegions", { rects });
+    }
+
+    fire(type, payload) {
+        return this.rpc(type, payload).catch(() => {});
+    }
+
+    windowMinimize() {
+        void this.fire("window.minimize", {});
+    }
+
+    windowToggleMaximize() {
+        void this.fire("window.toggleMaximize", {});
+    }
+
+    windowClose() {
+        void this.fire("window.close", {});
+    }
+
+    rpc(type, payload) {
+        const webview = window.chrome && window.chrome.webview;
+        if (!webview) {
+            return Promise.reject(new Error("native window unavailable"));
+        }
+        const id = `q${++this.seq}`;
+        this.requestsSent += 1;
+        this.lastRequestType = type;
+        this.lastRequestId = id;
+        const entry = {
+            key: id,
+            type,
+            outcome: "pending",
+            tone: "log__outcome log__outcome--pending",
+            time: this.clock(),
+        };
+        this.log = [entry].concat(this.log).slice(0, 8);
+        return new Promise((resolve, reject) => {
+            this.pending[id] = { resolve, reject };
+            webview.postMessage(JSON.stringify(Object.assign({ type, id }, payload || {})));
+        });
+    }
+
+    clock() {
+        const now = new Date();
+        const pad = (value) => String(value).padStart(2, "0");
+        return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    }
+
+    finishLog(id, outcome) {
+        const tone = outcome === "ok" ? "log__outcome log__outcome--ok" : "log__outcome log__outcome--error";
+        this.log = this.log.map((entry) => {
+            if (entry.key !== id) {
+                return entry;
+            }
+            return { key: entry.key, type: entry.type, time: entry.time, outcome, tone };
+        });
+    }
+
+    onHostMessage(event) {
+        let data = event.data;
+        if (typeof data === "string") {
+            try {
+                data = JSON.parse(data);
+            } catch {
+                return;
+            }
+        }
+        if (!data || typeof data !== "object" || typeof data.id !== "string") {
+            return;
+        }
+        const entry = this.pending[data.id];
+        if (!entry) {
+            return;
+        }
+        delete this.pending[data.id];
+        const type = typeof data.type === "string" ? data.type : "";
+        if (type.endsWith("Result")) {
+            this.finishLog(data.id, "ok");
+            entry.resolve(data);
+        } else {
+            this.finishLog(data.id, "error");
+            entry.reject(new Error(data.message || type || "request failed"));
+        }
+    }
+
+    fail(error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const split = message.indexOf(":");
+        const head = split > 0 ? message.slice(0, split).trim() : "";
+        const knownCode = /^[a-z][a-z0-9-]*\/[a-z][a-z0-9-]*$/.test(head);
+        const code = knownCode ? head : "session/request-failed";
+        this.lastErrorCode = code;
+        this.lastErrorText = message;
+        this.errorText = message;
+        this.status = "Request rejected";
+        this.showToast("error", code, message);
+    }
+
+    firstLayerId() {
+        return this.board && this.board.layers.length ? this.board.layers[0].id : "";
+    }
+
+    keepLayer(fallback) {
+        if (!this.board) {
+            return fallback;
+        }
+        const kept = this.board.layers.some((layer) => layer.id === this.currentLayerId);
+        return kept ? this.currentLayerId : fallback;
+    }
+
+    outlineLabel() {
+        const outline = this.board ? this.board.outline : null;
+        if (!outline) {
+            return "not set";
+        }
+        const width = Number((outline.to[0] - outline.from[0]).toFixed(3));
+        const height = Number((outline.to[1] - outline.from[1]).toFixed(3));
+        return `${outline.from[0]},${outline.from[1]} to ${outline.to[0]},${outline.to[1]} (${width} x ${height})`;
+    }
+
+    adopt(response, nextPath) {
+        if (!response || !response.board) {
+            this.status = "The host answered without a board";
+            this.errorText = "No board arrived, so nothing was adopted.";
+            return;
+        }
+        const previous = this.handle;
+        this.handle = response.handle;
+        this.board = response.board;
+        this.currentLayerId = this.keepLayer(this.firstLayerId());
+        this.path = nextPath === undefined ? this.path : nextPath;
+        this.inspectResult = null;
+        this.exportOpen = false;
+        this.status = `Board ${response.board.id} at revision ${response.board.revision}`;
+        this.errorText = "";
+        if (previous && previous !== this.handle) {
+            void this.closeQuietly(previous);
+        }
+    }
+
+    async closeQuietly(handle) {
+        try {
+            await this.rpc("board.close", { handle });
+        } catch {
+            // A refused close carries its own stable code.
+        }
+    }
+
+    boardTitle() {
+        return this.board ? this.board.title || "Untitled board" : "No board open";
+    }
+
+    pathLine() {
+        const path = this.path.trim();
+        if (path) {
+            return path;
+        }
+        return this.board ? "Unsaved board" : "No path yet";
+    }
+
+    hasPath() {
+        return this.path.trim().length > 0;
+    }
+
+    revisionLabel() {
+        if (!this.board) {
+            return "no board";
+        }
+        return this.hasPath() ? `r${this.board.revision}` : "unsaved";
+    }
+
+    revisionChipClass() {
+        if (!this.board) {
+            return "chip chip--idle";
+        }
+        return this.hasPath() ? "chip" : "chip chip--warn";
+    }
+
+    connectionLabel() {
+        return this.hostReady ? "Native host" : "Preview";
+    }
+
+    connectionPillClass() {
+        return this.hostReady ? "pill pill--ok" : "pill pill--warn";
+    }
+
+    hostLabel() {
+        return this.hostReady ? "native WebView" : "browser preview";
+    }
+
+    hostPillLabel() {
+        return this.hostReady ? "native host" : "preview";
+    }
+
+    engineReported() {
+        if (!this.capabilities) {
+            return false;
+        }
+        const project = this.capabilities.project;
+        return project.import !== "unsupported" || project.edit !== "unsupported" || project.export !== "unsupported";
+    }
+
+    engineLabel() {
+        if (!this.capabilities) {
+            return "engine unknown";
+        }
+        return this.engineReported() ? "engine reported" : "engine not connected";
+    }
+
+    enginePillClass() {
+        return this.engineReported() ? "pill pill--ok" : "pill pill--idle";
+    }
+
+    layerCountLabel() {
+        return this.board ? `${this.board.layers.length} layers` : "none";
+    }
+
+    totalObjects() {
+        if (!this.board || !this.board.layers) {
+            return 0;
+        }
+        let total = 0;
+        this.board.layers.forEach((layer) => {
+            total += layer.objects;
+        });
+        return total;
+    }
+
+    countOf(key) {
+        if (!this.board || !this.board.counts) {
+            return 0;
+        }
+        return this.board.counts[key] || 0;
+    }
+
+    boardSummary() {
+        if (!this.board) {
+            return "no board open";
+        }
+        return `rev ${this.board.revision} · ${this.board.layers.length} layers · ${this.totalObjects()} objects`;
+    }
+
+    statusLine() {
+        return this.errorText ? this.errorText : this.status;
+    }
+
+    lastRequestLabel() {
+        return this.lastRequestType ? `${this.lastRequestType} ${this.lastRequestId}` : "none";
+    }
+
+    lastErrorLabel() {
+        return this.lastErrorCode ? this.lastErrorCode : "none";
+    }
+
+    exportTitle() {
+        if (!this.board) {
+            return "Open a board before exporting";
+        }
+        if (!this.capabilities) {
+            return "The capability matrix has not loaded";
+        }
+        if (!this.exportFormatSupported()) {
+            return "This target is declared but unsupported";
+        }
+        return "Write the selected projection from the open revision (Ctrl/Cmd+E)";
+    }
+
+    exportFormatSupported() {
+        if (!this.capabilities || !this.exportFormat) {
+            return false;
+        }
+        const targets = this.capabilities.exportTargets || {};
+        return targets[this.exportFormat] === "supported";
+    }
+
+    exportStatusLabel() {
+        if (!this.exportFormat) {
+            return "no target";
+        }
+        return this.exportFormatSupported() ? "supported" : "unsupported";
+    }
+
+    exportTargetNames() {
+        return this.capabilities ? Object.keys(this.capabilities.exportTargets) : [];
+    }
+
+    rulerTicks() {
+        const ticks = [];
+        for (let step = 0; step <= 8; step += 1) {
+            ticks.push({ value: step * 100, last: step === 8 });
+        }
+        return ticks;
+    }
+
+    shortcutList() {
+        return [
+            { label: "New", keys: "Ctrl/Cmd+N" },
+            { label: "Open", keys: "Ctrl/Cmd+O" },
+            { label: "Save", keys: "Ctrl/Cmd+S" },
+            { label: "Export", keys: "Ctrl/Cmd+E" },
+            { label: "Undo", keys: "Ctrl+Z" },
+            { label: "Redo", keys: "Ctrl+Shift+Z / Ctrl+Y" },
+            { label: "Close board", keys: "Ctrl/Cmd+W" },
+            { label: "Inspector tabs", keys: "Ctrl+1 / 2 / 3" },
+            { label: "Dismiss", keys: "Esc" },
+        ];
+    }
+
+    statusTone(level) {
+        if (level === "supported") {
+            return "chip chip--ok";
+        }
+        if (level === "partial") {
+            return "chip chip--warn";
+        }
+        return "chip chip--idle";
+    }
+
+    countFormats(formats, field) {
+        return Object.keys(formats).filter((name) => formats[name][field] === "supported").length;
+    }
+
+    countSupported(map) {
+        return Object.keys(map).filter((name) => map[name] === "supported").length;
+    }
+
+    projectSummary() {
+        const project = this.capabilities.project;
+        return `import ${project.import} · edit ${project.edit} · export ${project.export}`;
+    }
+
+    capabilityRows() {
+        const caps = this.capabilities;
+        if (!caps) {
+            return [];
+        }
+        const formats = caps.formats || {};
+        const checks = caps.checks || {};
+        const renderers = caps.renderers || {};
+        const exportTargets = caps.exportTargets || {};
+        const declared = Object.keys(formats).length;
+        const importable = this.countFormats(formats, "import");
+        const editable = this.countFormats(formats, "edit");
+        const exportable = this.countFormats(formats, "export");
+        const checksSupported = this.countSupported(checks);
+        const renderersSupported = this.countSupported(renderers);
+        const targetsSupported = this.countSupported(exportTargets);
+        const project = caps.project;
+        return [
+            { key: "project-import", label: "Project import", value: project.import, status: project.import, tone: this.statusTone(project.import) },
+            { key: "project-edit", label: "Project edit", value: project.edit, status: project.edit, tone: this.statusTone(project.edit) },
+            { key: "project-export", label: "Project export", value: project.export, status: project.export, tone: this.statusTone(project.export) },
+            { key: "formats", label: "Formats declared", value: String(declared), status: "declared", tone: "chip chip--idle" },
+            { key: "formats-import", label: "Importable formats", value: String(importable), status: importable ? "supported" : "unsupported", tone: this.statusTone(importable ? "supported" : "unsupported") },
+            { key: "formats-edit", label: "Editable formats", value: String(editable), status: editable ? "supported" : "unsupported", tone: this.statusTone(editable ? "supported" : "unsupported") },
+            { key: "formats-export", label: "Exportable formats", value: String(exportable), status: exportable ? "supported" : "unsupported", tone: this.statusTone(exportable ? "supported" : "unsupported") },
+            { key: "checks", label: "Checks supported", value: String(checksSupported), status: checksSupported ? "supported" : "unsupported", tone: this.statusTone(checksSupported ? "supported" : "unsupported") },
+            { key: "renderers", label: "Renderers supported", value: String(renderersSupported), status: renderersSupported ? "supported" : "unsupported", tone: this.statusTone(renderersSupported ? "supported" : "unsupported") },
+            { key: "targets", label: "Export targets supported", value: String(targetsSupported), status: targetsSupported ? "supported" : "unsupported", tone: this.statusTone(targetsSupported ? "supported" : "unsupported") },
+        ];
+    }
+
+    checkRows() {
+        const checks = this.capabilities ? this.capabilities.checks || {} : {};
+        return Object.keys(checks).map((name) => {
+            const level = checks[name];
+            return { key: name, label: name, status: level, tone: this.statusTone(level) };
+        });
+    }
+
+    capabilityNote() {
+        return this.engineReported()
+            ? "Counts, checks and targets come from the capability matrix the host reported."
+            : "The native host reports no project capability, so every declared format, check, renderer and export target stays unsupported.";
+    }
+
+    exportTargetRows() {
+        const targets = this.capabilities ? this.capabilities.exportTargets || {} : {};
+        return Object.keys(targets).map((name) => {
+            const level = targets[name];
+            return {
+                name,
+                status: level,
+                dot: level === "supported" ? "dot" : "dot dot--idle",
+            };
+        });
+    }
+
+    supportedTargetCount() {
+        if (!this.capabilities) {
+            return 0;
+        }
+        return this.countSupported(this.capabilities.exportTargets || {});
+    }
+
+    exportTargetIsDirectory() {
+        return this.exportFormat === "gbr";
+    }
+
+    exportTargetLabel() {
+        return this.exportTargetIsDirectory() ? "Directory" : "Target file";
+    }
+
+    exportTargetPath() {
+        const base = this.path.trim();
+        if (!base || !this.exportFormat) {
+            return "";
+        }
+        const slash = Math.max(base.lastIndexOf("/"), base.lastIndexOf("\\"));
+        const dot = base.lastIndexOf(".");
+        const stem = dot > slash ? base.slice(0, dot) : base;
+        return this.exportTargetIsDirectory() ? `${stem}-gerber` : `${stem}.${this.exportFormat}`;
+    }
+
+    exportTargetReadout() {
+        const target = this.exportTargetPath();
+        if (!target) {
+            return "Type a path in the context bar to choose a target.";
+        }
+        return this.exportTargetIsDirectory() ? `Directory ${target}` : target;
+    }
+
+    canExport() {
+        return (
+            this.hostReady &&
+            !!this.board &&
+            !!this.capabilities &&
+            this.exportFormatSupported() &&
+            this.exportTargetPath() !== ""
+        );
+    }
+
+    inspectText() {
+        if (!this.inspectResult) {
+            return "No inspection has run for the open board.";
+        }
+        const issues = this.inspectResult.issues || [];
+        const verdict = this.inspectResult.passed ? "Passed" : "Findings";
+        return `${verdict} · ${issues.length} issues at revision ${this.inspectResult.revision}`;
+    }
+
+    selectLayer(event) {
+        const layerId = event.currentTarget.dataset.layerId;
+        if (layerId) {
+            this.currentLayerId = layerId;
+        }
+    }
+
+    layerKinds() {
+        return [
+            { key: "copper", label: "copper" },
+            { key: "silkscreen", label: "silkscreen" },
+            { key: "soldermask", label: "soldermask" },
+            { key: "assembly", label: "assembly" },
+            { key: "mechanical", label: "mechanical" },
+        ];
+    }
+
+    async undoBoard() {
+        if (!this.hostReady || !this.handle || !this.board) {
+            return;
+        }
+        if (!this.board.canUndo) {
+            this.showToast("warn", "Nothing to undo", "This handle has no earlier snapshot.");
+            return;
+        }
+        try {
+            const response = await this.rpc("board.undo", { handle: this.handle });
+            this.adopt(response);
+            this.status = `Undid to revision ${this.board.revision}`;
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    async redoBoard() {
+        if (!this.hostReady || !this.handle || !this.board) {
+            return;
+        }
+        if (!this.board.canRedo) {
+            this.showToast("warn", "Nothing to redo", "This handle has no later snapshot.");
+            return;
+        }
+        try {
+            const response = await this.rpc("board.redo", { handle: this.handle });
+            this.adopt(response);
+            this.status = `Redid to revision ${this.board.revision}`;
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    async patchLayer(layerId, patch, label) {
+        if (!this.handle) {
+            return;
+        }
+        try {
+            const response = await this.rpc("board.updateLayer", {
+                handle: this.handle,
+                request: Object.assign({ id: layerId }, patch),
+            });
+            this.adopt(response);
+            this.status = `${label} ${layerId}`;
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    toggleLayerVisible(event) {
+        const layerId = event.currentTarget.dataset.layerId;
+        const layer = this.board ? this.board.layers.find((item) => item.id === layerId) : null;
+        if (layer) {
+            void this.patchLayer(layerId, { visible: !layer.visible }, layer.visible ? "Hid" : "Showed");
+        }
+    }
+
+    toggleLayerLocked(event) {
+        const layerId = event.currentTarget.dataset.layerId;
+        const layer = this.board ? this.board.layers.find((item) => item.id === layerId) : null;
+        if (layer) {
+            void this.patchLayer(layerId, { locked: !layer.locked }, layer.locked ? "Unlocked" : "Locked");
+        }
+    }
+
+    openAddLayer() {
+        this.addLayerOpen = true;
+        this.newLayerName = "";
+        this.newLayerKind = "copper";
+        this.newLayerColor = "#c87533";
+    }
+
+    cancelAddLayer() {
+        this.addLayerOpen = false;
+    }
+
+    onNewLayerName(event) {
+        this.newLayerName = event.target.value;
+    }
+
+    onNewLayerKind(event) {
+        this.newLayerKind = event.target.value;
+    }
+
+    onNewLayerColor(event) {
+        this.newLayerColor = event.target.value;
+    }
+
+    canAddLayer() {
+        return (
+            !!this.handle &&
+            this.newLayerName.trim().length > 0 &&
+            this.newLayerKind.length > 0 &&
+            this.newLayerColor.trim().length > 0
+        );
+    }
+
+    async commitLayer() {
+        if (!this.canAddLayer()) {
+            return;
+        }
+        try {
+            const response = await this.rpc("board.addLayer", {
+                handle: this.handle,
+                request: {
+                    name: this.newLayerName.trim(),
+                    kind: this.newLayerKind,
+                    color: this.newLayerColor.trim(),
+                },
+            });
+            this.adopt(response);
+            if (response.object && response.object.id) {
+                this.currentLayerId = response.object.id;
+            }
+            this.addLayerOpen = false;
+            this.status = `Added layer ${this.newLayerName.trim()}`;
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    selectTab(event) {
+        const tab = event.currentTarget.dataset.tab;
+        if (tab) {
+            this.tab = tab;
+        }
+    }
+
+    onPathInput(event) {
+        this.path = event.target.value;
+    }
+
+    toggleExport() {
+        if (!this.hostReady) {
+            this.showToast("warn", "Preview mode", "The native host is not attached.");
+            return;
+        }
+        if (!this.board) {
+            this.showToast("warn", "No board open", "Open a board before choosing an export target.");
+            return;
+        }
+        if (!this.capabilities) {
+            this.showToast("warn", "No capability matrix", "The host has not reported its export targets.");
+            return;
+        }
+        this.exportOpen = !this.exportOpen;
+        if (this.exportOpen) {
+            this.shortcutsOpen = false;
+        }
+    }
+
+    closeExport() {
+        this.exportOpen = false;
+    }
+
+    onExportFormat(event) {
+        this.exportFormat = event.target.value;
+    }
+
+    toggleShortcuts() {
+        this.shortcutsOpen = !this.shortcutsOpen;
+        if (this.shortcutsOpen) {
+            this.exportOpen = false;
+        }
+    }
+
+    closeOverlays() {
+        this.exportOpen = false;
+        this.shortcutsOpen = false;
+    }
+
+    toastTone() {
+        return this.toast ? `toast toast--${this.toast.tone}` : "toast toast--warn";
+    }
+
+    showToast(tone, title, message) {
+        if (this.toastTimer) {
+            clearTimeout(this.toastTimer);
+            this.toastTimer = 0;
+        }
+        this.toast = { tone, title, message };
+        this.toastTimer = setTimeout(() => {
+            this.toast = null;
+            this.toastTimer = 0;
+        }, 7000);
+    }
+
+    dismissToast() {
+        if (this.toastTimer) {
+            clearTimeout(this.toastTimer);
+            this.toastTimer = 0;
+        }
+        this.toast = null;
+    }
+
+    diagnosticText() {
+        const lines = [
+            `host: ${this.hostLabel()}`,
+            `connection: ${this.connectionLabel()}`,
+            `requests: ${this.requestsSent}`,
+            `last request: ${this.lastRequestLabel()}`,
+            `last error: ${this.lastErrorLabel()}`,
+        ];
+        if (this.lastErrorText) {
+            lines.push(`message: ${this.lastErrorText}`);
+        }
+        this.log.forEach((entry) => {
+            lines.push(`${entry.time} ${entry.type} ${entry.outcome}`);
+        });
+        return lines.join("\n");
+    }
+
+    async copyDiagnostics() {
+        if (typeof navigator === "undefined" || !navigator.clipboard || !navigator.clipboard.writeText) {
+            this.showToast("warn", "Clipboard unavailable", "This host does not expose navigator.clipboard.");
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(this.diagnosticText());
+            this.showToast("ok", "Diagnostics copied", `${this.log.length} recent requests copied.`);
+        } catch {
+            this.showToast("warn", "Copy failed", "The clipboard rejected the write.");
+        }
+    }
+
+    clearDiagnostics() {
+        this.log = [];
+        this.lastErrorCode = "";
+        this.lastErrorText = "";
+        this.showToast("ok", "Diagnostics cleared", "The request log is empty.");
+    }
+
+    async newBoard() {
+        if (!this.hostReady) {
+            this.showToast("warn", "Preview mode", "The native WebView host is not attached.");
+            return;
+        }
+        try {
+            const response = await this.rpc("board.create", { request: { title: "Untitled board" } });
+            this.adopt(response, "");
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    async openBoard() {
+        if (!this.hostReady) {
+            this.showToast("warn", "Preview mode", "The native WebView host is not attached.");
+            return;
+        }
+        const path = this.path.trim();
+        if (!path) {
+            this.errorText = "Type a board path before opening.";
+            this.status = "Open needs a path";
+            return;
+        }
+        try {
+            const response = await this.rpc("board.open", { path });
+            this.adopt(response, path);
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    async saveBoard() {
+        if (!this.hostReady) {
+            this.showToast("warn", "Preview mode", "The native WebView host is not attached.");
+            return;
+        }
+        if (!this.handle || !this.board) {
+            this.errorText = "Open or create a board before saving.";
+            this.status = "Save needs a board";
+            return;
+        }
+        const path = this.path.trim();
+        if (!path) {
+            this.errorText = "Type a board path before saving.";
+            this.status = "Save needs a path";
+            return;
+        }
+        try {
+            const response = await this.rpc("board.save", { handle: this.handle, path, overwrite: true });
+            const report = response.report;
+            this.status = report ? `Saved ${report.bytes} bytes at revision ${report.revision}` : "Save finished without a report";
+            this.errorText = "";
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    async exportCurrent() {
+        if (!this.canExport()) {
+            this.showToast("warn", "Export unavailable", "Open a board and type a target path first.");
+            return;
+        }
+        try {
+            const response = await this.rpc("board.export", {
+                handle: this.handle,
+                format: this.exportFormat,
+                target: this.exportTargetPath(),
+                overwrite: true,
+            });
+            const report = response.report;
+            const artifacts = report && Array.isArray(report.artifacts) ? report.artifacts.length : 0;
+            if (report && artifacts > 0) {
+                this.status = `Exported ${report.format} (${artifacts} files) at revision ${report.revision}`;
+                this.showToast("ok", "Export written", `${artifacts} artifacts at revision ${report.revision}.`);
+            } else {
+                this.status = report ? `Exported ${report.format} at revision ${report.revision}` : "Export finished without a report";
+            }
+            this.errorText = "";
+            this.exportOpen = false;
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    async closeBoard() {
+        if (!this.hostReady || !this.handle) {
+            return;
+        }
+        try {
+            await this.rpc("board.close", { handle: this.handle });
+            this.handle = 0;
+            this.board = null;
+            this.currentLayerId = "";
+            this.inspectResult = null;
+            this.exportOpen = false;
+            this.status = "Board closed";
+            this.errorText = "";
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    async inspectBoard() {
+        if (!this.handle) {
+            this.showToast("warn", "No board handle", "Open a board before running an inspection.");
+            return;
+        }
+        try {
+            const response = await this.rpc("board.inspect", { handle: this.handle });
+            this.inspectResult = response.report ? response.report : null;
+            this.status = this.inspectResult ? "Inspection finished" : "Inspection finished without a report";
+            this.errorText = "";
+        } catch (error) {
+            this.fail(error);
+        }
+    }
+
+    onKeyDown(event) {
+        const target = event.target;
+        const typing = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
+        const mod = event.ctrlKey || event.metaKey;
+        const key = event.key ? event.key.toLowerCase() : "";
+        if (key === "escape") {
+            event.preventDefault();
+            this.closeOverlays();
+            return;
+        }
+        if (mod && key === "w") {
+            event.preventDefault();
+            void this.closeBoard();
+            return;
+        }
+        if (typing) {
+            return;
+        }
+        if (mod && key === "n") {
+            event.preventDefault();
+            void this.newBoard();
+            return;
+        }
+        if (mod && key === "o") {
+            event.preventDefault();
+            void this.openBoard();
+            return;
+        }
+        if (mod && key === "s") {
+            event.preventDefault();
+            void this.saveBoard();
+            return;
+        }
+        if (mod && key === "e") {
+            event.preventDefault();
+            void this.toggleExport();
+            return;
+        }
+        if (mod && key === "z") {
+            event.preventDefault();
+            void (event.shiftKey ? this.redoBoard() : this.undoBoard());
+            return;
+        }
+        if (mod && key === "y") {
+            event.preventDefault();
+            void this.redoBoard();
+            return;
+        }
+        if (mod && (event.key === "1" || event.key === "2" || event.key === "3")) {
+            event.preventDefault();
+            this.tab = event.key === "1" ? "properties" : event.key === "2" ? "capabilities" : "diagnostics";
+        }
+    }
+}
+</script>
+

@@ -1,0 +1,61 @@
+{
+    "name": "@wae/open-pcb",
+    "version": "0.0.0",
+    "private": true,
+    "description": "PCB layout, inspection, fabrication and assembly documents: one editable board model for people and agents",
+    "license": "MPL-2.0",
+    "type": "module",
+    "engines": {
+        "node": ">=18"
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "bin": {
+        "open-pcb": "./dist/cli.js"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "locales"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "test": "tsc -p tsconfig.json && node --test dist/smoke.test.js"
+    },
+    "keywords": [
+        "pcb",
+        "embedded",
+        "gerber",
+        "drill",
+        "bom",
+        "drc",
+        "kicad",
+        "board"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nyar-os/OpenPCB.git",
+        "directory": "projects/packages/open-pcb"
+    },
+    "devDependencies": {
+        "@types/node": "^22.20.4",
+        "typescript": "^5.9.2"
+    },
+    "dependencies": {
+        "@wae/commander": "0.0.7"
+    },
+    "optionalDependencies": {
+        "@wae/open-pcb-darwin-arm64": "workspace:*",
+        "@wae/open-pcb-darwin-x64": "workspace:*",
+        "@wae/open-pcb-linux-arm64": "workspace:*",
+        "@wae/open-pcb-linux-x64": "workspace:*",
+        "@wae/open-pcb-win32-x64": "workspace:*"
+    }
+}
+

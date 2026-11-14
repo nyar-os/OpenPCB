@@ -1,0 +1,82 @@
+<template>
+    <div class="studio-root">
+        <slot />
+    </div>
+</template>
+
+<style>
+:root {
+    --opb-bg: #eceeef;
+    --opb-surface: #ffffff;
+    --opb-surface-2: #e1e5e7;
+    --opb-ink: #161b1e;
+    --opb-muted: #5d686e;
+    --opb-line: #c7cdd1;
+    --opb-accent: #157347;
+    --opb-accent-soft: #e3ebe6;
+    --opb-copper: #b45309;
+    --opb-danger: #b42318;
+    --opb-radius: 2px;
+    --opb-chrome: #191d20;
+    --opb-chrome-2: #22272b;
+    --opb-chrome-line: #0b0e10;
+    --opb-chrome-ink: #dfe4e6;
+    --opb-chrome-muted: #8b979e;
+    --opb-chrome-hover: #2b3237;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    background: var(--opb-bg);
+    color: var(--opb-ink);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+}
+
+h1,
+h2,
+h3 {
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+}
+
+button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+
+input,
+textarea,
+select {
+    font: inherit;
+    color: inherit;
+}
+
+.studio-root {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+</style>
+
+<script client>
+export default class Application {}
+</script>
+

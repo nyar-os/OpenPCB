@@ -1,0 +1,413 @@
+<template>
+    <SiteShell page="roadmap">
+        <div class="page-head">
+            <h1>Roadmap</h1>
+            <p class="lead">
+                The phases below are gates, not marketing dates. A phase is done
+                when its evidence exists; until then, the capability matrix says
+                so.
+            </p>
+        </div>
+
+        <div class="legend">
+            <span class="chip chip--ok">done</span>
+            <span class="chip chip--warn">active</span>
+            <span class="chip chip--idle">planned</span>
+            <span class="legend__note">No public release yet.</span>
+        </div>
+
+        <section class="notice">
+            <b>There are no installers to download.</b>
+            The source builds the model, the command-line interface, the SDK and the
+            studio shell. The board document, undo and redo, layer and outline edits,
+            rule checks and five output writers run; STEP, IPC-2581, KiCad and the
+            viewport do not.
+        </section>
+
+        <ol class="phases">
+            <li data-state="done">
+                <span class="phase__id">P0</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Freeze the model and contracts</h2>
+                        <span class="chip chip--ok">done</span>
+                    </div>
+                    <p>
+                        Board identities, revisions, error codes, the format
+                        registry and one honest capability matrix shared by every
+                        entry point.
+                    </p>
+                </div>
+            </li>
+            <li data-state="done">
+                <span class="phase__id">P1</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Native document and minimal board model</h2>
+                        <span class="chip chip--ok">done</span>
+                    </div>
+                    <p>
+                        Create and open run behind the existing contracts. Layers and
+                        board objects are edited through the model, and saves reopen at
+                        the same revision.
+                    </p>
+                </div>
+            </li>
+            <li data-state="done">
+                <span class="phase__id">P2</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Board layout and rule checks</h2>
+                        <span class="chip chip--ok">done</span>
+                    </div>
+                    <p>
+                        Footprints, nets, tracks, vias, stackup and clearance analysis,
+                        with DRC and connectivity findings located on the layer and
+                        object that caused them.
+                    </p>
+                </div>
+            </li>
+            <li data-state="active">
+                <span class="phase__id">P3</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Fabrication and assembly outputs</h2>
+                        <span class="chip chip--warn">active</span>
+                    </div>
+                    <p>
+                        Gerber RS-274X, drill, position, BOM and SVG are written from the
+                        open revision. KiCad board import and export, STEP, IPC-2581 and
+                        PDF, each with a per-object support and loss report, remain ahead.
+                    </p>
+                </div>
+            </li>
+            <li>
+                <span class="phase__id">P4</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Studio viewport</h2>
+                        <span class="chip chip--idle">planned</span>
+                    </div>
+                    <p>
+                        A real layer viewport in OpenPCB Studio: copper layers,
+                        stackup, selection, placement, inspection and
+                        revision-scoped edits.
+                    </p>
+                </div>
+            </li>
+            <li>
+                <span class="phase__id">P5</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Agent board loop</h2>
+                        <span class="chip chip--idle">planned</span>
+                    </div>
+                    <p>
+                        Templates, semantic objects, inspection and revisions that
+                        target a single object, with review evidence per layer.
+                    </p>
+                </div>
+            </li>
+            <li>
+                <span class="phase__id">P6</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Skills acceptance and releases</h2>
+                        <span class="chip chip--idle">planned</span>
+                    </div>
+                    <p>
+                        Install the skills package in a clean environment, finish
+                        real board tasks, then ship standalone and suite builds
+                        from one engine.
+                    </p>
+                </div>
+            </li>
+        </ol>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Working today</h2>
+                <p>Available means the repository contains it and a command or test exercises it.</p>
+            </div>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Area</th>
+                            <th>Today</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Workspace build</td>
+                            <td>The package and site workspaces build and type-check through the repository scripts.</td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                        <tr>
+                            <td>CLI</td>
+                            <td>
+                                <code>create</code>, <code>open</code>, <code>list</code>,
+                                <code>inspect</code>, <code>undo</code>, <code>redo</code>,
+                                <code>export</code>, <code>gui</code>, footprint add/move/update/delete,
+                                track and via add/delete, <code>net add</code>,
+                                <code>layer add|rename|visible|lock</code> and
+                                <code>outline set</code> run against the native host.
+                            </td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                        <tr>
+                            <td>Capability matrix</td>
+                            <td>
+                                Per-format, per-check, per-renderer and per-target status.
+                                gbr, drl, bom, pos, svg and the seven implemented checks
+                                report supported; everything else stays unsupported.
+                            </td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                        <tr>
+                            <td>Board document</td>
+                            <td>
+                                Create, open, save, inspect, undo, redo, export and close
+                                run on a revisioned native document with atomic saves,
+                                validation and 32 history snapshots per handle.
+                            </td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                        <tr>
+                            <td>Editing</td>
+                            <td>
+                                Add, move, update and delete footprints; add and delete tracks
+                                and vias; add and rename layers; hide and lock layers; set a
+                                rectangular outline; undo and redo through the model, SDK, CLI
+                                and studio.
+                            </td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                        <tr>
+                            <td>DRC and connectivity</td>
+                            <td>
+                                Duplicate references, layer and net references, minimum
+                                width, via drill and annular ring, clearance, stackup, outline
+                                presence and containment, and pad nets are checked with layer
+                                and object locations.
+                            </td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                        <tr>
+                            <td>Output writers</td>
+                            <td>
+                                Gerber RS-274X (four layer files), Excellon drill, BOM,
+                                pick-and-place and SVG are written atomically. kicad_pcb,
+                                step, ipc2581 and pdf stay declared only.
+                            </td>
+                            <td><span class="chip chip--warn">partial</span></td>
+                        </tr>
+                        <tr>
+                            <td>Studio shell</td>
+                            <td>
+                                Host RPC, board facts, outline, undo and redo, layer toggles
+                                and an add-layer form, counts, supported checks, export target
+                                status, inspector and diagnostics; the viewport stays offline.
+                            </td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                        <tr>
+                            <td>Skills</td>
+                            <td>
+                                Skill layout, routes, preflight and safety rules plus
+                                executable create, edit, undo/redo, layer, outline, inspect and
+                                export commands.
+                            </td>
+                            <td><span class="chip chip--ok">available</span></td>
+                        </tr>
+                        <tr>
+                            <td>Renderer</td>
+                            <td>No viewport or layer renderer, so no board geometry is painted. SVG output is a writer, not a viewport.</td>
+                            <td><span class="chip chip--idle">not implemented</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Where the tests live</h2>
+            </div>
+            <p>
+                The model crate covers create, add, save, reopen, undo and redo,
+                layer locks, footprint moves, outline validation, DRC passes and
+                failures, and the exact content of Gerber, drill, BOM, position and
+                SVG files. The SDK tests cover the handle, editing, history, layer,
+                outline, inspection and export round trip, and the CLI end-to-end
+                check asserts the four Gerber files and the rejected STEP target.
+                Visual baselines, fabrication checks and skill acceptance for the
+                unimplemented formats still belong to the product test suite.
+            </p>
+        </section>
+
+        <section class="cta-band">
+            <div>
+                <span class="eyebrow">Follow the work</span>
+                <h2>Read the source and the contracts.</h2>
+                <p>Every claim on this site is checkable in the repository.</p>
+            </div>
+            <a class="btn btn--primary" href="https://github.com/nyar-os/OpenPCB" rel="noopener">
+                Open the source repository
+            </a>
+        </section>
+    </SiteShell>
+</template>
+
+<style>
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 26px;
+}
+
+.legend__note {
+    margin-left: 4px;
+    color: var(--opb-muted);
+    font-size: 13.5px;
+}
+
+.notice {
+    margin-top: 18px;
+    padding: 16px 20px;
+    border: 1px solid var(--opb-line);
+    border-left: 3px solid var(--opb-accent);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+    color: var(--opb-muted);
+    font-size: 14.5px;
+}
+
+.notice b {
+    color: var(--opb-ink);
+}
+
+.phases {
+    display: grid;
+    gap: 12px;
+    margin: 30px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.phases li {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    gap: 14px;
+    padding: 18px 20px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: var(--opb-surface);
+}
+
+.phase__id {
+    color: var(--opb-muted);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 18px;
+    font-variant-numeric: tabular-nums;
+}
+
+.phase__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-bottom: 3px;
+}
+
+.phases h2 {
+    margin: 0;
+    font-size: 19px;
+}
+
+.phases p {
+    margin: 0;
+    color: var(--opb-muted);
+    font-size: 14.5px;
+}
+
+.phases li[data-state="done"] {
+    border-left: 3px solid var(--opb-copper);
+}
+
+.phases li[data-state="done"] .phase__id {
+    color: var(--opb-copper);
+}
+
+.phases li[data-state="active"] {
+    border-left: 3px solid var(--opb-accent);
+    background: linear-gradient(90deg, var(--opb-accent-soft), var(--opb-surface) 55%);
+}
+
+.phases li[data-state="active"] .phase__id {
+    color: var(--opb-accent);
+}
+
+.cta-band {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px 32px;
+    margin-top: 40px;
+    padding: 28px 26px;
+    border: 1px solid var(--opb-line);
+    border-radius: var(--opb-radius);
+    background: linear-gradient(115deg, var(--opb-accent-soft), var(--opb-surface) 62%);
+}
+
+.cta-band h2 {
+    margin: 6px 0 8px;
+    font-size: 23px;
+}
+
+.cta-band p {
+    max-width: 520px;
+    margin: 0;
+    color: var(--opb-muted);
+    font-size: 14.5px;
+}
+
+@media (max-width: 900px) {
+    .phases li {
+        grid-template-columns: 44px 1fr;
+    }
+}
+
+@media (max-width: 620px) {
+    .phases li {
+        grid-template-columns: 1fr;
+        gap: 6px;
+        padding: 16px;
+    }
+
+    .cta-band {
+        padding: 22px 18px;
+    }
+
+    .cta-band h2 {
+        font-size: 20px;
+    }
+}
+</style>
+
+<script client>
+export default class RoadmapPage {
+    static meta() {
+        return {
+            title: "Roadmap — OpenPCB",
+            description:
+                "The P0–P6 gates for OpenPCB: model contracts, native board document, layout checks, fabrication outputs, studio viewport, agent loop and releases.",
+        };
+    }
+}
+</script>
+

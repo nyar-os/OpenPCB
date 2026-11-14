@@ -1,0 +1,1224 @@
+//! Native board document schema, validation and summary projection.
+//!
+//! The types in this module mirror the `.opcb` document. They stay internal:
+//! callers reach a board through the handle-based operations in the crate root,
+//! so the wire shape can evolve without exposing Rust structs.
+
+use std::collections::HashSet;
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+use crate::ServiceError;
+
+/// Tag written to every native document.
+pub(crate) const DOCUMENT_FORMAT: &str = "open-pcb-board";
+
+/// Schema version this build reads and writes.
+pub(crate) const DOCUMENT_VERSION: u32 = 1;
+
+/// Coordinate unit of one board document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Units {
+    /// Millimetres.
+    Mm,
+    /// Thousandths of an inch.
+    Mil,
+}
+
+/// Role of one layer in the stackup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum LayerKind {
+    /// Electrical copper.
+    Copper,
+    /// Printed legend.
+    Silkscreen,
+    /// Solder mask opening.
+    Soldermask,
+    /// Assembly drawing.
+    Assembly,
+    /// Mechanical outline or documentation.
+    Mechanical,
+}
+
+/// One stackup layer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Layer {
+    /// Stable layer id, also used by tracks and footprints.
+    pub(crate) id: String,
+    /// Display name.
+    pub(crate) name: String,
+    /// Role in the stackup.
+    pub(crate) kind: LayerKind,
+    /// CSS colour used by the SVG writer.
+    pub(crate) color: String,
+    /// Whether the layer is drawn.
+    pub(crate) visible: bool,
+    /// Whether the layer rejects edits.
+    pub(crate) locked: bool,
+}
+
+/// One electrical net.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Net {
+    /// Stable net id.
+    pub(crate) id: String,
+    /// Net name referenced by pads, tracks and vias.
+    pub(crate) name: String,
+}
+
+/// One pad of a footprint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Pad {
+    /// Pad number or name.
+    pub(crate) number: String,
+    /// Pad centre, X.
+    pub(crate) x: f64,
+    /// Pad centre, Y.
+    pub(crate) y: f64,
+    /// Pad width.
+    pub(crate) w: f64,
+    /// Pad height.
+    pub(crate) h: f64,
+    /// Declared net name, when assigned.
+    pub(crate) net: Option<String>,
+}
+
+/// One placed footprint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Footprint {
+    /// Stable footprint id.
+    pub(crate) id: String,
+    /// Reference designator.
+    #[serde(rename = "ref")]
+    pub(crate) ref_: String,
+    /// Component value.
+    pub(crate) value: String,
+    /// Package or footprint name.
+    pub(crate) footprint: String,
+    /// Placement X.
+    pub(crate) x: f64,
+    /// Placement Y.
+    pub(crate) y: f64,
+    /// Rotation in degrees.
+    pub(crate) rotation: f64,
+    /// Layer the footprint is placed on.
+    pub(crate) layer: String,
+    /// Pads owned by the footprint.
+    pub(crate) pads: Vec<Pad>,
+}
+
+impl Footprint {
+    /// Serialises the public shape (reference designator is `ref`).
+    pub(crate) fn to_value(&self) -> Value {
+        json!({
+            "id": self.id,
+            "ref": self.ref_,
+            "value": self.value,
+            "footprint": self.footprint,
+            "x": self.x,
+            "y": self.y,
+            "rotation": self.rotation,
+            "layer": self.layer,
+            "pads": self.pads,
+        })
+    }
+}
+
+/// One routed track segment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Track {
+    /// Stable track id.
+    pub(crate) id: String,
+    /// Declared net name, when assigned.
+    pub(crate) net: Option<String>,
+    /// Copper layer the segment lives on.
+    pub(crate) layer: String,
+    /// Trace width.
+    pub(crate) width: f64,
+    /// Segment start.
+    pub(crate) from: [f64; 2],
+    /// Segment end.
+    pub(crate) to: [f64; 2],
+}
+
+/// One pad resolved to board coordinates, as the router and checks see it.
+///
+/// Footprint rotation is folded into the centre and the axis-aligned half
+/// extents, so callers never have to repeat that geometry.
+pub(crate) struct PlacedPad<'a> {
+    /// Stable key `footprint-id:pad-number`.
+    pub(crate) key: String,
+    /// Declared net name, when the pad is assigned.
+    pub(crate) net: Option<String>,
+    /// Pad centre in board coordinates.
+    pub(crate) at: [f64; 2],
+    /// Axis-aligned half extents after footprint rotation.
+    pub(crate) half: [f64; 2],
+    /// Layer the owning footprint is placed on.
+    pub(crate) layer: &'a str,
+}
+
+/// One through via.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Via {
+    /// Stable via id.
+    pub(crate) id: String,
+    /// Declared net name, when assigned.
+    pub(crate) net: Option<String>,
+    /// Via centre.
+    pub(crate) at: [f64; 2],
+    /// Copper diameter.
+    pub(crate) diameter: f64,
+    /// Finished drill diameter.
+    pub(crate) drill: f64,
+}
+
+/// Rectangular board outline in board units.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub(crate) struct Outline {
+    /// Lower-left corner.
+    pub(crate) from: [f64; 2],
+    /// Upper-right corner.
+    pub(crate) to: [f64; 2],
+}
+
+/// Default minimum gap between two drill holes of different nets, in mm.
+const DEFAULT_HOLE_CLEARANCE_MM: f64 = 0.25;
+
+/// Default minimum copper-to-board-edge gap, in mm.
+const DEFAULT_COPPER_TO_EDGE_MM: f64 = 0.3;
+
+/// Design-rule values the inspection checks read.
+///
+/// Every field carries a serde default, so documents written before the rules
+/// existed reopen with the documented values instead of zeroed ones.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct DesignRules {
+    /// Minimum gap between two drill holes of different nets, in millimetres.
+    pub(crate) hole_clearance: f64,
+    /// Minimum copper-to-board-edge gap, in millimetres.
+    pub(crate) copper_to_edge: f64,
+}
+
+impl Default for DesignRules {
+    fn default() -> Self {
+        Self { hole_clearance: DEFAULT_HOLE_CLEARANCE_MM, copper_to_edge: DEFAULT_COPPER_TO_EDGE_MM }
+    }
+}
+
+impl DesignRules {
+    /// Whether every value matches [`DesignRules::default`].
+    ///
+    /// Default rules are omitted from the document so existing files keep their
+    /// historical byte shape.
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// One editable board at a committed revision.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Board {
+    /// Board identity, stable across saves.
+    pub(crate) id: String,
+    /// Optional human title.
+    pub(crate) title: Option<String>,
+    /// Committed revision; every mutation increments it.
+    pub(crate) revision: u64,
+    /// Coordinate unit.
+    pub(crate) units: Units,
+    /// Optional rectangular outline; absent on documents written before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) outline: Option<Outline>,
+    /// Design-rule values; absent on documents written before the rules existed.
+    #[serde(default, skip_serializing_if = "DesignRules::is_default")]
+    pub(crate) rules: DesignRules,
+    /// Stackup layers.
+    pub(crate) layers: Vec<Layer>,
+    /// Declared nets.
+    pub(crate) nets: Vec<Net>,
+    /// Placed footprints.
+    pub(crate) footprints: Vec<Footprint>,
+    /// Routed tracks.
+    pub(crate) tracks: Vec<Track>,
+    /// Placed vias.
+    pub(crate) vias: Vec<Via>,
+    /// Next footprint sequence number.
+    pub(crate) next_footprint: u64,
+    /// Next track sequence number.
+    pub(crate) next_track: u64,
+    /// Next via sequence number.
+    pub(crate) next_via: u64,
+    /// Next net sequence number.
+    pub(crate) next_net: u64,
+}
+
+/// Native document envelope written to `.opcb` files.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct Document {
+    /// Document tag, always [`DOCUMENT_FORMAT`].
+    pub(crate) format: String,
+    /// Schema version, always [`DOCUMENT_VERSION`].
+    pub(crate) version: u32,
+    /// The board itself.
+    pub(crate) document: Board,
+}
+
+impl Board {
+    /// Builds the board a `create` call starts from.
+    pub(crate) fn new(id: String, title: Option<String>, template: Option<String>) -> Result<Self, ServiceError> {
+        if let Some(template) = template.as_deref()
+            && template != "blank"
+        {
+            return Err(ServiceError::new(
+                "capability/not-implemented",
+                format!("template `{template}` is not implemented; only `blank` starts a board"),
+            ));
+        }
+        let title = match title {
+            Some(value) if value.trim().is_empty() => {
+                return Err(crate::argument("`title` must be a non-empty string"));
+            }
+            Some(value) => Some(value),
+            None => None,
+        };
+        Ok(Self {
+            id,
+            title,
+            revision: 1,
+            units: Units::Mm,
+            outline: None,
+            rules: DesignRules::default(),
+            layers: vec![
+                layer("F.Cu", "F.Cu", LayerKind::Copper, "#c87533"),
+                layer("B.Cu", "B.Cu", LayerKind::Copper, "#2f6fb0"),
+                layer("F.SilkS", "F.SilkS", LayerKind::Silkscreen, "#e6e6e6"),
+                layer("B.SilkS", "B.SilkS", LayerKind::Silkscreen, "#c4c4c4"),
+                layer("Edge.Cuts", "Edge.Cuts", LayerKind::Mechanical, "#d9b44a"),
+            ],
+            nets: Vec::new(),
+            footprints: Vec::new(),
+            tracks: Vec::new(),
+            vias: Vec::new(),
+            next_footprint: 1,
+            next_track: 1,
+            next_via: 1,
+            next_net: 1,
+        })
+    }
+
+    /// Scale factor from document units to millimetres.
+    pub(crate) fn millimetres(&self) -> f64 {
+        match self.units {
+            Units::Mm => 1.0,
+            Units::Mil => 0.0254,
+        }
+    }
+
+    /// Looks a layer up by id.
+    pub(crate) fn layer(&self, id: &str) -> Option<&Layer> {
+        self.layers.iter().find(|layer| layer.id == id)
+    }
+
+    /// Looks a net up by name.
+    pub(crate) fn net(&self, name: &str) -> Option<&Net> {
+        self.nets.iter().find(|net| net.name == name)
+    }
+
+    /// Adds a footprint and returns the public object shape.
+    pub(crate) fn add_footprint(&mut self, request: AddFootprintRequest) -> Result<Value, ServiceError> {
+        let reference = request
+            .reference
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| crate::argument("a footprint needs a non-empty `reference`"))?;
+        if self.footprints.iter().any(|footprint| footprint.ref_ == reference) {
+            return Err(crate::argument(format!("reference `{reference}` already exists on this board")));
+        }
+        let layer = request.layer.as_deref().unwrap_or("F.Cu");
+        self.editable_layer(layer)?;
+        let x = finite(request.x.unwrap_or(0.0), "x")?;
+        let y = finite(request.y.unwrap_or(0.0), "y")?;
+        let rotation = finite(request.rotation.unwrap_or(0.0), "rotation")?;
+        let id = format!("fp-{}", self.next_footprint);
+        self.next_footprint += 1;
+        let footprint = Footprint {
+            id: id.clone(),
+            ref_: reference.to_string(),
+            value: request.value.unwrap_or_default(),
+            footprint: request.footprint.unwrap_or_default(),
+            x,
+            y,
+            rotation,
+            layer: layer.to_string(),
+            pads: Vec::new(),
+        };
+        let object = footprint.to_value();
+        self.footprints.push(footprint);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Removes one footprint by id and returns the removed id.
+    pub(crate) fn delete_footprint(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .footprints
+            .iter()
+            .position(|footprint| footprint.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no footprint with id `{id}`")))?;
+        self.editable_layer(&self.footprints[index].layer)?;
+        let removed = self.footprints.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
+    /// Moves one footprint and returns its public object shape.
+    pub(crate) fn move_footprint(&mut self, request: MoveFootprintRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .footprints
+            .iter()
+            .position(|footprint| footprint.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no footprint with id `{}`", request.id)))?;
+        self.editable_layer(&self.footprints[index].layer)?;
+        if let Some(layer) = request.layer.as_deref() {
+            self.editable_layer(layer)?;
+        }
+        if request.x.is_none() && request.y.is_none() && request.rotation.is_none() && request.layer.is_none() {
+            return Err(crate::argument("a move needs `x`, `y`, `rotation` or `layer`"));
+        }
+        let footprint = &mut self.footprints[index];
+        if let Some(x) = request.x {
+            footprint.x = finite(x, "x")?;
+        }
+        if let Some(y) = request.y {
+            footprint.y = finite(y, "y")?;
+        }
+        if let Some(rotation) = request.rotation {
+            footprint.rotation = finite(rotation, "rotation")?;
+        }
+        if let Some(layer) = request.layer {
+            footprint.layer = layer;
+        }
+        self.revision += 1;
+        Ok(self.footprints[index].to_value())
+    }
+
+    /// Updates the value or package of one footprint.
+    pub(crate) fn update_footprint(&mut self, request: UpdateFootprintRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .footprints
+            .iter()
+            .position(|footprint| footprint.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no footprint with id `{}`", request.id)))?;
+        self.editable_layer(&self.footprints[index].layer)?;
+        if request.value.is_none() && request.footprint.is_none() {
+            return Err(crate::argument("an update needs `value` or `footprint`"));
+        }
+        let footprint = &mut self.footprints[index];
+        if let Some(value) = request.value {
+            footprint.value = value;
+        }
+        if let Some(package) = request.footprint {
+            footprint.footprint = package;
+        }
+        self.revision += 1;
+        Ok(self.footprints[index].to_value())
+    }
+
+    /// Adds one pad to a footprint and returns its public shape.
+    pub(crate) fn add_pad(&mut self, request: AddPadRequest) -> Result<Value, ServiceError> {
+        let index =
+            self.footprints.iter().position(|footprint| footprint.id == request.footprint).ok_or_else(|| {
+                ServiceError::new("object/not-found", format!("no footprint with id `{}`", request.footprint))
+            })?;
+        self.editable_layer(&self.footprints[index].layer)?;
+        if request.number.trim().is_empty() {
+            return Err(crate::argument("a pad needs a non-empty `number`"));
+        }
+        if self.footprints[index].pads.iter().any(|pad| pad.number == request.number) {
+            return Err(ServiceError::new(
+                "object/duplicate",
+                format!("pad `{}` already exists on footprint `{}`", request.number, self.footprints[index].ref_),
+            ));
+        }
+        let x = finite(request.x, "x")?;
+        let y = finite(request.y, "y")?;
+        let w = positive(request.w, "w")?;
+        let h = positive(request.h, "h")?;
+        let net = self.pad_net(request.net.as_deref())?;
+        let pad = Pad { number: request.number, x, y, w, h, net };
+        let object = json!(pad);
+        self.footprints[index].pads.push(pad);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Updates the geometry or net of one pad and returns its public shape.
+    pub(crate) fn update_pad(&mut self, request: UpdatePadRequest) -> Result<Value, ServiceError> {
+        let footprint_index =
+            self.footprints.iter().position(|footprint| footprint.id == request.footprint).ok_or_else(|| {
+                ServiceError::new("object/not-found", format!("no footprint with id `{}`", request.footprint))
+            })?;
+        self.editable_layer(&self.footprints[footprint_index].layer)?;
+        let pad_index =
+            self.footprints[footprint_index].pads.iter().position(|pad| pad.number == request.number).ok_or_else(|| {
+                ServiceError::new(
+                    "object/not-found",
+                    format!("no pad `{}` on footprint `{}`", request.number, self.footprints[footprint_index].ref_),
+                )
+            })?;
+        if request.x.is_none() && request.y.is_none() && request.w.is_none() && request.h.is_none() && request.net.is_none() {
+            return Err(crate::argument("a pad update needs `x`, `y`, `w`, `h` or `net`"));
+        }
+        let net = self.pad_net(request.net.as_deref())?;
+        let pad = &mut self.footprints[footprint_index].pads[pad_index];
+        if let Some(x) = request.x {
+            pad.x = finite(x, "x")?;
+        }
+        if let Some(y) = request.y {
+            pad.y = finite(y, "y")?;
+        }
+        if let Some(w) = request.w {
+            pad.w = positive(w, "w")?;
+        }
+        if let Some(h) = request.h {
+            pad.h = positive(h, "h")?;
+        }
+        if net.is_some() {
+            pad.net = net;
+        }
+        self.revision += 1;
+        Ok(json!(self.footprints[footprint_index].pads[pad_index].clone()))
+    }
+
+    /// Removes one pad from a footprint and returns the removed pad number.
+    pub(crate) fn delete_pad(&mut self, request: DeletePadRequest) -> Result<String, ServiceError> {
+        let footprint_index =
+            self.footprints.iter().position(|footprint| footprint.id == request.footprint).ok_or_else(|| {
+                ServiceError::new("object/not-found", format!("no footprint with id `{}`", request.footprint))
+            })?;
+        self.editable_layer(&self.footprints[footprint_index].layer)?;
+        let pad_index =
+            self.footprints[footprint_index].pads.iter().position(|pad| pad.number == request.number).ok_or_else(|| {
+                ServiceError::new(
+                    "object/not-found",
+                    format!("no pad `{}` on footprint `{}`", request.number, self.footprints[footprint_index].ref_),
+                )
+            })?;
+        let removed = self.footprints[footprint_index].pads.remove(pad_index);
+        self.revision += 1;
+        Ok(removed.number)
+    }
+
+    /// Adds a track and returns the public object shape.
+    pub(crate) fn add_track(&mut self, request: AddTrackRequest) -> Result<Value, ServiceError> {
+        let layer = request.layer.trim();
+        if layer.is_empty() {
+            return Err(crate::argument("a track needs a non-empty `layer`"));
+        }
+        self.editable_layer(layer)?;
+        let net = self.declared_net(request.net.as_deref())?;
+        let width = positive(request.width, "width")?;
+        let from = finite_pair(request.from, "from")?;
+        let to = finite_pair(request.to, "to")?;
+        let id = format!("track-{}", self.next_track);
+        self.next_track += 1;
+        let track = Track { id: id.clone(), net, layer: layer.to_string(), width, from, to };
+        let object = json!(track);
+        self.tracks.push(track);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Removes one track by id and returns the removed id.
+    pub(crate) fn delete_track(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .tracks
+            .iter()
+            .position(|track| track.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no track with id `{id}`")))?;
+        self.editable_layer(&self.tracks[index].layer)?;
+        let removed = self.tracks.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
+    /// Adds a via and returns the public object shape.
+    pub(crate) fn add_via(&mut self, request: AddViaRequest) -> Result<Value, ServiceError> {
+        self.editable_copper()?;
+        let net = self.declared_net(request.net.as_deref())?;
+        let at = finite_pair(request.at, "at")?;
+        let diameter = positive(request.diameter, "diameter")?;
+        let drill = positive(request.drill, "drill")?;
+        let id = format!("via-{}", self.next_via);
+        self.next_via += 1;
+        let via = Via { id: id.clone(), net, at, diameter, drill };
+        let object = json!(via);
+        self.vias.push(via);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Removes one via by id and returns the removed id.
+    pub(crate) fn delete_via(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .vias
+            .iter()
+            .position(|via| via.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no via with id `{id}`")))?;
+        self.editable_copper()?;
+        let removed = self.vias.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
+    /// Adds one stackup layer and returns its public object shape.
+    pub(crate) fn add_layer(&mut self, request: AddLayerRequest) -> Result<Value, ServiceError> {
+        let name = request.name.trim();
+        if name.is_empty() {
+            return Err(crate::argument("a layer needs a non-empty `name`"));
+        }
+        if self.layers.iter().any(|layer| layer.id == name || layer.name == name) {
+            return Err(crate::argument(format!("layer `{name}` is already declared")));
+        }
+        let kind = parse_kind(request.kind.as_deref())?;
+        let color = match request.color.as_deref().map(str::trim) {
+            Some("") => return Err(crate::argument("a layer `color` must not be empty")),
+            Some(color) => color.to_string(),
+            None => default_color(kind).to_string(),
+        };
+        let layer = Layer { id: name.to_string(), name: name.to_string(), kind, color, visible: true, locked: false };
+        let object = layer_value(&layer);
+        self.layers.push(layer);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Renames or reconfigures one layer, updating every object that names it.
+    pub(crate) fn update_layer(&mut self, request: UpdateLayerRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .layers
+            .iter()
+            .position(|layer| layer.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no layer with id `{}`", request.id)))?;
+        if request.name.is_none()
+            && request.color.is_none()
+            && request.kind.is_none()
+            && request.visible.is_none()
+            && request.locked.is_none()
+        {
+            return Err(crate::argument("an update needs `name`, `kind`, `color`, `visible` or `locked`"));
+        }
+
+        if let Some(name) = request.name.as_deref() {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(crate::argument("a layer `name` must not be empty"));
+            }
+            if name != self.layers[index].id {
+                if self
+                    .layers
+                    .iter()
+                    .enumerate()
+                    .any(|(other, layer)| other != index && (layer.id == name || layer.name == name))
+                {
+                    return Err(crate::argument(format!("layer `{name}` is already declared")));
+                }
+                let previous = self.layers[index].id.clone();
+                for footprint in &mut self.footprints {
+                    if footprint.layer == previous {
+                        footprint.layer = name.to_string();
+                    }
+                }
+                for track in &mut self.tracks {
+                    if track.layer == previous {
+                        track.layer = name.to_string();
+                    }
+                }
+                // Vias pass through every copper layer: renaming a copper layer
+                // keeps them electrically equivalent, so they need no reference.
+                self.layers[index].id = name.to_string();
+                self.layers[index].name = name.to_string();
+            }
+        }
+        if let Some(kind) = request.kind.as_deref() {
+            self.layers[index].kind = parse_kind(Some(kind))?;
+        }
+        if let Some(color) = request.color.as_deref() {
+            let color = color.trim();
+            if color.is_empty() {
+                return Err(crate::argument("a layer `color` must not be empty"));
+            }
+            self.layers[index].color = color.to_string();
+        }
+        if let Some(visible) = request.visible {
+            self.layers[index].visible = visible;
+        }
+        if let Some(locked) = request.locked {
+            self.layers[index].locked = locked;
+        }
+        self.revision += 1;
+        Ok(layer_value(&self.layers[index]))
+    }
+
+    /// Sets the rectangular board outline.
+    pub(crate) fn set_outline(&mut self, request: SetOutlineRequest) -> Result<Value, ServiceError> {
+        let from = finite_pair(request.from, "from")?;
+        let to = finite_pair(request.to, "to")?;
+        if to[0] <= from[0] {
+            return Err(crate::argument("the outline width must be greater than zero"));
+        }
+        if to[1] <= from[1] {
+            return Err(crate::argument("the outline height must be greater than zero"));
+        }
+        let outline = Outline { from, to };
+        self.outline = Some(outline);
+        self.revision += 1;
+        Ok(json!(outline))
+    }
+
+    /// Declares a net and returns the public object shape.
+    pub(crate) fn add_net(&mut self, request: AddNetRequest) -> Result<Value, ServiceError> {
+        let name = request.name.trim();
+        if name.is_empty() {
+            return Err(crate::argument("a net needs a non-empty `name`"));
+        }
+        if self.nets.iter().any(|net| net.name == name) {
+            return Err(crate::argument(format!("net `{name}` is already declared")));
+        }
+        let id = format!("net-{}", self.next_net);
+        self.next_net += 1;
+        let net = Net { id: id.clone(), name: name.to_string() };
+        let object = json!(net);
+        self.nets.push(net);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Resolves every pad to board coordinates.
+    ///
+    /// Footprint rotation is applied once here so router and inspection code
+    /// share one pad geometry model.
+    pub(crate) fn placed_pads(&self) -> Vec<PlacedPad<'_>> {
+        let mut pads = Vec::new();
+        for footprint in &self.footprints {
+            let angle = footprint.rotation.to_radians();
+            let (sin, cos) = (angle.sin(), angle.cos());
+            for pad in &footprint.pads {
+                pads.push(PlacedPad {
+                    key: format!("{}:{}", footprint.id, pad.number),
+                    net: pad.net.clone(),
+                    at: [footprint.x + pad.x * cos - pad.y * sin, footprint.y + pad.x * sin + pad.y * cos],
+                    half: [(cos.abs() * pad.w + sin.abs() * pad.h) / 2.0, (sin.abs() * pad.w + cos.abs() * pad.h) / 2.0],
+                    layer: &footprint.layer,
+                });
+            }
+        }
+        pads
+    }
+
+    /// Rejects a missing or locked layer before an edit touches it.
+    fn editable_layer(&self, id: &str) -> Result<(), ServiceError> {
+        let layer = self.layer(id).ok_or_else(|| crate::argument(format!("layer `{id}` is not declared on this board")))?;
+        if layer.locked {
+            return Err(ServiceError::new("board/layer-locked", format!("layer `{id}` is locked")));
+        }
+        Ok(())
+    }
+
+    /// Rejects a through via when either outer copper layer is locked.
+    fn editable_copper(&self) -> Result<(), ServiceError> {
+        for id in ["F.Cu", "B.Cu"] {
+            if self.layer(id).is_some_and(|layer| layer.locked) {
+                return Err(ServiceError::new("board/layer-locked", format!("layer `{id}` is locked")));
+            }
+        }
+        Ok(())
+    }
+
+    /// Rejects a pad net that the board does not declare, or returns it.
+    fn pad_net(&self, name: Option<&str>) -> Result<Option<String>, ServiceError> {
+        match name {
+            None => Ok(None),
+            Some(name) if name.trim().is_empty() => Err(crate::argument("a net name must not be empty")),
+            Some(name) => {
+                if self.net(name).is_none() {
+                    return Err(ServiceError::new("object/not-found", format!("net `{name}` is not declared on this board")));
+                }
+                Ok(Some(name.to_string()))
+            }
+        }
+    }
+
+    /// Rejects an undeclared net name, or returns the normalised name.
+    fn declared_net(&self, name: Option<&str>) -> Result<Option<String>, ServiceError> {
+        match name {
+            None => Ok(None),
+            Some(name) if name.trim().is_empty() => Err(crate::argument("a net name must not be empty")),
+            Some(name) => {
+                if self.net(name).is_none() {
+                    return Err(crate::argument(format!("net `{name}` is not declared on this board")));
+                }
+                Ok(Some(name.to_string()))
+            }
+        }
+    }
+}
+
+impl Document {
+    /// Wraps a board into the native document envelope.
+    pub(crate) fn new(board: Board) -> Self {
+        Self { format: DOCUMENT_FORMAT.to_string(), version: DOCUMENT_VERSION, document: board }
+    }
+}
+
+fn layer(id: &str, name: &str, kind: LayerKind, color: &str) -> Layer {
+    Layer { id: id.to_string(), name: name.to_string(), kind, color: color.to_string(), visible: true, locked: false }
+}
+
+fn layer_value(layer: &Layer) -> Value {
+    json!({
+        "id": layer.id,
+        "name": layer.name,
+        "kind": layer.kind,
+        "color": layer.color,
+        "visible": layer.visible,
+        "locked": layer.locked,
+    })
+}
+
+fn parse_kind(raw: Option<&str>) -> Result<LayerKind, ServiceError> {
+    match raw.map(str::trim).map(str::to_lowercase).as_deref() {
+        None | Some("") | Some("copper") => Ok(LayerKind::Copper),
+        Some("silkscreen") => Ok(LayerKind::Silkscreen),
+        Some("soldermask") => Ok(LayerKind::Soldermask),
+        Some("assembly") => Ok(LayerKind::Assembly),
+        Some("mechanical") => Ok(LayerKind::Mechanical),
+        Some(other) => Err(crate::argument(format!(
+            "`{other}` is not a layer kind; use copper, silkscreen, soldermask, assembly or mechanical"
+        ))),
+    }
+}
+
+fn default_color(kind: LayerKind) -> &'static str {
+    match kind {
+        LayerKind::Copper => "#c87533",
+        LayerKind::Silkscreen => "#e6e6e6",
+        LayerKind::Soldermask => "#2f6fb0",
+        LayerKind::Assembly => "#9b7bd4",
+        LayerKind::Mechanical => "#d9b44a",
+    }
+}
+
+fn finite(value: f64, field: &str) -> Result<f64, ServiceError> {
+    if value.is_finite() { Ok(value) } else { Err(crate::argument(format!("`{field}` must be a finite number"))) }
+}
+
+fn finite_pair(value: [f64; 2], field: &str) -> Result<[f64; 2], ServiceError> {
+    Ok([finite(value[0], field)?, finite(value[1], field)?])
+}
+
+fn positive(value: f64, field: &str) -> Result<f64, ServiceError> {
+    let value = finite(value, field)?;
+    if value > 0.0 { Ok(value) } else { Err(crate::argument(format!("`{field}` must be greater than zero"))) }
+}
+
+/// Validates a board loaded from disk before it receives a handle.
+///
+/// Failures use `format/invalid`; a version mismatch is reported by the caller
+/// as `format/unsupported-version`.
+pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
+    if board.id.trim().is_empty() {
+        return Err(crate::invalid("the board id is empty"));
+    }
+    if let Some(outline) = &board.outline {
+        checks(outline.from[0], "outline from.x")?;
+        checks(outline.from[1], "outline from.y")?;
+        checks(outline.to[0], "outline to.x")?;
+        checks(outline.to[1], "outline to.y")?;
+        if outline.to[0] <= outline.from[0] || outline.to[1] <= outline.from[1] {
+            return Err(crate::invalid("the outline must have a positive width and height"));
+        }
+    }
+    let mut layer_ids = HashSet::new();
+    for layer in &board.layers {
+        if layer.id.trim().is_empty() {
+            return Err(crate::invalid("a layer has an empty id"));
+        }
+        if !layer_ids.insert(layer.id.as_str()) {
+            return Err(crate::invalid(format!("layer id `{}` is duplicated", layer.id)));
+        }
+        if layer.color.trim().is_empty() {
+            return Err(crate::invalid(format!("layer `{}` has an empty color", layer.id)));
+        }
+    }
+    let mut net_ids = HashSet::new();
+    let mut net_names = HashSet::new();
+    for net in &board.nets {
+        if net.id.trim().is_empty() {
+            return Err(crate::invalid("a net has an empty id"));
+        }
+        if net.name.trim().is_empty() {
+            return Err(crate::invalid(format!("net `{}` has an empty name", net.id)));
+        }
+        if !net_ids.insert(net.id.as_str()) {
+            return Err(crate::invalid(format!("net id `{}` is duplicated", net.id)));
+        }
+        if !net_names.insert(net.name.as_str()) {
+            return Err(crate::invalid(format!("net name `{}` is duplicated", net.name)));
+        }
+    }
+
+    let mut footprint_ids = HashSet::new();
+    let mut references = HashSet::new();
+    for footprint in &board.footprints {
+        if footprint.id.trim().is_empty() {
+            return Err(crate::invalid("a footprint has an empty id"));
+        }
+        if !footprint_ids.insert(footprint.id.as_str()) {
+            return Err(crate::invalid(format!("footprint id `{}` is duplicated", footprint.id)));
+        }
+        if footprint.ref_.trim().is_empty() {
+            return Err(crate::invalid(format!("footprint `{}` has an empty reference", footprint.id)));
+        }
+        if !references.insert(footprint.ref_.as_str()) {
+            return Err(crate::invalid(format!("reference `{}` is duplicated", footprint.ref_)));
+        }
+        if !layer_ids.contains(footprint.layer.as_str()) {
+            return Err(crate::invalid(format!(
+                "footprint `{}` references missing layer `{}`",
+                footprint.ref_, footprint.layer
+            )));
+        }
+        checks(footprint.x, &format!("footprint `{}` x", footprint.ref_))?;
+        checks(footprint.y, &format!("footprint `{}` y", footprint.ref_))?;
+        checks(footprint.rotation, &format!("footprint `{}` rotation", footprint.ref_))?;
+        let mut pad_numbers = HashSet::new();
+        for pad in &footprint.pads {
+            if pad.number.trim().is_empty() {
+                return Err(crate::invalid(format!("a pad of `{}` has an empty number", footprint.ref_)));
+            }
+            if !pad_numbers.insert(pad.number.as_str()) {
+                return Err(crate::invalid(format!("pad number `{}` is duplicated on `{}`", pad.number, footprint.ref_)));
+            }
+            checks(pad.x, &format!("pad `{}` of `{}` x", pad.number, footprint.ref_))?;
+            checks(pad.y, &format!("pad `{}` of `{}` y", pad.number, footprint.ref_))?;
+            sizes(pad.w, &format!("pad `{}` of `{}` width", pad.number, footprint.ref_))?;
+            sizes(pad.h, &format!("pad `{}` of `{}` height", pad.number, footprint.ref_))?;
+            if let Some(net) = pad.net.as_deref()
+                && !net_names.contains(net)
+            {
+                return Err(crate::invalid(format!(
+                    "pad `{}` of `{}` references undeclared net `{net}`",
+                    pad.number, footprint.ref_
+                )));
+            }
+        }
+    }
+
+    let mut track_ids = HashSet::new();
+    for track in &board.tracks {
+        if track.id.trim().is_empty() {
+            return Err(crate::invalid("a track has an empty id"));
+        }
+        if !track_ids.insert(track.id.as_str()) {
+            return Err(crate::invalid(format!("track id `{}` is duplicated", track.id)));
+        }
+        if !layer_ids.contains(track.layer.as_str()) {
+            return Err(crate::invalid(format!("track `{}` references missing layer `{}`", track.id, track.layer)));
+        }
+        sizes(track.width, &format!("track `{}` width", track.id))?;
+        checks(track.from[0], &format!("track `{}` from.x", track.id))?;
+        checks(track.from[1], &format!("track `{}` from.y", track.id))?;
+        checks(track.to[0], &format!("track `{}` to.x", track.id))?;
+        checks(track.to[1], &format!("track `{}` to.y", track.id))?;
+        if let Some(net) = track.net.as_deref()
+            && !net_names.contains(net)
+        {
+            return Err(crate::invalid(format!("track `{}` references undeclared net `{net}`", track.id)));
+        }
+    }
+
+    let mut via_ids = HashSet::new();
+    for via in &board.vias {
+        if via.id.trim().is_empty() {
+            return Err(crate::invalid("a via has an empty id"));
+        }
+        if !via_ids.insert(via.id.as_str()) {
+            return Err(crate::invalid(format!("via id `{}` is duplicated", via.id)));
+        }
+        checks(via.at[0], &format!("via `{}` at.x", via.id))?;
+        checks(via.at[1], &format!("via `{}` at.y", via.id))?;
+        sizes(via.diameter, &format!("via `{}` diameter", via.id))?;
+        sizes(via.drill, &format!("via `{}` drill", via.id))?;
+        if let Some(net) = via.net.as_deref()
+            && !net_names.contains(net)
+        {
+            return Err(crate::invalid(format!("via `{}` references undeclared net `{net}`", via.id)));
+        }
+    }
+    Ok(())
+}
+
+fn checks(value: f64, field: &str) -> Result<(), ServiceError> {
+    if value.is_finite() { Ok(()) } else { Err(crate::invalid(format!("{field} is not finite"))) }
+}
+
+fn sizes(value: f64, field: &str) -> Result<(), ServiceError> {
+    checks(value, field)?;
+    if value > 0.0 { Ok(()) } else { Err(crate::invalid(format!("{field} must be greater than zero"))) }
+}
+
+/// Projects a board to the summary shape shared by the SDK, CLI and studio.
+pub(crate) fn summary(board: &Board) -> Value {
+    let layers: Vec<Value> = board
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(index, layer)| {
+            json!({
+                "id": layer.id,
+                "index": index,
+                "title": layer.name,
+                "kind": layer.kind,
+                "visible": layer.visible,
+                "locked": layer.locked,
+                "objects": objects_on(board, layer),
+            })
+        })
+        .collect();
+    json!({
+        "id": board.id,
+        "revision": board.revision,
+        "title": board.title,
+        "units": board.units,
+        "outline": board.outline,
+        "layers": layers,
+        "counts": {
+            "nets": board.nets.len(),
+            "footprints": board.footprints.len(),
+            "tracks": board.tracks.len(),
+            "vias": board.vias.len(),
+        },
+    })
+}
+
+fn objects_on(board: &Board, layer: &Layer) -> usize {
+    let mut count = board.footprints.iter().filter(|footprint| footprint.layer == layer.id).count();
+    count += board.tracks.iter().filter(|track| track.layer == layer.id).count();
+    if layer.kind == LayerKind::Copper {
+        count += board.vias.len();
+    }
+    count
+}
+
+/// Request of [`crate::add_footprint`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddFootprintRequest {
+    /// Reference designator, required.
+    pub reference: Option<String>,
+    /// Component value.
+    pub value: Option<String>,
+    /// Package or footprint name.
+    pub footprint: Option<String>,
+    /// Placement X.
+    pub x: Option<f64>,
+    /// Placement Y.
+    pub y: Option<f64>,
+    /// Rotation in degrees.
+    pub rotation: Option<f64>,
+    /// Layer id; defaults to `F.Cu`.
+    pub layer: Option<String>,
+}
+
+/// Request of [`crate::add_pad`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddPadRequest {
+    /// Footprint id that owns the pad.
+    pub footprint: String,
+    /// Pad number or name, unique within the footprint.
+    pub number: String,
+    /// Pad centre, X.
+    pub x: f64,
+    /// Pad centre, Y.
+    pub y: f64,
+    /// Pad width.
+    pub w: f64,
+    /// Pad height.
+    pub h: f64,
+    /// Declared net name, when assigned.
+    #[serde(default)]
+    pub net: Option<String>,
+}
+
+/// Request of [`crate::update_pad`]. At least one field is required.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePadRequest {
+    /// Footprint id that owns the pad.
+    pub footprint: String,
+    /// Pad number or name to update.
+    pub number: String,
+    /// New pad centre, X.
+    pub x: Option<f64>,
+    /// New pad centre, Y.
+    pub y: Option<f64>,
+    /// New pad width.
+    pub w: Option<f64>,
+    /// New pad height.
+    pub h: Option<f64>,
+    /// New declared net name.
+    pub net: Option<String>,
+}
+
+/// Request of [`crate::delete_pad`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletePadRequest {
+    /// Footprint id that owns the pad.
+    pub footprint: String,
+    /// Pad number or name to delete.
+    pub number: String,
+}
+
+/// Request of [`crate::add_track`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTrackRequest {
+    /// Declared net name, when assigned.
+    #[serde(default)]
+    pub net: Option<String>,
+    /// Copper layer id.
+    pub layer: String,
+    /// Trace width.
+    pub width: f64,
+    /// Segment start.
+    pub from: [f64; 2],
+    /// Segment end.
+    pub to: [f64; 2],
+}
+
+/// Request of [`crate::add_via`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddViaRequest {
+    /// Declared net name, when assigned.
+    #[serde(default)]
+    pub net: Option<String>,
+    /// Via centre.
+    pub at: [f64; 2],
+    /// Copper diameter.
+    pub diameter: f64,
+    /// Finished drill diameter.
+    pub drill: f64,
+}
+
+/// Request of [`crate::add_net`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddNetRequest {
+    /// Net name, required.
+    pub name: String,
+}
+
+/// Request of [`crate::move_footprint`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveFootprintRequest {
+    /// Footprint id, required.
+    pub id: String,
+    /// New placement X.
+    pub x: Option<f64>,
+    /// New placement Y.
+    pub y: Option<f64>,
+    /// New rotation in degrees.
+    pub rotation: Option<f64>,
+    /// New layer id.
+    pub layer: Option<String>,
+}
+
+/// Request of [`crate::update_footprint`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFootprintRequest {
+    /// Footprint id, required.
+    pub id: String,
+    /// New component value.
+    pub value: Option<String>,
+    /// New package or footprint name.
+    pub footprint: Option<String>,
+}
+
+/// Request of [`crate::add_layer`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddLayerRequest {
+    /// Layer name, required and unique.
+    pub name: String,
+    /// Layer kind; defaults to `copper`.
+    pub kind: Option<String>,
+    /// CSS colour; defaults to the kind colour.
+    pub color: Option<String>,
+}
+
+/// Request of [`crate::update_layer`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateLayerRequest {
+    /// Layer id, required.
+    pub id: String,
+    /// New name; renames the id and updates every reference.
+    pub name: Option<String>,
+    /// New kind.
+    pub kind: Option<String>,
+    /// New CSS colour.
+    pub color: Option<String>,
+    /// New visibility.
+    pub visible: Option<bool>,
+    /// New lock state.
+    pub locked: Option<bool>,
+}
+
+/// Request of [`crate::set_outline`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetOutlineRequest {
+    /// Lower-left corner in board units.
+    pub from: [f64; 2],
+    /// Upper-right corner in board units.
+    pub to: [f64; 2],
+}
+
+/// Request of [`crate::route`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteOptions {
+    /// Copper layers to route on, in preference order; defaults to `F.Cu` then `B.Cu`.
+    #[serde(default)]
+    pub layers: Option<Vec<String>>,
+    /// Trace width; defaults to 0.25 board units.
+    #[serde(default)]
+    pub width: Option<f64>,
+    /// Clearance kept from existing copper; defaults to 0.2 board units.
+    #[serde(default)]
+    pub clearance: Option<f64>,
+    /// Via copper diameter; defaults to 0.6 board units.
+    #[serde(default)]
+    pub via_diameter: Option<f64>,
+    /// Via finished drill; defaults to 0.3 board units.
+    #[serde(default)]
+    pub via_drill: Option<f64>,
+    /// Route only this declared net.
+    #[serde(default)]
+    pub net: Option<String>,
+    /// Rip-up and retry rounds after the first pass; defaults to 2, capped at 8.
+    #[serde(default)]
+    pub retries: Option<u32>,
+}

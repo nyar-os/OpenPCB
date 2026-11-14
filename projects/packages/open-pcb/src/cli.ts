@@ -1,0 +1,806 @@
+#!/usr/bin/env node
+/**
+ * Command-line assembly only.
+ *
+ * Every command parses options, calls one session or document method and prints
+ * the result. Board logic, inspection, export and sidecar history stay in the
+ * SDK; help text and errors come from `@wae/commander`, so the CLI does not grow
+ * its own parser.
+ */
+
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { createCli } from '@wae/commander';
+
+import { isOpenPCBError } from './errors.js';
+import { runGui } from './gui.js';
+import { OpenPCB } from './open-pcb.js';
+import type {
+    Board,
+    BoardCapabilities,
+    BoardSummary,
+    ExportTarget,
+    InspectCheck,
+    InspectReport,
+    LayerKind,
+} from './types.js';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+const cli = createCli('open-pcb').locales(path.join(here, '..', 'locales')).intro('cli.intro');
+
+// Exported for contract audits that import the built entry to inspect the
+// command tree. Nothing runs until the file is executed as the program entry.
+export { cli };
+
+/** One session per invocation; documents live in it until the command ends. */
+const app = new OpenPCB({ history: 'sidecar' });
+
+interface ParsedOptions {
+    readonly _?: readonly string[];
+    readonly [key: string]: unknown;
+}
+
+const text = (options: ParsedOptions, key: string): string | undefined =>
+    typeof options[key] === 'string' ? (options[key] as string) : undefined;
+
+const flag = (options: ParsedOptions, key: string): boolean => options[key] === true || options[key] === 'true';
+
+/** Parses an explicit `true`/`false` option; anything else is invalid. */
+const booleanOption = (raw: string | undefined): boolean | undefined => {
+    if (raw === 'true' || raw === '1') {
+        return true;
+    }
+    if (raw === 'false' || raw === '0') {
+        return false;
+    }
+    return undefined;
+};
+
+const input = (options: ParsedOptions): string | undefined => options._?.[0];
+
+/** Parses one numeric option; a non-numeric value is reported as invalid. */
+function numberOption(raw: string | undefined): number | undefined {
+    if (raw === undefined) {
+        return undefined;
+    }
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : undefined;
+}
+
+/** Parses `x,y` into a coordinate pair. */
+function pair(raw: string | undefined): [number, number] | undefined {
+    if (raw === undefined) {
+        return undefined;
+    }
+    const parts = raw.split(',').map((part) => part.trim());
+    if (parts.length !== 2) {
+        return undefined;
+    }
+    const first = Number(parts[0]);
+    const second = Number(parts[1]);
+    return Number.isFinite(first) && Number.isFinite(second) ? [first, second] : undefined;
+}
+
+/** Opens one document for the duration of one command. */
+async function withBoard<T>(file: string, apply: (board: Board) => Promise<T>): Promise<T> {
+    const board = await app.open({ path: file });
+    try {
+        return await apply(board);
+    } finally {
+        await board.close();
+    }
+}
+
+/** Export targets the CLI accepts, mirroring the declared capability matrix. */
+const exportTargets: readonly ExportTarget[] =
+    ['kicad_pcb', 'gbr', 'drl', 'pos', 'bom', 'step', 'ipc2581', 'pdf', 'svg', 'png'];
+
+/** Layer kinds the model accepts. */
+const layerKinds: readonly LayerKind[] = ['copper', 'silkscreen', 'soldermask', 'assembly', 'mechanical'];
+
+function asExportTarget(value: string | undefined): ExportTarget | undefined {
+    return value !== undefined && (exportTargets as readonly string[]).includes(value) ? (value as ExportTarget) : undefined;
+}
+
+function supportedNames(map: Readonly<Record<string, string>>): string {
+    const names = Object.entries(map)
+        .filter(([, level]) => level === 'supported')
+        .map(([name]) => name);
+    return names.length > 0 ? names.join(', ') : 'none';
+}
+
+function describeCapabilities(matrix: BoardCapabilities): string {
+    const formats = Object.entries(matrix.formats)
+        .filter(([, entry]) => entry.export === 'supported')
+        .map(([name]) => name);
+    return [
+        `engine: ${matrix.engine.package} ${matrix.engine.version}`,
+        `project: import=${matrix.project.import} edit=${matrix.project.edit} export=${matrix.project.export}`,
+        `formats with export: ${formats.length > 0 ? formats.join(', ') : 'none'}`,
+        `export targets: ${supportedNames(matrix.exportTargets)}`,
+        `checks: ${supportedNames(matrix.checks)}`,
+        `renderers: ${supportedNames(matrix.renderers)}`,
+    ].join('\n');
+}
+
+function describeBoard(board: BoardSummary): string {
+    const title = board.title ?? 'untitled';
+    const counts = board.counts;
+    const lines = [
+        `board ${board.id} "${title}" revision=${board.revision} units=${board.units} layers=${board.layers.length}`
+            + ` nets=${counts.nets} footprints=${counts.footprints} tracks=${counts.tracks} vias=${counts.vias}`,
+    ];
+    for (const layer of board.layers) {
+        lines.push(`  [${layer.index}] ${layer.id} ${layer.title} (${layer.kind}, ${layer.objects} objects)`);
+    }
+    return lines.join('\n');
+}
+
+function describeReport(report: InspectReport): string {
+    const lines = [`inspect revision=${report.revision} checker=${report.checkerVersion} passed=${report.passed}`];
+    for (const issue of report.issues) {
+        lines.push(`  ${issue.severity} ${issue.code} ${issue.layerId ?? '-'} ${issue.message}`);
+    }
+    return lines.join('\n');
+}
+
+cli.command('capabilities', 'cli.cmd.capabilities').actionCtx(async (_options, _args, ctx) => {
+    const matrix = await app.capabilities();
+    ctx.emitResult(matrix, describeCapabilities(matrix));
+    return 0;
+});
+
+cli
+    .command('create', 'cli.cmd.create')
+    .option('--out <file>', 'cli.opt.out')
+    .option('--title <title>', 'cli.opt.title')
+    .option('--template <name>', 'cli.opt.template')
+    .option('--overwrite', 'cli.opt.overwrite')
+    .actionCtx(async (options, _args, ctx) => {
+        const out = text(options, 'out');
+        if (out === undefined) {
+            ctx.fail('open-pcb.cli.out-required', { message: '`--out <file>` is required' });
+            return 2;
+        }
+        const created = await app.create({ title: text(options, 'title'), template: text(options, 'template') });
+        try {
+            const report = await created.save({ target: out, overwrite: flag(options, 'overwrite') });
+            const board = created.summary;
+            ctx.emitResult(
+                { ...report, board },
+                `created ${out} revision=${report.revision} layers=${board.layers.length}`,
+            );
+        } finally {
+            await created.close();
+        }
+        return 0;
+    });
+
+cli.command('open', 'cli.cmd.open').actionCtx(async (options, _args, ctx) => {
+    const file = input(options);
+    if (file === undefined) {
+        ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+        return 2;
+    }
+    await withBoard(file, async (board) => {
+        const summary = board.summary;
+        ctx.emitResult(summary, describeBoard(summary));
+        return 0;
+    });
+    return 0;
+});
+
+cli
+    .command('import', 'cli.cmd.import')
+    .option('--out <file>', 'cli.opt.import-out')
+    .option('--overwrite', 'cli.opt.overwrite')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a KiCad PCB file is required' });
+            return 2;
+        }
+        const out = text(options, 'out');
+        if (out === undefined) {
+            ctx.fail('open-pcb.cli.out-required', { message: '`--out <file>` is required' });
+            return 2;
+        }
+        const imported = await app.importKicadPcb({
+            path: file,
+            target: out,
+            overwrite: flag(options, 'overwrite'),
+        });
+        try {
+            const document = imported.board.summary;
+            const counts = document.counts;
+            const saved = imported.saved ?? { path: out, revision: document.revision, bytes: imported.bytes };
+            const revision = saved.revision;
+            ctx.emitResult(
+                {
+                    ...saved,
+                    document,
+                    losses: imported.losses,
+                    lossCodes: imported.lossCodes,
+                },
+                `imported ${file} to ${out} revision=${revision}`
+                    + ` nets=${counts.nets} footprints=${counts.footprints} tracks=${counts.tracks} vias=${counts.vias}`
+                    + ` losses=${imported.losses.length}`,
+            );
+        } finally {
+            await imported.board.close();
+        }
+        return 0;
+    });
+
+cli.command('list', 'cli.cmd.list').actionCtx(async (options, _args, ctx) => {
+    const file = input(options);
+    if (file === undefined) {
+        ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+        return 2;
+    }
+    await withBoard(file, async (board) => {
+        const summary = await board.list();
+        ctx.emitResult(summary, describeBoard(summary));
+        return 0;
+    });
+    return 0;
+});
+
+for (const [name, description] of [
+    ['undo', 'cli.cmd.undo'],
+    ['redo', 'cli.cmd.redo'],
+] as const) {
+    cli.command(name, description).actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        const board = await app.open({ path: file });
+        try {
+            const result = name === 'undo' ? await board.undo() : await board.redo();
+            ctx.emitResult(result.board, `${name} revision=${result.revision}`);
+            return 0;
+        } catch (error) {
+            if (isOpenPCBError(error) && error.code === 'board/history-empty') {
+                ctx.fail('board/history-empty', { message: error.message });
+                return 2;
+            }
+            throw error;
+        } finally {
+            await board.close();
+        }
+    });
+}
+
+const footprint = cli.command('footprint', 'cli.cmd.footprint');
+footprint
+    .command('add', 'cli.cmd.footprint-add')
+    .option('--ref <ref>', 'cli.opt.ref')
+    .option('--value <value>', 'cli.opt.value')
+    .option('--footprint <name>', 'cli.opt.footprint')
+    .option('--x <mm>', 'cli.opt.x')
+    .option('--y <mm>', 'cli.opt.y')
+    .option('--rotation <degrees>', 'cli.opt.rotation')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const reference = text(options, 'ref');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (reference === undefined || reference.length === 0) {
+            ctx.fail('open-pcb.cli.ref-required', { message: '`--ref <ref>` is required' });
+            return 2;
+        }
+        const x = numberOption(text(options, 'x'));
+        const y = numberOption(text(options, 'y'));
+        const rotation = numberOption(text(options, 'rotation'));
+        if (text(options, 'x') !== undefined && x === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--x` must be a finite number' });
+            return 2;
+        }
+        if (text(options, 'y') !== undefined && y === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--y` must be a finite number' });
+            return 2;
+        }
+        if (text(options, 'rotation') !== undefined && rotation === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--rotation` must be a finite number' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addFootprint({
+                reference,
+                value: text(options, 'value'),
+                footprint: text(options, 'footprint'),
+                x,
+                y,
+                rotation,
+                layer: text(options, 'layer'),
+            });
+            ctx.emitResult(result, `added ${result.object?.id ?? 'footprint'} ${reference}`);
+            return 0;
+        });
+        return 0;
+    });
+
+footprint
+    .command('delete', 'cli.cmd.footprint-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteFootprint(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+footprint
+    .command('move', 'cli.cmd.footprint-move')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--x <mm>', 'cli.opt.x')
+    .option('--y <mm>', 'cli.opt.y')
+    .option('--rotation <degrees>', 'cli.opt.rotation')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        const x = numberOption(text(options, 'x'));
+        const y = numberOption(text(options, 'y'));
+        const rotation = numberOption(text(options, 'rotation'));
+        if (text(options, 'x') !== undefined && x === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--x` must be a finite number' });
+            return 2;
+        }
+        if (text(options, 'y') !== undefined && y === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--y` must be a finite number' });
+            return 2;
+        }
+        if (text(options, 'rotation') !== undefined && rotation === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--rotation` must be a finite number' });
+            return 2;
+        }
+        if (x === undefined && y === undefined && rotation === undefined && text(options, 'layer') === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: 'a move needs `--x`, `--y`, `--rotation` or `--layer`' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.moveFootprint({ id, x, y, rotation, layer: text(options, 'layer') });
+            ctx.emitResult(result, `moved ${id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+footprint
+    .command('update', 'cli.cmd.footprint-update')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--value <value>', 'cli.opt.value')
+    .option('--footprint <name>', 'cli.opt.footprint')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        if (text(options, 'value') === undefined && text(options, 'footprint') === undefined) {
+            ctx.fail('open-pcb.cli.ref-required', { message: '`--value` or `--footprint` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.updateFootprint({
+                id,
+                value: text(options, 'value'),
+                footprint: text(options, 'footprint'),
+            });
+            ctx.emitResult(result, `updated ${id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const track = cli.command('track', 'cli.cmd.track');
+track
+    .command('add', 'cli.cmd.track-add')
+    .option('--net <name>', 'cli.opt.net')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .option('--from <x,y>', 'cli.opt.from')
+    .option('--to <x,y>', 'cli.opt.to')
+    .option('--width <mm>', 'cli.opt.width')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        const layer = text(options, 'layer');
+        const from = pair(text(options, 'from'));
+        const to = pair(text(options, 'to'));
+        const width = numberOption(text(options, 'width'));
+        if (layer === undefined || layer.length === 0) {
+            ctx.fail('open-pcb.cli.layer-required', { message: '`--layer <layer>` is required' });
+            return 2;
+        }
+        if (from === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--from <x,y>` needs two numbers' });
+            return 2;
+        }
+        if (to === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--to <x,y>` needs two numbers' });
+            return 2;
+        }
+        if (width === undefined || width <= 0) {
+            ctx.fail('open-pcb.cli.width-required', { message: '`--width <mm>` must be greater than zero' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addTrack({ net: text(options, 'net'), layer, from, to, width });
+            ctx.emitResult(result, `added ${result.object?.id ?? 'track'} on ${layer}`);
+            return 0;
+        });
+        return 0;
+    });
+
+track
+    .command('delete', 'cli.cmd.track-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteTrack(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const via = cli.command('via', 'cli.cmd.via');
+via
+    .command('add', 'cli.cmd.via-add')
+    .option('--net <name>', 'cli.opt.net')
+    .option('--at <x,y>', 'cli.opt.at')
+    .option('--diameter <mm>', 'cli.opt.diameter')
+    .option('--drill <mm>', 'cli.opt.drill')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        const at = pair(text(options, 'at'));
+        const diameter = numberOption(text(options, 'diameter'));
+        const drill = numberOption(text(options, 'drill'));
+        if (at === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--at <x,y>` needs two numbers' });
+            return 2;
+        }
+        if (diameter === undefined || diameter <= 0) {
+            ctx.fail('open-pcb.cli.diameter-required', { message: '`--diameter <mm>` must be greater than zero' });
+            return 2;
+        }
+        if (drill === undefined || drill <= 0) {
+            ctx.fail('open-pcb.cli.drill-required', { message: '`--drill <mm>` must be greater than zero' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addVia({ net: text(options, 'net'), at, diameter, drill });
+            ctx.emitResult(result, `added ${result.object?.id ?? 'via'} at ${at[0]},${at[1]}`);
+            return 0;
+        });
+        return 0;
+    });
+
+via
+    .command('delete', 'cli.cmd.via-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteVia(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const net = cli.command('net', 'cli.cmd.net');
+net
+    .command('add', 'cli.cmd.net-add')
+    .option('--name <name>', 'cli.opt.name')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const name = text(options, 'name');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (name === undefined || name.length === 0) {
+            ctx.fail('open-pcb.cli.name-required', { message: '`--name <name>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addNet({ name });
+            ctx.emitResult(result, `added ${result.object?.id ?? 'net'} ${name}`);
+            return 0;
+        });
+        return 0;
+    });
+
+cli
+    .command('route', 'cli.cmd.route')
+    .option('--width <mm>', 'cli.opt.width')
+    .option('--clearance <mm>', 'cli.opt.clearance')
+    .option('--via <mm>', 'cli.opt.via')
+    .option('--net <name>', 'cli.opt.net')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        const width = numberOption(text(options, 'width'));
+        const clearance = numberOption(text(options, 'clearance'));
+        const viaDiameter = numberOption(text(options, 'via'));
+        if (width !== undefined && width <= 0) {
+            ctx.fail('open-pcb.cli.width-required', { message: '`--width <mm>` must be greater than zero' });
+            return 2;
+        }
+        if (clearance !== undefined && clearance <= 0) {
+            ctx.fail('open-pcb.cli.clearance-required', { message: '`--clearance <mm>` must be greater than zero' });
+            return 2;
+        }
+        if (viaDiameter !== undefined && viaDiameter <= 0) {
+            ctx.fail('open-pcb.cli.via-required', { message: '`--via <mm>` must be greater than zero' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.route({ width, clearance, viaDiameter, net: text(options, 'net') });
+            ctx.emitResult(
+                report,
+                `routed ${report.routed} connection(s): ${report.tracks} tracks, ${report.vias} vias, ${report.unrouted.length} unrouted`,
+            );
+            return 0;
+        });
+        return 0;
+    });
+
+const layer = cli.command('layer', 'cli.cmd.layer');
+layer
+    .command('add', 'cli.cmd.layer-add')
+    .option('--name <name>', 'cli.opt.name')
+    .option('--kind <kind>', 'cli.opt.kind')
+    .option('--color <css>', 'cli.opt.color')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const name = text(options, 'name');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (name === undefined || name.length === 0) {
+            ctx.fail('open-pcb.cli.name-required', { message: '`--name <name>` is required' });
+            return 2;
+        }
+        const kind = text(options, 'kind') as LayerKind | undefined;
+        if (kind !== undefined && !layerKinds.includes(kind)) {
+            ctx.fail('open-pcb.cli.kind-invalid', { message: '`--kind` must be copper, silkscreen, soldermask, assembly or mechanical' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addLayer({ name, kind, color: text(options, 'color') });
+            ctx.emitResult(result, `added layer ${name}`);
+            return 0;
+        });
+        return 0;
+    });
+
+layer
+    .command('rename', 'cli.cmd.layer-rename')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--name <name>', 'cli.opt.name')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        const name = text(options, 'name');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        if (name === undefined || name.length === 0) {
+            ctx.fail('open-pcb.cli.name-required', { message: '`--name <name>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.updateLayer({ id, name });
+            ctx.emitResult(result, `renamed ${id} to ${name}`);
+            return 0;
+        });
+        return 0;
+    });
+
+for (const [name, description, key, option] of [
+    ['visible', 'cli.cmd.layer-visible', 'visible', 'cli.opt.visible'],
+    ['lock', 'cli.cmd.layer-lock', 'locked', 'cli.opt.locked'],
+] as const) {
+    layer
+        .command(name, description)
+        .option('--id <id>', 'cli.opt.id')
+        .option(name === 'visible' ? '--visible <bool>' : '--locked <bool>', option)
+        .actionCtx(async (options, _args, ctx) => {
+            const file = input(options);
+            const id = text(options, 'id');
+            const value = booleanOption(text(options, key));
+            if (file === undefined) {
+                ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+                return 2;
+            }
+            if (id === undefined || id.length === 0) {
+                ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+                return 2;
+            }
+            if (value === undefined) {
+                ctx.fail('open-pcb.cli.boolean-invalid', { message: `\`--${key}\` must be true or false` });
+                return 2;
+            }
+            await withBoard(file, async (board) => {
+                const result = key === 'visible'
+                    ? await board.updateLayer({ id, visible: value })
+                    : await board.updateLayer({ id, locked: value });
+                ctx.emitResult(result, `layer ${id} ${key}=${value}`);
+                return 0;
+            });
+            return 0;
+        });
+}
+
+const outline = cli.command('outline', 'cli.cmd.outline');
+outline
+    .command('set', 'cli.cmd.outline-set')
+    .option('--from <x,y>', 'cli.opt.from')
+    .option('--to <x,y>', 'cli.opt.to')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const from = pair(text(options, 'from'));
+        const to = pair(text(options, 'to'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (from === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--from <x,y>` needs two numbers' });
+            return 2;
+        }
+        if (to === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--to <x,y>` needs two numbers' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.setOutline({ from, to });
+            ctx.emitResult(result, `outline ${from[0]},${from[1]} to ${to[0]},${to[1]}`);
+            return 0;
+        });
+        return 0;
+    });
+
+cli
+    .command('inspect', 'cli.cmd.inspect')
+    .option('--checks <list>', 'cli.opt.checks')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        const checks = text(options, 'checks')
+            ?.split(',')
+            .map((name) => name.trim())
+            .filter((name) => name.length > 0) as InspectCheck[] | undefined;
+        const report = await app.inspect({ path: file }, { checks });
+        ctx.emitResult(report, describeReport(report));
+        return report.passed ? 0 : 1;
+    });
+
+cli
+    .command('export', 'cli.cmd.export')
+    .option('--format <format>', 'cli.opt.format')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        const format = asExportTarget(text(options, 'format'));
+        if (format === undefined) {
+            ctx.fail('open-pcb.cli.format-required', {
+                message: '`--format` must be one of kicad_pcb, gbr, drl, pos, bom, step, ipc2581, pdf, svg',
+            });
+            return 2;
+        }
+        const out = text(options, 'out');
+        if (out === undefined) {
+            ctx.fail('open-pcb.cli.out-required', { message: '`--out <file-or-directory>` is required' });
+            return 2;
+        }
+        return withBoard(file, async (board) => {
+            try {
+                const report = await board.export({ format, target: out });
+                const files = report.artifacts ? ` (${report.artifacts.length} files)` : '';
+                ctx.emitResult(report, `exported ${format} to ${out}${files} revision=${report.revision}`);
+            } catch (error) {
+                // Keep the stable code visible in human output; the SDK error keeps
+                // its own code field unchanged.
+                const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+                const message = error instanceof Error ? error.message : String(error);
+                throw new Error(code ? `${code}: ${message}` : message);
+            }
+            return 0;
+        });
+    });
+
+cli.command('gui', 'cli.cmd.gui').actionCtx(async (_options, _args, ctx) => {
+    try {
+        const status = await runGui({});
+        ctx.emitResult(status, `window ${status.state}`);
+        return 0;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.fail('open-pcb.cli.gui-failed', { message });
+        return 1;
+    }
+});
+
+const entry = process.argv[1];
+if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
+    const code = await cli.parse(process.argv);
+    process.exitCode = code;
+}

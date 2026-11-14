@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = ["projects/crates/*"]
+default-members = ["projects/crates/pcb-napi"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MPL-2.0"
+authors = ["OpenPCB Authors"]
+repository = "https://github.com/nyar-os/OpenPCB"
+
+[workspace.dependencies]
+# Shared host facade for the Node-API and WebView surfaces. Cross-repo git
+# dependencies pin the full 40-character revision so local builds and CI resolve
+# the same commit.
+wae = { git = "https://github.com/doki-land/wae-framework.git", rev = "f92f818fde7174154d77a87b55a5e44b367034c9", default-features = false, features = ["webview"] }
+serde_json = "1"
+# Shared crates from boost.rs `dev`, pinned to the full 40-character revision
+# so local builds and CI resolve the same commit.
+boost-fs = { git = "https://github.com/oovm/boost.rs.git", rev = "f0c76fc60090650eefa1de1a4f2c2cbb29cba8d9" }
+boost-source = { git = "https://github.com/oovm/boost.rs.git", rev = "f0c76fc60090650eefa1de1a4f2c2cbb29cba8d9" }
+boost-collection = { git = "https://github.com/oovm/boost.rs.git", rev = "f0c76fc60090650eefa1de1a4f2c2cbb29cba8d9" }
+boost-check = { git = "https://github.com/oovm/boost.rs.git", rev = "f0c76fc60090650eefa1de1a4f2c2cbb29cba8d9" }
+boost-session = { git = "https://github.com/oovm/boost.rs.git", rev = "f0c76fc60090650eefa1de1a4f2c2cbb29cba8d9" }
+geometry-planar = { git = "https://github.com/oovm/boost.rs.git", rev = "f0c76fc60090650eefa1de1a4f2c2cbb29cba8d9" }
+media-codec = { git = "https://github.com/oovm/boost.rs.git", rev = "f0c76fc60090650eefa1de1a4f2c2cbb29cba8d9" }
+document-drawing = { git = "https://github.com/oovm/boost.rs.git", rev = "f0c76fc60090650eefa1de1a4f2c2cbb29cba8d9" }
+
+[profile.release]
+lto = true
+panic = "abort"
+
