@@ -16,6 +16,7 @@ import * as service from './service.js';
 import type {
     AddDifferentialPairOptions,
     AddFootprintOptions,
+    AddKeepoutOptions,
     AddTeardropsOptions,
     AddTestPointOptions,
     AddLayerOptions,
@@ -431,6 +432,14 @@ function attach(
         async deleteZone(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteZone(current, id));
+        },
+        async addKeepout(options: AddKeepoutOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addKeepout(current, options));
+        },
+        async deleteKeepout(id: string): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deleteKeepout(current, id));
         },
         async addNetClass(options: AddNetClassOptions): Promise<BoardEditResult> {
             ensure();

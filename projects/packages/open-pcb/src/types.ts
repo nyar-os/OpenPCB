@@ -79,7 +79,8 @@ export type InspectCheck =
     | 'silkscreen-over-pad'
     | 'diffpair'
     | 'dangling-copper'
-    | 'netclass';
+    | 'netclass'
+    | 'keepout';
 
 /** Rectangular board outline in board units. */
 export interface BoardOutline {
@@ -165,6 +166,8 @@ export interface BoardCapabilities {
     readonly routing: SupportLevel;
     /** Whether copper pour regions can be declared, previewed and written as Gerber regions. */
     readonly zones: SupportLevel;
+    /** Whether copper keepout regions can be declared and checked. */
+    readonly keepouts: SupportLevel;
     /** Whether net classes with clearance and width targets are available. */
     readonly netClasses: SupportLevel;
     /** Whether declared test points can be reported. */
@@ -205,6 +208,7 @@ export interface BoardSummaryCounts {
     readonly tracks: number;
     readonly vias: number;
     readonly zones: number;
+    readonly keepouts: number;
     readonly netClasses: number;
     readonly testPoints: number;
     readonly differentialPairs: number;
@@ -443,6 +447,14 @@ export interface AddZoneOptions {
     readonly points: readonly (readonly [number, number])[];
 }
 
+/** Options of `board.addKeepout()`. */
+export interface AddKeepoutOptions {
+    /** Copper layer id, or `*` for every copper layer; defaults to `*`. */
+    readonly layer?: string;
+    /** Closed polygon in board units, in drawing order; at least three points. */
+    readonly points: readonly (readonly [number, number])[];
+}
+
 /** Options of `board.addNetClass()`. */
 export interface AddNetClassOptions {
     /** Class name, unique on the board. */
@@ -664,6 +676,8 @@ export interface Board {
     deleteVia(id: ObjectId): Promise<BoardEditResult>;
     addZone(options: AddZoneOptions): Promise<BoardEditResult>;
     deleteZone(id: ObjectId): Promise<BoardEditResult>;
+    addKeepout(options: AddKeepoutOptions): Promise<BoardEditResult>;
+    deleteKeepout(id: ObjectId): Promise<BoardEditResult>;
     addNetClass(options: AddNetClassOptions): Promise<BoardEditResult>;
     deleteNetClass(id: ObjectId): Promise<BoardEditResult>;
     assignNetClass(options: AssignNetClassOptions): Promise<BoardEditResult>;

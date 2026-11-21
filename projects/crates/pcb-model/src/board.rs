@@ -384,6 +384,21 @@ pub(crate) struct Zone {
     pub(crate) points: Vec<[f64; 2]>,
 }
 
+/// One copper keepout region.
+///
+/// A keepout is a closed polygon with at least three vertices that no copper
+/// object may enter. The layer is either a copper layer id or `*`, which rejects
+/// copper on every copper layer. The `keepout` check reads these regions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Keepout {
+    /// Stable keepout id.
+    pub(crate) id: String,
+    /// Copper layer id, or `*` for every copper layer.
+    pub(crate) layer: String,
+    /// Polygon vertices in board units, in drawing order.
+    pub(crate) points: Vec<[f64; 2]>,
+}
+
 /// Default minimum gap between two drill holes of different nets, in mm.
 const DEFAULT_HOLE_CLEARANCE_MM: f64 = 0.25;
 
@@ -470,6 +485,9 @@ pub(crate) struct Board {
     /// Copper pour regions; absent on documents written before zones existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) zones: Vec<Zone>,
+    /// Copper keepout regions; absent on documents written before them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) keepouts: Vec<Keepout>,
     /// Declared net classes; absent on documents written before classes existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) net_classes: Vec<NetClass>,
@@ -500,6 +518,9 @@ pub(crate) struct Board {
     /// Next zone sequence number.
     #[serde(default = "one")]
     pub(crate) next_zone: u64,
+    /// Next keepout sequence number.
+    #[serde(default = "one")]
+    pub(crate) next_keepout: u64,
     /// Next net class sequence number.
     #[serde(default = "one")]
     pub(crate) next_net_class: u64,
@@ -558,6 +579,7 @@ impl Board {
             tracks: Vec::new(),
             vias: Vec::new(),
             zones: Vec::new(),
+            keepouts: Vec::new(),
             net_classes: Vec::new(),
             test_points: Vec::new(),
             differential_pairs: Vec::new(),
@@ -569,6 +591,7 @@ impl Board {
             next_track: 1,
             next_via: 1,
             next_zone: 1,
+            next_keepout: 1,
             next_net_class: 1,
             next_test_point: 1,
             next_net: 1,
@@ -1300,6 +1323,55 @@ impl Board {
         let removed = self.zones.remove(index);
         self.revision += 1;
         Ok(removed.id)
+    }
+
+    /// Adds one copper keepout region and returns its public object shape.
+    ///
+    /// A keepout needs at least three vertices and a non-zero enclosed area.
+    /// `layer` defaults to `*`, which rejects copper on every copper layer; a
+    /// named layer must be copper.
+    pub(crate) fn add_keepout(&mut self, request: AddKeepoutRequest) -> Result<Value, ServiceError> {
+        let layer = request.layer.as_deref().map(str::trim).filter(|layer| !layer.is_empty()).unwrap_or("*");
+        if layer != "*" {
+            self.editable_layer(layer)?;
+            if self.layer(layer).is_none_or(|entry| entry.kind != LayerKind::Copper) {
+                return Err(crate::argument(format!("`{layer}` is not a copper layer; keepouts need copper")));
+            }
+        }
+        if request.points.len() < 3 {
+            return Err(crate::argument("a keepout needs at least three points"));
+        }
+        let points = request.points.into_iter().map(|point| finite_pair(point, "points")).collect::<Result<Vec<_>, _>>()?;
+        if polygon_area(&points) <= 1e-9 {
+            return Err(crate::argument("a keepout polygon must enclose a non-zero area"));
+        }
+        let id = format!("keepout-{}", self.next_keepout);
+        self.next_keepout += 1;
+        let keepout = Keepout { id, layer: layer.to_string(), points };
+        let object = json!(keepout);
+        self.keepouts.push(keepout);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Removes one keepout region by id and returns the removed id.
+    pub(crate) fn delete_keepout(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .keepouts
+            .iter()
+            .position(|keepout| keepout.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no keepout with id `{id}`")))?;
+        if self.keepouts[index].layer != "*" {
+            self.editable_layer(&self.keepouts[index].layer)?;
+        }
+        let removed = self.keepouts.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
+    /// Whether one keepout rejects copper on a layer.
+    pub(crate) fn keepout_covers(&self, keepout: &Keepout, layer: &str) -> bool {
+        keepout.layer == "*" || keepout.layer == layer
     }
 
     /// Declares one net class and returns its public object shape.
@@ -2082,6 +2154,38 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         }
     }
 
+    let mut keepout_ids = HashSet::new();
+    for keepout in &board.keepouts {
+        if keepout.id.trim().is_empty() {
+            return Err(crate::invalid("a keepout has an empty id"));
+        }
+        if !keepout_ids.insert(keepout.id.as_str()) {
+            return Err(crate::invalid(format!("keepout id `{}` is duplicated", keepout.id)));
+        }
+        if keepout.layer != "*" {
+            let Some(layer) = board.layer(&keepout.layer)
+            else {
+                return Err(crate::invalid(format!("keepout `{}` references missing layer `{}`", keepout.id, keepout.layer)));
+            };
+            if layer.kind != LayerKind::Copper {
+                return Err(crate::invalid(format!(
+                    "keepout `{}` sits on `{}`, which is not a copper layer",
+                    keepout.id, keepout.layer
+                )));
+            }
+        }
+        if keepout.points.len() < 3 {
+            return Err(crate::invalid(format!("keepout `{}` has fewer than three points", keepout.id)));
+        }
+        for (index, point) in keepout.points.iter().enumerate() {
+            checks(point[0], &format!("keepout `{}` point {index} x", keepout.id))?;
+            checks(point[1], &format!("keepout `{}` point {index} y", keepout.id))?;
+        }
+        if polygon_area(&keepout.points) <= 1e-9 {
+            return Err(crate::invalid(format!("keepout `{}` encloses no area", keepout.id)));
+        }
+    }
+
     let mut pair_ids = HashSet::new();
     for pair in &board.differential_pairs {
         if pair.id.trim().is_empty() {
@@ -2183,6 +2287,7 @@ pub(crate) fn summary(board: &Board) -> Value {
             "tracks": board.tracks.len(),
             "vias": board.vias.len(),
             "zones": board.zones.len(),
+            "keepouts": board.keepouts.len(),
             "netClasses": board.net_classes.len(),
             "testPoints": board.test_points.len(),
             "differentialPairs": board.differential_pairs.len(),
@@ -2195,6 +2300,7 @@ fn objects_on(board: &Board, layer: &Layer) -> usize {
     let mut count = board.footprints.iter().filter(|footprint| footprint.layer == layer.id).count();
     count += board.tracks.iter().filter(|track| track.layer == layer.id).count();
     count += board.zones.iter().filter(|zone| zone.layer == layer.id).count();
+    count += board.keepouts.iter().filter(|keepout| board.keepout_covers(keepout, &layer.id)).count();
     if layer.kind == LayerKind::Copper {
         count += board.vias.iter().filter(|via| board.via_covers(via, &layer.id)).count();
     }
@@ -2319,6 +2425,17 @@ pub struct AddZoneRequest {
     /// Declared net the pour belongs to, when assigned.
     #[serde(default)]
     pub net: Option<String>,
+    /// Polygon vertices in board units, in drawing order.
+    pub points: Vec<[f64; 2]>,
+}
+
+/// Request of [`crate::add_keepout`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddKeepoutRequest {
+    /// Copper layer id, or `*` for every copper layer; defaults to `*`.
+    #[serde(default)]
+    pub layer: Option<String>,
     /// Polygon vertices in board units, in drawing order.
     pub points: Vec<[f64; 2]>,
 }

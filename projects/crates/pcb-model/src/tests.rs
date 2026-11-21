@@ -12,14 +12,14 @@ use std::{
 use serde_json::Value;
 
 use crate::{
-    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest, AddPadRequest,
-    AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
+    AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
+    AddPadRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
     AssignNetClassRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
     SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, add_differential_pair,
-    add_footprint, add_layer, add_net, add_net_class, add_pad, add_teardrops, add_test_point, add_track, add_via, add_waiver,
-    add_zone, assign_net_class,
+    add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_teardrops, add_test_point, add_track, add_via,
+    add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
-    capabilities, close, create, delete_differential_pair, delete_footprint, delete_net_class, delete_severity,
+    capabilities, close, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class, delete_severity,
     delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import, inspect, move_footprint, open,
     redo, route, save, set_outline, set_rules, set_severity, set_via_back_drill, store, summary, undo, update_footprint,
     update_layer,
@@ -466,6 +466,62 @@ fn test_points_report_pad_and_via_probes() {
     );
     delete_test_point(reopened, "testpoint-1").expect("the pad test point is deleted");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["testPoints"], 0);
+    close(reopened).expect("the board closes");
+}
+
+#[test]
+fn keepouts_reject_copper_on_their_layer() {
+    let directory = TempDir::new();
+    let path = directory.join("keepouts.opcb");
+    let handle = created();
+    add_full_board(handle);
+    let added = add_keepout(
+        handle,
+        AddKeepoutRequest {
+            layer: Some("F.Cu".to_string()),
+            points: vec![[15.0, 5.0], [25.0, 5.0], [25.0, 15.0], [15.0, 15.0]],
+        },
+    )
+    .expect("the keepout is added");
+    assert_eq!(added["object"]["id"], "keepout-1");
+    assert_eq!(added["object"]["layer"], "F.Cu");
+    assert_eq!(added["board"]["counts"]["keepouts"], 1);
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("VCC".to_string()),
+            layer: "B.Cu".to_string(),
+            width: 0.25,
+            from: [10.0, 10.0],
+            to: [30.0, 10.0],
+        },
+    )
+    .expect("the bottom track is placed");
+
+    let flat = add_keepout(handle, AddKeepoutRequest { layer: None, points: vec![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]] })
+        .expect_err("a keepout must enclose an area");
+    assert_eq!(flat.code, "session/argument-invalid");
+    let silk = add_keepout(
+        handle,
+        AddKeepoutRequest { layer: Some("F.SilkS".to_string()), points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]] },
+    )
+    .expect_err("a keepout needs a copper layer");
+    assert_eq!(silk.code, "session/argument-invalid");
+
+    let report = inspect(handle, Some(vec!["keepout".to_string()])).expect("the board is inspected");
+    assert_eq!(report["passed"], false);
+    let issues = report["issues"].as_array().expect("issues are listed");
+    let tracks: Vec<&str> =
+        issues.iter().filter_map(|issue| issue["objectId"].as_str()).filter(|id| id.starts_with("track-")).collect();
+    assert!(tracks.contains(&"track-1"), "the front track enters the keepout; got {tracks:?}");
+    assert!(!tracks.contains(&"track-2"), "a keepout on F.Cu ignores B.Cu copper; got {tracks:?}");
+
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["keepouts"], 1);
+    delete_keepout(reopened, "keepout-1").expect("the keepout is deleted");
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["keepouts"], 0);
     close(reopened).expect("the board closes");
 }
 

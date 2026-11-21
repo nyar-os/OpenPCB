@@ -59,6 +59,7 @@ pub(crate) const CHECKS: &[&str] = &[
     "diffpair",
     "dangling-copper",
     "netclass",
+    "keepout",
 ];
 
 /// Checks this build can actually run.
@@ -82,6 +83,7 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "diffpair",
     "dangling-copper",
     "netclass",
+    "keepout",
 ];
 
 /// Runs the requested checks and returns an `InspectReport`.
@@ -118,6 +120,7 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "diffpair" => diffpair(board, &mut report),
             "dangling-copper" => dangling_copper(board, &mut report),
             "netclass" => netclass(board, &mut report),
+            "keepout" => keepout(board, &mut report),
             other => report.push(finding(
                 "check/unsupported",
                 Severity::Warning,
@@ -414,6 +417,117 @@ fn clearance(board: &Board, issues: &mut CheckReport) {
             }
         }
     }
+}
+
+/// Flags every copper object that enters a declared keepout region.
+///
+/// Tracks, vias, copper pour regions and pads are tested against each keepout
+/// polygon on a matching layer. A keepout on `*` covers every copper layer; one
+/// on a named layer covers only that layer.
+fn keepout(board: &Board, issues: &mut CheckReport) {
+    for region in &board.keepouts {
+        for track in &board.tracks {
+            if board.layer(&track.layer).is_none_or(|layer| layer.kind != LayerKind::Copper) {
+                continue;
+            }
+            if !board.keepout_covers(region, &track.layer) {
+                continue;
+            }
+            if segment_in_polygon(track.from, track.to, &region.points) {
+                issues.push(finding(
+                    "drc/keepout-violation",
+                    Severity::Error,
+                    board,
+                    Some(&track.layer),
+                    Some(&track.id),
+                    format!("track `{}` enters keepout `{}` on {}", track.id, region.id, track.layer),
+                ));
+            }
+        }
+        for via in &board.vias {
+            if region.layer != "*" && !board.via_covers(via, &region.layer) {
+                continue;
+            }
+            if point_in_polygon(via.at, &region.points) {
+                let layer = (region.layer != "*").then_some(region.layer.as_str());
+                issues.push(finding(
+                    "drc/keepout-violation",
+                    Severity::Error,
+                    board,
+                    layer,
+                    Some(&via.id),
+                    format!("via `{}` sits inside keepout `{}`", via.id, region.id),
+                ));
+            }
+        }
+        for zone in &board.zones {
+            if !board.keepout_covers(region, &zone.layer) {
+                continue;
+            }
+            if polygons_overlap(&zone.points, &region.points) {
+                issues.push(finding(
+                    "drc/keepout-violation",
+                    Severity::Error,
+                    board,
+                    Some(&zone.layer),
+                    Some(&zone.id),
+                    format!("zone `{}` overlaps keepout `{}`", zone.id, region.id),
+                ));
+            }
+        }
+        for pad in board.placed_pads() {
+            if !board.keepout_covers(region, pad.layer) {
+                continue;
+            }
+            if point_in_polygon(pad.at, &region.points) {
+                issues.push(finding(
+                    "drc/keepout-violation",
+                    Severity::Error,
+                    board,
+                    Some(pad.layer),
+                    Some(&pad.key),
+                    format!("pad `{}` sits inside keepout `{}`", pad.key, region.id),
+                ));
+            }
+        }
+    }
+}
+
+/// Whether a point falls inside a closed polygon, using the even-odd rule.
+fn point_in_polygon(point: [f64; 2], polygon: &[[f64; 2]]) -> bool {
+    if polygon.len() < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut previous = polygon.len() - 1;
+    for current in 0..polygon.len() {
+        let (a, b) = (polygon[current], polygon[previous]);
+        if (a[1] > point[1]) != (b[1] > point[1]) && point[0] < (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1]) + a[0] {
+            inside = !inside;
+        }
+        previous = current;
+    }
+    inside
+}
+
+/// Whether a segment enters a polygon, including touching an edge.
+fn segment_in_polygon(from: [f64; 2], to: [f64; 2], polygon: &[[f64; 2]]) -> bool {
+    if point_in_polygon(from, polygon) || point_in_polygon(to, polygon) {
+        return true;
+    }
+    polygon_edges(polygon).any(|(start, end)| segment_distance(from, to, start, end) <= 1e-9)
+}
+
+/// Whether two closed polygons share any area or touch.
+fn polygons_overlap(left: &[[f64; 2]], right: &[[f64; 2]]) -> bool {
+    left.iter().any(|point| point_in_polygon(*point, right))
+        || right.iter().any(|point| point_in_polygon(*point, left))
+        || polygon_edges(left).any(|(a, b)| polygon_edges(right).any(|(c, d)| segment_distance(a, b, c, d) <= 1e-9))
+}
+
+/// Iterates the ordered edges of a closed polygon.
+fn polygon_edges(polygon: &[[f64; 2]]) -> impl Iterator<Item = ([f64; 2], [f64; 2])> + '_ {
+    polygon.iter().enumerate().map(move |(index, point)| (*point, polygon[(index + 1) % polygon.len()]))
 }
 
 /// Clearance two nets need, taking the strictest class value.

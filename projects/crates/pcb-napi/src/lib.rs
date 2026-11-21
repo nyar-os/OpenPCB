@@ -253,6 +253,26 @@ fn board_delete_zone(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Adds one copper keepout region to an open board.
+#[function]
+fn board_add_keepout(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::AddKeepoutRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::add_keepout(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Deletes one keepout region from an open board.
+#[function]
+fn board_delete_keepout(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let value = open_pcb_model::delete_keepout(handle, &id).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds linear teardrop copper at every pad-track junction.
 #[function]
 fn board_add_teardrops(ctx: CallContext) -> Result<JsValue> {
@@ -665,6 +685,17 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
             let handle = rpc_handle(value)?;
             let id = rpc_text(value, "id")?;
             open_pcb_model::delete_zone(handle, id)
+        }
+        "board.addKeepout" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::AddKeepoutRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::add_keepout(handle, request)
+        }
+        "board.deleteKeepout" => {
+            let handle = rpc_handle(value)?;
+            let id = rpc_text(value, "id")?;
+            open_pcb_model::delete_keepout(handle, id)
         }
         "board.addNetClass" => {
             let handle = rpc_handle(value)?;
@@ -1107,6 +1138,8 @@ register_module![
     board_set_via_back_drill,
     board_add_zone,
     board_delete_zone,
+    board_add_keepout,
+    board_delete_keepout,
     board_add_net_class,
     board_delete_net_class,
     board_assign_net_class,

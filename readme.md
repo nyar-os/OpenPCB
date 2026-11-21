@@ -28,6 +28,8 @@ SDK and studio shell share one native model:
 - Declare copper pour regions on copper layers as closed polygons; the Gerber
   writer emits each one as a `G36`/`G37` region and the SVG and PDF previews
   draw the pour.
+- Declare copper keepout regions on one copper layer or on `*` for the whole
+  stack; the `keepout` check flags any track, via, pad or pour that enters one.
 - Undo and redo up to 32 snapshots per handle, optionally persisted in
   `<file>.history.json` with `history: 'sidecar'`, with `canUndo`/`canRedo` on
   every summary and edit result.
@@ -40,7 +42,7 @@ SDK and studio shell share one native model:
 - Run DRC, connectivity, clearance, annular ring, stackup, outline, silkscreen,
   courtyard, netlist, `annular-ring`, `track-width`, `unrouted`, `diffpair`,
   `dangling-copper`, `hole-to-hole`, `copper-to-edge`, `edge-clearance`,
-  `silkscreen-over-pad` and `netclass` checks. Waive a finding by code (optionally
+  `silkscreen-over-pad`, `netclass` and `keepout` checks. Waive a finding by code (optionally
   narrowed to one object) and override a code's severity; a waived error no longer
   blocks `passed`, and every waived issue is still reported with its waiver.
 - Declare net classes with optional target width, clearance, via diameter and via
@@ -70,8 +72,8 @@ STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
 through, blind and buried vias, back drilling, linear teardrops, editable design
-rules, solder-mask Gerber layers, copper pour regions, net classes, test point
-reports and waiver/severity policy as supported, micro vias as unsupported, and
+rules, solder-mask Gerber layers, copper pour regions, copper keepouts, net
+classes, test point reports and waiver/severity policy as supported, micro vias as unsupported, and
 both `kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities`
 prints exactly that matrix.
 
@@ -124,6 +126,10 @@ open-pcb layer lock blinker.opcb --id Inner2 --locked true
 # Add a copper pour region and delete it by id
 open-pcb zone add blinker.opcb --layer F.Cu --net VCC --points "5,5 40,5 40,30 5,30"
 open-pcb zone delete blinker.opcb --id zone-1
+
+# Add a copper keepout region and delete it by id
+open-pcb keepout add blinker.opcb --layer F.Cu --points "45,5 60,5 60,20 45,20"
+open-pcb keepout delete blinker.opcb --id keepout-1
 
 # Declare a net class and move nets into it
 open-pcb netclass add blinker.opcb --name Power --width 0.5 --clearance 0.6 --via-diameter 0.8 --via-drill 0.4
@@ -191,6 +197,7 @@ await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
 await board.setViaBackDrill({ id: 'via-1', depth: 0.8, stub: 0.2 });
 await board.setOutline({ from: [0, 0], to: [100, 80] });
 await board.addZone({ layer: 'F.Cu', net: 'VCC', points: [[5, 5], [40, 5], [40, 30], [5, 30]] });
+await board.addKeepout({ layer: 'F.Cu', points: [[45, 5], [60, 5], [60, 20], [45, 20]] });
 await board.addNetClass({ name: 'Power', width: 0.5, clearance: 0.6, viaDiameter: 0.8, viaDrill: 0.4 });
 await board.assignNetClass({ net: 'VCC', class: 'Power' });
 await board.addTestPoint({ target: 'fp-1:1' });
@@ -283,6 +290,9 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   geometry or rotations the document does not hold.
 - The test point report lists only explicitly declared pads and vias. It does not
   infer probes from nets or create panel or fixture geometry.
+- Keepout regions are design intent: the `keepout` check reads them, but they are
+  not written to Gerber, drill data, IPC-2581 or KiCad output, and the router
+  does not yet avoid them.
 - It does not render an interactive board viewport; SVG export is a writer, not
   a viewport.
 - It does not store silkscreen text or shapes. The `silkscreen` check therefore

@@ -21,6 +21,9 @@ Implemented:
 - Declare copper pour regions on copper layers as closed polygons (`zone add`);
   each one is written as a `G36`/`G37` region in its layer's Gerber file and
   drawn by the SVG and PDF previews.
+- Declare copper keepout regions (`keepout add`) on one copper layer or on `*`
+  for the whole stack; the `keepout` check flags tracks, vias, pads and pours
+  that enter one.
 - Read and edit the design rules (`rules show`, `rules set`): drill-hole
   clearance, copper-, component- and hole-to-edge gaps and the solder-mask
   expansion. Values are millimetres; a partial update keeps the other rules.
@@ -44,7 +47,7 @@ Implemented:
 - Checks: `drc`, `connectivity`, `clearance`, `annular_rings`, `annular-ring`,
   `track-width`, `unrouted`, `stackup`, `outline`, `silkscreen`, `courtyard`,
   `netlist`, `hole-to-hole`, `copper-to-edge`, `edge-clearance`,
-  `silkscreen-over-pad`, `diffpair`, `dangling-copper`, `netclass`.
+  `silkscreen-over-pad`, `diffpair`, `dangling-copper`, `netclass`, `keepout`.
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `drill_map`
   (hole map SVG with tool legend and back-drill marks), `bom`, `pos`,
   `placement` (millimetre JSON), `testpoints` (CSV probe report), `svg`, `pdf`,
@@ -63,7 +66,9 @@ carry back drill. The outline is rectangular, so closure and self-intersection
 are guaranteed by construction and `edge-clearance` only measures component and
 drill spacing to the four edges. Teardrops are only generated as linear copper
 tracks; arc teardrops stay unimplemented. The test point report lists only
-explicitly declared pads and vias, never inferred probes. Solder-mask openings are rectangular
+explicitly declared pads and vias, never inferred probes. Keepouts are design
+intent only: the `keepout` check reads them, but they are not written to Gerber,
+drill data, IPC-2581 or KiCad output and the router does not avoid them. Solder-mask openings are rectangular
 and cover outer-layer pads only; vias stay tented, inner-layer pads open no mask,
 and paste layers are not written. All unimplemented targets stay
 `unsupported` in the capability matrix and reject with
@@ -104,6 +109,8 @@ a format, check or target.
 | `open-pcb outline set <file.opcb> --from <x,y> --to <x,y>` | Set the rectangular board outline; width and height must be positive. |
 | `open-pcb zone add <file.opcb> --layer <layer> --net <name> --points <list>` | Add a copper pour region as a closed polygon of at least three `x,y` points separated by spaces or semicolons. The layer must be copper. |
 | `open-pcb zone delete <file.opcb> --id <id>` | Delete a copper pour region by id. |
+| `open-pcb keepout add <file.opcb> [--layer <layer>] --points <list>` | Add a copper keepout polygon; `--layer` defaults to `*` for every copper layer. |
+| `open-pcb keepout delete <file.opcb> --id <id>` | Delete a keepout region by id. |
 | `open-pcb netclass add <file.opcb> --name <name> [--width <mm>] [--clearance <mm>] [--via-diameter <mm>] [--via-drill <mm>]` | Declare a net class with optional routing targets. |
 | `open-pcb netclass assign <file.opcb> --net <name> --class <name-or-id>` | Move one declared net into a class; a net belongs to one class at a time. |
 | `open-pcb netclass delete <file.opcb> --id <id>` | Delete a net class by id. |
@@ -152,7 +159,7 @@ mutating command also records the previous document for CLI undo/redo.
 
 1. `open-pcb list <file>` and record the revision under review.
 2. Run `open-pcb inspect <file> --checks <list>` with
-   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper,netclass`.
+   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper,netclass,keepout`.
 3. Report each finding with its code, layer and object. `passed` is false when
    any non-waived error-severity issue remains; `active` and `waived` count the
    findings after policy is applied. A waived issue stays in `issues` with

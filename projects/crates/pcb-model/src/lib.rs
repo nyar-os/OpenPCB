@@ -37,8 +37,8 @@ mod tests;
 use std::{fs, path::Path};
 
 pub use board::{
-    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest, AddPadRequest,
-    AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
+    AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
+    AddPadRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
     AssignNetClassRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
     SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
 };
@@ -168,6 +168,7 @@ pub fn capabilities() -> Value {
         "drcPolicy": "supported",
         "routing": "supported",
         "zones": "supported",
+        "keepouts": "supported",
         "netClasses": "supported",
         "testPoints": "supported",
     })
@@ -490,6 +491,26 @@ pub fn delete_zone(handle: u64, id: &str) -> Result<Value, ServiceError> {
     let mut deleted = String::new();
     store::mutate(handle, |board| {
         deleted = board.delete_zone(id)?;
+        Ok(())
+    })?;
+    edit_result(handle, None, Some(deleted))
+}
+
+/// Adds one copper keepout region to an open board.
+pub fn add_keepout(handle: u64, request: AddKeepoutRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.add_keepout(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Deletes one keepout region from an open board.
+pub fn delete_keepout(handle: u64, id: &str) -> Result<Value, ServiceError> {
+    let mut deleted = String::new();
+    store::mutate(handle, |board| {
+        deleted = board.delete_keepout(id)?;
         Ok(())
     })?;
     edit_result(handle, None, Some(deleted))

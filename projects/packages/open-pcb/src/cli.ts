@@ -166,7 +166,7 @@ function describeBoard(board: BoardSummary): string {
     const lines = [
         `board ${board.id} "${title}" revision=${board.revision} units=${board.units} layers=${board.layers.length}`
             + ` nets=${counts.nets} footprints=${counts.footprints} tracks=${counts.tracks} vias=${counts.vias}`
-            + ` zones=${counts.zones} diffpairs=${counts.differentialPairs}`,
+            + ` zones=${counts.zones} keepouts=${counts.keepouts} diffpairs=${counts.differentialPairs}`,
     ];
     for (const layer of board.layers) {
         lines.push(`  [${layer.index}] ${layer.id} ${layer.title} (${layer.kind}, ${layer.objects} objects)`);
@@ -693,6 +693,54 @@ zone
         }
         await withBoard(file, async (board) => {
             const result = await board.deleteZone(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const keepout = cli.command('keepout', 'cli.cmd.keepout');
+keepout
+    .command('add', 'cli.cmd.keepout-add')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .option('--points <list>', 'cli.opt.points')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const points = polygon(text(options, 'points'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (points === undefined) {
+            ctx.fail('open-pcb.cli.point-required', {
+                message: '`--points` needs at least three `x,y` points separated by spaces or semicolons',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addKeepout({ layer: text(options, 'layer'), points });
+            ctx.emitResult(result, `added ${result.object?.id ?? 'keepout'}`);
+            return 0;
+        });
+        return 0;
+    });
+
+keepout
+    .command('delete', 'cli.cmd.keepout-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteKeepout(id);
             ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
             return 0;
         });

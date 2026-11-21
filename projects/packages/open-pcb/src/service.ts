@@ -11,6 +11,7 @@ import { nativeBinding } from './native.js';
 import type {
     AddDifferentialPairOptions,
     AddFootprintOptions,
+    AddKeepoutOptions,
     AddTeardropsOptions,
     AddTestPointOptions,
     AddLayerOptions,
@@ -177,6 +178,18 @@ export function addZone(handle: number, options: AddZoneOptions): BoardEditResul
 /** Deletes one copper pour region from an open board. */
 export function deleteZone(handle: number, id: string): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.deleteZone').board_delete_zone(handle, id));
+}
+
+/** Adds one copper keepout region to an open board. */
+export function addKeepout(handle: number, options: AddKeepoutOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.addKeepout').board_add_keepout(handle, JSON.stringify(options)),
+    );
+}
+
+/** Deletes one keepout region from an open board. */
+export function deleteKeepout(handle: number, id: string): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deleteKeepout').board_delete_keepout(handle, id));
 }
 
 /** Declares one net class on an open board. */
