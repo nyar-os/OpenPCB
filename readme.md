@@ -30,8 +30,9 @@ SDK and studio shell share one native model:
 - Run DRC, connectivity, clearance, annular ring, stackup, outline, silkscreen,
   courtyard, netlist, `annular-ring`, `track-width` and `unrouted` checks.
 - Import a KiCad PCB file into the native document: copper layers, nets,
-  footprints and pads, tracks, through vias and a rectangular `Edge.Cuts`
-  outline, with a stable loss ledger for everything the document cannot hold.
+  footprints and pads, tracks, through, blind and buried vias and a rectangular
+  `Edge.Cuts` outline, with a stable loss ledger for everything the document
+  cannot hold. Micro vias stay in that ledger instead of being approximated.
 - Write Gerber RS-274X, Excellon drill, BOM, pick-and-place, SVG, vector PDF,
   8-bit RGB PNG, KiCad PCB and IPC-2581 files atomically. Gerber writes one
   file per copper layer plus `F_SilkS` and `Edge_Cuts`; one Excellon file lists
@@ -178,8 +179,8 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
 ## What it does NOT do
 
 - It does not import STEP or IPC-2581 files. KiCad PCB import maps copper
-  layers, nets, footprints and pads, tracks, through vias and a rectangular
-  outline only; zones, dimensions, text, arcs, polygons, blind or buried vias,
+  layers, nets, footprints and pads, tracks, through, blind and buried vias and
+  a rectangular outline; zones, dimensions, text, arcs, polygons, micro vias,
   footprint graphics and non-rectangular outlines are reported in the import
   loss ledger instead of being approximated.
 - It does not export STEP. PNG export is a fixed 1024x768 top-down raster; it

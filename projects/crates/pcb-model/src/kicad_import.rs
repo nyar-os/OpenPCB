@@ -99,6 +99,8 @@ pub(crate) fn parse(source: &str, id: String) -> Result<Imported, ServiceError> 
         board.layers = layers;
     }
     let layer_ids: BTreeSet<String> = board.layers.iter().map(|layer| layer.id.clone()).collect();
+    let copper_order: Vec<String> =
+        board.layers.iter().filter(|layer| layer.kind == LayerKind::Copper).map(|layer| layer.id.clone()).collect();
 
     let mut net_map = BTreeMap::new();
     for entry in items.iter().filter(|item| tag(item) == Some("net")) {
@@ -162,7 +164,7 @@ pub(crate) fn parse(source: &str, id: String) -> Result<Imported, ServiceError> 
                 }
             }
             "via" => {
-                if let Some(via) = via(item, &layer_ids, &net_map, &mut losses) {
+                if let Some(via) = via(item, &copper_order, &net_map, &mut losses) {
                     vias.push(via);
                 }
             }
@@ -511,8 +513,12 @@ fn track(node: &Node, layers: &BTreeSet<String>, nets: &BTreeMap<u32, String>, l
     Some(Track { id: String::new(), net, layer, width, from, to })
 }
 
-/// Parses one through via; blind, buried and micro vias are refused.
-fn via(node: &Node, layers: &BTreeSet<String>, nets: &BTreeMap<u32, String>, losses: &mut Vec<Loss>) -> Option<Via> {
+/// Parses one through, blind or buried via; micro and unknown types are refused.
+///
+/// The layer pair is read from `(layers ...)`: exactly two distinct copper
+/// layers are required, and they are reordered by stack position. An outer pair
+/// imports as a through via, any other pair keeps its endpoint ids.
+fn via(node: &Node, copper: &[String], nets: &BTreeMap<u32, String>, losses: &mut Vec<Loss>) -> Option<Via> {
     let values = body(node)?;
     let Some(at) = child(values, "at").and_then(point2)
     else {
@@ -526,16 +532,34 @@ fn via(node: &Node, layers: &BTreeSet<String>, nets: &BTreeMap<u32, String>, los
         return None;
     }
     if let Some(kind) = child(values, "type").and_then(|node| body(node)?.first()).and_then(text)
-        && kind != "through"
+        && !matches!(kind, "through" | "blind" | "buried")
     {
-        loss(losses, "kicad/via-type", format!("via type `{kind}` is not stored; only through vias are imported"));
+        loss(
+            losses,
+            "kicad/via-type",
+            format!("via type `{kind}` is not stored; only through, blind and buried vias are imported"),
+        );
         return None;
     }
-    let span: BTreeSet<String> = child(values, "layers").map(text_values).unwrap_or_default().into_iter().collect();
-    if !span.contains("F.Cu") || !span.contains("B.Cu") || !layers.contains("F.Cu") || !layers.contains("B.Cu") {
-        loss(losses, "kicad/via-layer-span", "a via does not span F.Cu to B.Cu and is skipped".to_string());
+    let mut span: Vec<String> = Vec::new();
+    for layer in child(values, "layers").map(text_values).unwrap_or_default() {
+        if !span.contains(&layer) {
+            span.push(layer);
+        }
+    }
+    if span.len() != 2 {
+        loss(losses, "kicad/via-layer-span", "a via must name exactly two distinct copper layers".to_string());
         return None;
     }
+    let (Some(first), Some(second)) =
+        (copper.iter().position(|id| id == &span[0]), copper.iter().position(|id| id == &span[1]))
+    else {
+        loss(losses, "kicad/via-layer-span", "a via names a layer that is not imported copper".to_string());
+        return None;
+    };
+    let (low, high) = if first < second { (first, second) } else { (second, first) };
+    let (from, to) = (copper[low].clone(), copper[high].clone());
+    let (from_layer, to_layer) = if from == "F.Cu" && to == "B.Cu" { (None, None) } else { (Some(from), Some(to)) };
     let net = match child(values, "net").and_then(net_number) {
         None | Some(0) => None,
         Some(number) => match nets.get(&number) {
@@ -546,7 +570,7 @@ fn via(node: &Node, layers: &BTreeSet<String>, nets: &BTreeMap<u32, String>, los
             }
         },
     };
-    Some(Via { id: String::new(), net, at, diameter, drill, from_layer: None, to_layer: None })
+    Some(Via { id: String::new(), net, at, diameter, drill, from_layer, to_layer })
 }
 
 /// Edge.Cuts geometry collected before the outline is decided.

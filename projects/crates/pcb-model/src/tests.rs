@@ -2063,6 +2063,92 @@ fn exports_write_one_gerber_per_copper_layer_and_keep_every_hole() {
 }
 
 #[test]
+fn kicad_import_round_trips_blind_and_buried_vias() {
+    let directory = TempDir::new();
+    let source = directory.join("spans.kicad_pcb");
+    let handle = created();
+    inner_layers(handle, &["In1.Cu", "In2.Cu"]);
+    for (at, from, to) in
+        [([1.0, 1.0], None, None), ([2.0, 2.0], Some("F.Cu"), Some("In1.Cu")), ([3.0, 3.0], Some("In1.Cu"), Some("In2.Cu"))]
+    {
+        add_via(
+            handle,
+            AddViaRequest {
+                at,
+                diameter: 0.6,
+                drill: 0.3,
+                from_layer: from.map(str::to_string),
+                to_layer: to.map(str::to_string),
+                ..Default::default()
+            },
+        )
+        .expect("the via is placed");
+    }
+    export(handle, "kicad_pcb", &source).expect("KiCad export writes");
+    let text = fs::read_to_string(&source).expect("the KiCad board is readable");
+    assert!(text.contains("(layers \"F.Cu\" \"In1.Cu\")"), "the blind span is written: {text}");
+    assert!(text.contains("(layers \"In1.Cu\" \"In2.Cu\")"), "the buried span is written: {text}");
+
+    let imported = import(&source).expect("the exported board imports");
+    assert!(imported["losses"].as_array().expect("losses is an array").is_empty(), "the round trip loses nothing");
+    assert_eq!(imported["document"]["counts"]["vias"], 3);
+    let imported_handle = handle_of(&imported);
+    let spans = store::read(imported_handle, |board| {
+        board.vias.iter().map(|via| (via.from_layer.clone(), via.to_layer.clone())).collect::<Vec<_>>()
+    })
+    .expect("the imported board is readable");
+    assert_eq!(
+        spans,
+        [
+            (None, None),
+            (Some("F.Cu".to_string()), Some("In1.Cu".to_string())),
+            (Some("In1.Cu".to_string()), Some("In2.Cu".to_string())),
+        ]
+    );
+    let kinds =
+        store::read(imported_handle, |board| board.vias.iter().map(|via| board.via_kind(via).to_string()).collect::<Vec<_>>())
+            .expect("the imported board is readable");
+    assert_eq!(kinds, ["through", "blind", "buried"]);
+    close(imported_handle).expect("the imported board closes");
+    close(handle).expect("the source board closes");
+}
+
+#[test]
+fn kicad_import_refuses_micro_and_malformed_via_spans() {
+    let directory = TempDir::new();
+    let path = directory.join("via-types.kicad_pcb");
+    let text = "(kicad_pcb (version 20221018) (generator open-pcb)\n\
+        (layers (0 \"F.Cu\" signal) (1 \"In1.Cu\" signal) (31 \"B.Cu\" signal))\n\
+        (net 0 \"\")\n\
+        (via (at 1 1) (size 0.6) (drill 0.3) (layers \"F.Cu\" \"B.Cu\") (type micro))\n\
+        (via (at 2 2) (size 0.6) (drill 0.3) (layers \"F.Cu\" \"B.Cu\") (type foo))\n\
+        (via (at 3 3) (size 0.6) (drill 0.3) (layers \"F.Cu\" \"B.Cu\") (type through))\n\
+        (via (at 4 4) (size 0.6) (drill 0.3) (layers \"F.Cu\" \"In1.Cu\") (type blind))\n\
+        (via (at 5 5) (size 0.6) (drill 0.3) (layers \"In1.Cu\" \"B.Cu\") (type blind))\n\
+        (via (at 6 6) (size 0.6) (drill 0.3) (layers \"F.Cu\")))\n";
+    fs::write(&path, text).expect("the fixture is written");
+    let imported = import(&path).expect("the annotated board imports");
+    assert_eq!(imported["document"]["counts"]["vias"], 3, "only the valid spans are imported");
+    let codes: Vec<&str> =
+        imported["lossCodes"].as_array().expect("codes are listed").iter().filter_map(Value::as_str).collect();
+    assert_eq!(codes, ["kicad/via-type", "kicad/via-layer-span"]);
+    let imported_handle = handle_of(&imported);
+    let spans = store::read(imported_handle, |board| {
+        board.vias.iter().map(|via| (via.from_layer.clone(), via.to_layer.clone())).collect::<Vec<_>>()
+    })
+    .expect("the imported board is readable");
+    assert_eq!(
+        spans,
+        [
+            (None, None),
+            (Some("F.Cu".to_string()), Some("In1.Cu".to_string())),
+            (Some("In1.Cu".to_string()), Some("B.Cu".to_string())),
+        ]
+    );
+    close(imported_handle).expect("the imported board closes");
+}
+
+#[test]
 fn kicad_import_refuses_a_non_rectangular_outline() {
     let directory = TempDir::new();
     let path = directory.join("triangle.kicad_pcb");
