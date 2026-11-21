@@ -22,6 +22,7 @@
 #![deny(missing_docs)]
 
 mod board;
+mod copper;
 mod export;
 mod impedance;
 mod inspect;
@@ -203,6 +204,7 @@ pub fn capabilities() -> Value {
         "keepouts": "supported",
         "viaStitching": "supported",
         "slots": "supported",
+        "copperBalance": "supported",
         "netClasses": "supported",
         "testPoints": "supported",
         "stackup": "supported",
@@ -804,6 +806,15 @@ pub fn delete_severity(handle: u64, code: &str) -> Result<Value, ServiceError> {
     edit_result(handle, Some(removed), None)
 }
 
+/// Reports copper area per layer and the coverage imbalance across them.
+///
+/// Feature areas are summed, so overlapping copper is counted once per feature.
+/// `boardArea` and the coverage fields are present only when the board has a
+/// rectangular outline.
+pub fn copper_balance(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, copper::report)
+}
+
 /// Lists one open board as a summary.
 pub fn list_board(handle: u64) -> Result<Value, ServiceError> {
     store::summary_of(handle)
@@ -827,7 +838,7 @@ fn edit_result(handle: u64, object: Option<Value>, deleted: Option<String>) -> R
 }
 
 /// Rounds a computed value for a readable API report without a negative zero.
-fn round6(value: f64) -> f64 {
+pub(crate) fn round6(value: f64) -> f64 {
     if !value.is_finite() {
         return 0.0;
     }

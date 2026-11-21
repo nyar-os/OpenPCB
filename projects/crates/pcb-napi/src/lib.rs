@@ -541,6 +541,14 @@ fn stackup_width(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Reports copper area per layer and the coverage imbalance across them.
+#[function]
+fn board_copper_balance(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::copper_balance(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Lists one open board as a summary.
 #[function]
 fn board_list(ctx: CallContext) -> Result<JsValue> {
@@ -921,6 +929,10 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
                 serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
             open_pcb_model::set_stackup(handle, request)
         }
+        "board.copperBalance" => {
+            let handle = rpc_handle(value)?;
+            open_pcb_model::copper_balance(handle)
+        }
         "board.list" => {
             let handle = rpc_handle(value)?;
             let summary = open_pcb_model::list_board(handle)?;
@@ -1255,6 +1267,7 @@ register_module![
     board_set_stackup,
     stackup_impedance,
     stackup_width,
+    board_copper_balance,
     board_list,
     open_gui,
     pump_events,

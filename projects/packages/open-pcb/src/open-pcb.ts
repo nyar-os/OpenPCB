@@ -36,6 +36,7 @@ import type {
     BoardImportResult,
     BoardInput,
     BoardSummary,
+    CopperBalanceReport,
     ExportOptions,
     ExportReport,
     ImpedanceOptions,
@@ -545,6 +546,10 @@ function attach(
         async impedanceWidth(options: ImpedanceWidthOptions): Promise<ImpedanceWidthReport> {
             ensure();
             return service.impedanceWidth(handle, options);
+        },
+        async copperBalance(): Promise<CopperBalanceReport> {
+            ensure();
+            return service.copperBalance(handle);
         },
         async addWaiver(options: AddWaiverOptions): Promise<BoardEditResult> {
             ensure();

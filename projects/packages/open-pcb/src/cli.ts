@@ -1324,6 +1324,29 @@ rules
         return 0;
     });
 
+const copper = cli.command('copper', 'cli.cmd.copper');
+copper.command('balance', 'cli.cmd.copper-balance').actionCtx(async (options, _args, ctx) => {
+    const file = input(options);
+    if (file === undefined) {
+        ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+        return 2;
+    }
+    await withBoard(file, async (board) => {
+        const report = await board.copperBalance();
+        const layers = report.layers
+            .map((layer) =>
+                layer.coveragePercent === null
+                    ? `${layer.layer}=${layer.area}mm2`
+                    : `${layer.layer}=${layer.area}mm2 (${layer.coveragePercent}%)`,
+            )
+            .join(' ');
+        const imbalance = report.imbalancePercent === null ? 'n/a' : `${report.imbalancePercent}%`;
+        ctx.emitResult(report, `${layers} total=${report.totalArea}mm2 imbalance=${imbalance}`);
+        return 0;
+    });
+    return 0;
+});
+
 const waiver = cli.command('waiver', 'cli.cmd.waiver');
 waiver
     .command('add', 'cli.cmd.waiver-add')

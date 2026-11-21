@@ -2075,7 +2075,7 @@ fn default_color(kind: LayerKind) -> &'static str {
 }
 
 /// Signed area of a polygon in board units, using the shoelace formula.
-fn polygon_area(points: &[[f64; 2]]) -> f64 {
+pub(crate) fn polygon_area(points: &[[f64; 2]]) -> f64 {
     let mut sum = 0.0;
     for (index, point) in points.iter().enumerate() {
         let next = points[(index + 1) % points.len()];

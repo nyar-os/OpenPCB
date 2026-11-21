@@ -174,6 +174,33 @@ export interface ImpedanceWidthReport {
     readonly dielectricConstant: number;
 }
 
+/** Copper area of one copper layer, in square millimetres. */
+export interface CopperBalanceLayer {
+    readonly layer: LayerId;
+    /** Total feature area; overlapping copper is counted once per feature. */
+    readonly area: number;
+    readonly tracks: number;
+    readonly vias: number;
+    readonly pads: number;
+    readonly zones: number;
+    /** Area divided by the rectangular board area; `null` without an outline. */
+    readonly coveragePercent: number | null;
+}
+
+/** Result of `board.copperBalance()`. Areas are in square millimetres. */
+export interface CopperBalanceReport {
+    readonly revision: number;
+    readonly units: 'mm2';
+    /** Rectangular board area; `null` without an outline. */
+    readonly boardArea: number | null;
+    readonly totalArea: number;
+    readonly layers: readonly CopperBalanceLayer[];
+    readonly minCoveragePercent: number | null;
+    readonly maxCoveragePercent: number | null;
+    /** Difference between the highest and lowest layer coverage, in percentage points. */
+    readonly imbalancePercent: number | null;
+}
+
 /** Render targets declared for preview surfaces. */
 export type RenderFormat = 'svg' | 'png' | 'pdf';
 
@@ -243,6 +270,8 @@ export interface BoardCapabilities {
     readonly viaStitching: SupportLevel;
     /** Whether plated routed slots can be declared and written to drill data. */
     readonly slots: SupportLevel;
+    /** Whether a copper area and balance report can be produced. */
+    readonly copperBalance: SupportLevel;
     /** Whether net classes with clearance and width targets are available. */
     readonly netClasses: SupportLevel;
     /** Whether declared test points can be reported. */
@@ -817,6 +846,7 @@ export interface Board {
     setStackup(options: SetStackupOptions): Promise<BoardEditResult>;
     impedance(options: ImpedanceOptions): Promise<ImpedanceReport>;
     impedanceWidth(options: ImpedanceWidthOptions): Promise<ImpedanceWidthReport>;
+    copperBalance(): Promise<CopperBalanceReport>;
     addWaiver(options: AddWaiverOptions): Promise<BoardEditResult>;
     deleteWaiver(id: ObjectId): Promise<BoardEditResult>;
     setSeverity(options: SetSeverityOptions): Promise<BoardEditResult>;

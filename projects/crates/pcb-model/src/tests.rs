@@ -20,9 +20,9 @@ use crate::{
     add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_track, add_via,
     add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
-    capabilities, close, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class, delete_severity,
-    delete_slot, delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import, inspect,
-    move_footprint, open, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill,
+    capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
+    delete_severity, delete_slot, delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import,
+    inspect, move_footprint, open, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill,
     stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_layer,
 };
 
@@ -223,6 +223,7 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["keepouts"], "supported");
     assert_eq!(matrix["viaStitching"], "supported");
     assert_eq!(matrix["slots"], "supported");
+    assert_eq!(matrix["copperBalance"], "supported");
     assert_eq!(matrix["netClasses"], "supported");
     assert_eq!(matrix["testPoints"], "supported");
     assert_eq!(matrix["stackup"], "supported");
@@ -447,6 +448,60 @@ fn via_in_pad_flags_a_via_whose_centre_lands_inside_a_pad() {
     let clean = inspect(handle, Some(vec!["via-in-pad".to_string()])).expect("the check runs again");
     assert_eq!(codes(&clean), ["via-in-pad/via-in-pad"], "only the on-pad via is flagged");
     assert_eq!(clean["issues"].as_array().expect("issues is an array").len(), 1);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn copper_balance_sums_layers_and_reports_coverage_imbalance() {
+    let handle = created();
+    add_full_board(handle);
+    add_zone(
+        handle,
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: Some("VCC".to_string()),
+            points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+        },
+    )
+    .expect("the pour is added");
+
+    let report = copper_balance(handle).expect("the report is built");
+    assert_eq!(report["revision"], 7);
+    assert_eq!(report["units"], "mm2");
+    assert_eq!(report["boardArea"], 8000.0);
+    let layers = report["layers"].as_array().expect("layers is an array");
+    assert_eq!(layers.len(), 2, "only copper layers are reported");
+    assert_eq!(layers[0]["layer"], "F.Cu");
+    assert_eq!(layers[1]["layer"], "B.Cu");
+    let front = layers[0]["area"].as_f64().expect("the front area is a number");
+    assert!((front - 105.282743).abs() < 1e-4, "front area is track, via and pour; got {front}");
+    assert_eq!(layers[0]["zones"], 100.0);
+    assert_eq!(layers[0]["tracks"], 5.0);
+    let back = layers[1]["area"].as_f64().expect("the back area is a number");
+    assert!((back - 0.282743).abs() < 1e-4, "back area is the through via; got {back}");
+    assert_eq!(report["imbalancePercent"], 1.3125);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn copper_balance_without_an_outline_reports_areas_without_coverage() {
+    let mut board = crafted();
+    board.tracks.push(Track {
+        id: "track-1".to_string(),
+        net: None,
+        layer: "B.Cu".to_string(),
+        width: 0.5,
+        from: [0.0, 0.0],
+        to: [4.0, 0.0],
+        teardrop: false,
+    });
+    let handle = store::insert(board);
+    let report = copper_balance(handle).expect("the report is built");
+    assert_eq!(report["boardArea"], Value::Null);
+    assert_eq!(report["minCoveragePercent"], Value::Null);
+    assert_eq!(report["imbalancePercent"], Value::Null);
+    assert_eq!(report["totalArea"], 2.0);
+    assert_eq!(report["layers"][1]["area"], 2.0);
     close(handle).expect("the board closes");
 }
 

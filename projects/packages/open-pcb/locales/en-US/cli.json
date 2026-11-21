@@ -63,6 +63,8 @@
             "severity": "Manage per-code severity overrides",
             "severity-set": "Override the severity of one finding code",
             "severity-delete": "Remove the severity override of one finding code",
+            "copper": "Report copper area and layer balance",
+            "copper-balance": "Print copper area per layer and the coverage imbalance",
             "gui": "Open the OpenPCB Studio window on the native board"
         },
         "opt": {

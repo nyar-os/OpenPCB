@@ -27,6 +27,7 @@ import type {
     BoardCreateOptions,
     BoardEditResult,
     BoardSummary,
+    CopperBalanceReport,
     ExportReport,
     ExportTarget,
     ImportReport,
@@ -331,6 +332,11 @@ export function updateLayer(handle: number, options: UpdateLayerOptions): BoardE
 /** Sets the rectangular outline of an open board. */
 export function setOutline(handle: number, options: SetOutlineOptions): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.setOutline').board_set_outline(handle, JSON.stringify(options)));
+}
+
+/** Reports copper area per layer and the coverage imbalance across them. */
+export function copperBalance(handle: number): CopperBalanceReport {
+    return decode<CopperBalanceReport>(() => binding('board.copperBalance').board_copper_balance(handle));
 }
 
 /** Replaces one or more design-rule values on an open board. */
