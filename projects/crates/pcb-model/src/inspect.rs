@@ -60,6 +60,7 @@ pub(crate) const CHECKS: &[&str] = &[
     "dangling-copper",
     "netclass",
     "keepout",
+    "via-in-pad",
 ];
 
 /// Checks this build can actually run.
@@ -84,6 +85,7 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "dangling-copper",
     "netclass",
     "keepout",
+    "via-in-pad",
 ];
 
 /// Runs the requested checks and returns an `InspectReport`.
@@ -121,6 +123,7 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "dangling-copper" => dangling_copper(board, &mut report),
             "netclass" => netclass(board, &mut report),
             "keepout" => keepout(board, &mut report),
+            "via-in-pad" => via_in_pad(board, &mut report),
             other => report.push(finding(
                 "check/unsupported",
                 Severity::Warning,
@@ -489,6 +492,36 @@ fn keepout(board: &Board, issues: &mut CheckReport) {
                     format!("pad `{}` sits inside keepout `{}`", pad.key, region.id),
                 ));
             }
+        }
+    }
+}
+
+/// Checks vias whose centre lands inside a pad they share copper with.
+///
+/// A via-in-pad needs plugging or filling before assembly, so the finding is a
+/// warning rather than an electrical error. The check reports the pad key and
+/// the via id so a review can decide whether the via is intentional. Only vias
+/// that reach the pad's layer are compared.
+fn via_in_pad(board: &Board, issues: &mut CheckReport) {
+    let pads = board.placed_pads();
+    for via in &board.vias {
+        for pad in &pads {
+            if !board.via_covers(via, pad.layer) {
+                continue;
+            }
+            if (via.at[0] - pad.at[0]).abs() > pad.half[0] || (via.at[1] - pad.at[1]).abs() > pad.half[1] {
+                continue;
+            }
+            let mut issue = finding(
+                "via-in-pad/via-in-pad",
+                Severity::Warning,
+                board,
+                Some(pad.layer),
+                Some(&via.id),
+                format!("via `{}` sits inside pad `{}` and needs fill or plugging", via.id, pad.key),
+            );
+            issue = issue.with_detail("pad", pad.key.clone());
+            issues.push(issue);
         }
     }
 }

@@ -179,6 +179,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         "dangling-copper",
         "netclass",
         "keepout",
+        "via-in-pad",
     ] {
         assert_eq!(matrix["checks"][check], "supported", "{check} check");
     }
@@ -405,6 +406,48 @@ fn slots_persist_and_write_excellon_g85_segments() {
     assert_eq!(removed["deleted"], "slot-1");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["slots"], 0);
     close(reopened).expect("the board closes");
+}
+
+#[test]
+fn via_in_pad_flags_a_via_whose_centre_lands_inside_a_pad() {
+    let handle = created();
+    add_full_board(handle);
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("VCC".to_string()),
+        },
+    )
+    .expect("the pad is added");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [30.0, 20.0], diameter: 0.3, drill: 0.15, ..Default::default() },
+    )
+    .expect("the via is placed on the pad");
+
+    let report = inspect(handle, Some(vec!["via-in-pad".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["via-in-pad/via-in-pad"]);
+    assert_eq!(report["issues"][0]["severity"], "warning");
+    assert_eq!(report["issues"][0]["objectId"], "via-2");
+    assert_eq!(report["issues"][0]["pad"], "fp-1:1");
+    assert_eq!(report["issues"][0]["layerId"], "F.Cu");
+    assert_eq!(report["passed"], true, "via-in-pad is a warning");
+
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [10.0, 30.0], diameter: 0.3, drill: 0.15, ..Default::default() },
+    )
+    .expect("the off-pad via is placed");
+    let clean = inspect(handle, Some(vec!["via-in-pad".to_string()])).expect("the check runs again");
+    assert_eq!(codes(&clean), ["via-in-pad/via-in-pad"], "only the on-pad via is flagged");
+    assert_eq!(clean["issues"].as_array().expect("issues is an array").len(), 1);
+    close(handle).expect("the board closes");
 }
 
 #[test]

@@ -80,7 +80,8 @@ export type InspectCheck =
     | 'diffpair'
     | 'dangling-copper'
     | 'netclass'
-    | 'keepout';
+    | 'keepout'
+    | 'via-in-pad';
 
 /** Rectangular board outline in board units. */
 export interface BoardOutline {
