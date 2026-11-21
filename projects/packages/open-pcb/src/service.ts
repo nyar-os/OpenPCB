@@ -38,6 +38,8 @@ import type {
     InspectCheck,
     InspectReport,
     MoveFootprintOptions,
+    OutlineGeometryOptions,
+    OutlineGeometryReport,
     PanelizeOptions,
     PanelizeReport,
     RouteOptions,
@@ -334,6 +336,13 @@ export function updateLayer(handle: number, options: UpdateLayerOptions): BoardE
 /** Sets the rectangular outline of an open board. */
 export function setOutline(handle: number, options: SetOutlineOptions): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.setOutline').board_set_outline(handle, JSON.stringify(options)));
+}
+
+/** Reports the geometry of a polygonal board outline. */
+export function outlineGeometry(handle: number, options: OutlineGeometryOptions): OutlineGeometryReport {
+    return decode<OutlineGeometryReport>(() =>
+        binding('board.outlineGeometry').board_outline_geometry(handle, JSON.stringify(options)),
+    );
 }
 
 /** Reports copper area per layer and the coverage imbalance across them. */

@@ -49,6 +49,8 @@ import type {
     KicadImportResult,
     MoveFootprintOptions,
     OpenPCBOptions,
+    OutlineGeometryOptions,
+    OutlineGeometryReport,
     PanelizeOptions,
     PanelizeReport,
     RouteOptions,
@@ -532,6 +534,10 @@ function attach(
         async setOutline(options: SetOutlineOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.setOutline(current, options));
+        },
+        async outlineGeometry(options: OutlineGeometryOptions = {}): Promise<OutlineGeometryReport> {
+            ensure();
+            return service.outlineGeometry(handle, options);
         },
         async setRules(options: SetRulesOptions): Promise<BoardEditResult> {
             ensure();

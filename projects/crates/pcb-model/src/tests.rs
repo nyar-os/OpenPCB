@@ -15,15 +15,16 @@ use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest,
     AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
-    MoveFootprintRequest, PanelizeRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
-    SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, WidthRequest, add_differential_pair,
-    add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_track,
-    add_via, add_waiver, add_zone, assign_net_class,
+    MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
+    SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, WidthRequest,
+    add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops,
+    add_test_point, add_track, add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
     delete_severity, delete_slot, delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import,
-    inspect, move_footprint, open, panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup,
-    set_via_back_drill, stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_layer,
+    inspect, move_footprint, open, outline_geometry, panelize, redo, route, save, set_outline, set_rules, set_severity,
+    set_stackup, set_via_back_drill, stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint,
+    update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -225,6 +226,7 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["slots"], "supported");
     assert_eq!(matrix["copperBalance"], "supported");
     assert_eq!(matrix["panelization"], "supported");
+    assert_eq!(matrix["polygonOutline"], "supported");
     assert_eq!(matrix["netClasses"], "supported");
     assert_eq!(matrix["testPoints"], "supported");
     assert_eq!(matrix["stackup"], "supported");
@@ -571,6 +573,67 @@ fn panelization_rejects_an_absent_outline_and_invalid_tabs() {
 
     let style = panelize(handle, request(2, 1, Some("castellated"), 2.0)).expect_err("an unknown tab style is rejected");
     assert_eq!(style.code, "session/argument-invalid");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn outline_geometry_measures_a_polygon_and_offsets_it() {
+    let handle = created();
+    let square = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+
+    let report = outline_geometry(handle, OutlineGeometryRequest { points: Some(square.clone()), offset: Some(1.0) })
+        .expect("the polygon is measured");
+    assert_eq!(report["source"], "request");
+    assert_eq!(report["units"], "mm");
+    assert_eq!(report["vertexCount"], 4);
+    assert_eq!(report["orientation"], "counter-clockwise");
+    assert_eq!(report["area"], 100.0);
+    assert_eq!(report["perimeter"], 40.0);
+    assert_eq!(report["offset"]["distance"], 1.0);
+    assert_eq!(report["offset"]["area"], 144.0);
+    assert_eq!(report["offset"]["perimeter"], 48.0);
+    assert_eq!(report["offset"]["points"][0], json!([-1.0, -1.0]));
+    assert_eq!(report["offset"]["points"][2], json!([11.0, 11.0]));
+
+    let inward = outline_geometry(handle, OutlineGeometryRequest { points: Some(square), offset: Some(-1.0) })
+        .expect("the inward offset is measured");
+    assert_eq!(inward["offset"]["area"], 64.0);
+    assert_eq!(inward["offset"]["perimeter"], 32.0);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn outline_geometry_rejects_broken_polygons_and_impossible_offsets() {
+    let handle = created();
+    let missing = outline_geometry(handle, OutlineGeometryRequest { points: None, offset: None })
+        .expect_err("a board without an outline has nothing to measure");
+    assert_eq!(missing.code, "session/argument-invalid");
+
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [10.0, 10.0] }).expect("the outline is set");
+    let stored = outline_geometry(handle, OutlineGeometryRequest { points: None, offset: None })
+        .expect("the stored outline is measured");
+    assert_eq!(stored["source"], "outline");
+    assert_eq!(stored["area"], 100.0);
+    assert_eq!(stored["perimeter"], 40.0);
+
+    let bowtie = vec![[0.0, 0.0], [10.0, 10.0], [10.0, 0.0], [0.0, 10.0]];
+    let crossing = outline_geometry(handle, OutlineGeometryRequest { points: Some(bowtie), offset: None })
+        .expect_err("a self-intersecting polygon is rejected");
+    assert_eq!(crossing.code, "session/argument-invalid");
+
+    let duplicate = outline_geometry(
+        handle,
+        OutlineGeometryRequest { points: Some(vec![[0.0, 0.0], [0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]), offset: None },
+    )
+    .expect_err("a repeated vertex is rejected");
+    assert_eq!(duplicate.code, "session/argument-invalid");
+
+    let collapsed = outline_geometry(
+        handle,
+        OutlineGeometryRequest { points: Some(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]), offset: Some(-6.0) },
+    )
+    .expect_err("an offset past the centre is rejected");
+    assert_eq!(collapsed.code, "session/argument-invalid");
     close(handle).expect("the board closes");
 }
 

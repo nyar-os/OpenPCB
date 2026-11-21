@@ -349,6 +349,8 @@ export interface BoardCapabilities {
     readonly copperBalance: SupportLevel;
     /** Whether a rectangular board can be arrayed into a panel with seams or tabs. */
     readonly panelization: SupportLevel;
+    /** Whether a polygonal board outline can be validated, measured and offset. */
+    readonly polygonOutline: SupportLevel;
     /** Whether net classes with clearance and width targets are available. */
     readonly netClasses: SupportLevel;
     /** Whether declared test points can be reported. */
@@ -833,6 +835,39 @@ export interface SetOutlineOptions {
     readonly to: readonly [number, number];
 }
 
+/** Options of `board.outlineGeometry()`. Polygon vertices are in board units. */
+export interface OutlineGeometryOptions {
+    /** Closed polygon vertices; omitted measures the stored rectangular outline. */
+    readonly points?: ReadonlyArray<readonly [number, number]>;
+    /** Outward offset in board units; negative moves inward. */
+    readonly offset?: number;
+}
+
+/** One offset polygon produced by `board.outlineGeometry()`. Lengths are in millimetres. */
+export interface OutlineOffsetReport {
+    /** Signed offset distance; positive was outward. */
+    readonly distance: number;
+    readonly vertexCount: number;
+    readonly area: number;
+    readonly perimeter: number;
+    readonly points: ReadonlyArray<readonly [number, number]>;
+}
+
+/** Result of `board.outlineGeometry()`. Lengths are in millimetres and areas in square millimetres. */
+export interface OutlineGeometryReport {
+    readonly revision: number;
+    readonly units: 'mm';
+    /** Whether the polygon came from the request or the stored rectangular outline. */
+    readonly source: 'request' | 'outline';
+    readonly vertexCount: number;
+    readonly orientation: 'counter-clockwise' | 'clockwise';
+    readonly area: number;
+    readonly perimeter: number;
+    readonly points: ReadonlyArray<readonly [number, number]>;
+    /** Offset polygon; `null` when no offset was requested. */
+    readonly offset: OutlineOffsetReport | null;
+}
+
 /** Options of `board.setRules()`. At least one value is required. */
 export interface SetRulesOptions {
     readonly holeClearance?: number;
@@ -919,6 +954,7 @@ export interface Board {
     addLayer(options: AddLayerOptions): Promise<BoardEditResult>;
     updateLayer(options: UpdateLayerOptions): Promise<BoardEditResult>;
     setOutline(options: SetOutlineOptions): Promise<BoardEditResult>;
+    outlineGeometry(options?: OutlineGeometryOptions): Promise<OutlineGeometryReport>;
     setRules(options: SetRulesOptions): Promise<BoardEditResult>;
     setStackup(options: SetStackupOptions): Promise<BoardEditResult>;
     impedance(options: ImpedanceOptions): Promise<ImpedanceReport>;

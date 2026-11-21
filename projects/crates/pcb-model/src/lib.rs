@@ -31,6 +31,7 @@ mod ipc2581;
 mod ipc2581_import;
 mod kicad_import;
 mod kicad_pcb;
+mod outline;
 mod panel;
 mod route;
 mod store;
@@ -48,6 +49,7 @@ pub use board::{
     SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
+pub use outline::OutlineGeometryRequest;
 pub use panel::PanelizeRequest;
 use serde_json::{Map, Value, json};
 
@@ -209,6 +211,7 @@ pub fn capabilities() -> Value {
         "slots": "supported",
         "copperBalance": "supported",
         "panelization": "supported",
+        "polygonOutline": "supported",
         "netClasses": "supported",
         "testPoints": "supported",
         "stackup": "supported",
@@ -827,6 +830,17 @@ pub fn copper_balance(handle: u64) -> Result<Value, ServiceError> {
 /// the requested style.
 pub fn panelize(handle: u64, request: PanelizeRequest) -> Result<Value, ServiceError> {
     store::read(handle, |board| panel::report(board, request))?
+}
+
+/// Reports the geometry of a polygonal board outline.
+///
+/// A requested polygon must have at least three distinct vertices, enclose an
+/// area and not self-intersect. The report gives the area and perimeter in
+/// millimetres and, when `offset` is set, the outward or inward offset polygon.
+/// An offset that empties, self-intersects or turns the outline inside out is
+/// rejected. Arc segments are not accepted.
+pub fn outline_geometry(handle: u64, request: OutlineGeometryRequest) -> Result<Value, ServiceError> {
+    store::read(handle, |board| outline::report(board, request))?
 }
 
 /// Lists one open board as a summary.

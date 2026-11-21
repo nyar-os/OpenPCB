@@ -560,6 +560,17 @@ fn board_panelize(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Reports the geometry of a polygonal board outline.
+#[function]
+fn board_outline_geometry(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::OutlineGeometryRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::outline_geometry(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Lists one open board as a summary.
 #[function]
 fn board_list(ctx: CallContext) -> Result<JsValue> {
@@ -1280,6 +1291,7 @@ register_module![
     stackup_width,
     board_copper_balance,
     board_panelize,
+    board_outline_geometry,
     board_list,
     open_gui,
     pump_events,

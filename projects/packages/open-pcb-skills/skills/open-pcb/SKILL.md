@@ -24,6 +24,10 @@ Implemented:
   rows, gaps, an edge rail and a `v-cut`, `mouse-bite` or `none` tab style. The
   report gives the panel outline, every placement, seam lines, tab placeholders
   and the board and panel areas with utilization.
+- Measure a polygonal board outline (`Board.outlineGeometry`): validate at least
+  three distinct vertices with no self-intersection, report area and perimeter in
+  millimetres and offset the polygon outward or inward. An offset that collapses
+  a corner or turns the outline inside out is rejected.
 - Declare copper pour regions on copper layers as closed polygons (`zone add`);
   each one is written as a `G36`/`G37` region in its layer's Gerber file and
   drawn by the SVG and PDF previews.
@@ -84,7 +88,9 @@ stub live in `.opcb` and IPC-2581 and appear as `;Back drill` comments in the
 Excellon file and as dashed rings in the drill map; KiCad PCB exchange does not
 carry back drill. The outline is rectangular, so closure and self-intersection
 are guaranteed by construction and `edge-clearance` only measures component and
-drill spacing to the four edges. Teardrops are only generated as linear copper
+drill spacing to the four edges. A polygon outline can be validated, measured and
+offset with `Board.outlineGeometry`, but the stored outline, previews, exports and
+edge checks stay rectangular and arc segments are not accepted. Teardrops are only generated as linear copper
 tracks; arc teardrops stay unimplemented. The test point report lists only
 explicitly declared pads and vias, never inferred probes. Keepouts are design
 intent only: the `keepout` check reads them, but they are not written to Gerber,
