@@ -44,6 +44,9 @@ Implemented:
   height and permittivity; compute microstrip or stripline single-ended
   impedance (`stackup impedance`) and convert a target impedance to a trace
   width (`stackup width`). Per-request overrides replace the stored values.
+- Build a controlled-impedance trace-width table (`Board.impedanceTable`) for a
+  list of target impedances; each row gives the suggested width and the
+  impedance recomputed from it on the same stackup.
 - Declare net classes (`netclass add`), move nets into them (`netclass assign`)
   and let their optional width, clearance, via diameter and via drill targets
   drive the `netclass` check; `clearance` also uses the strictest class value.
@@ -109,7 +112,8 @@ mask. Solder-paste windows are rectangular and exactly the outer pad size, with
 no paste expansion rule. The stackup is a single copper thickness, dielectric
 height and permittivity, so impedance is single-ended only: no differential,
 coplanar or per-layer stackup, and the IPC-2141 closed forms replace a field
-solver. IPC-D-356 output writes the header, `327` pads, `317`/`307` vias and the
+solver. The impedance table lists single-ended widths only, never differential
+spacing. IPC-D-356 output writes the header, `327` pads, `317`/`307` vias and the
 `999` terminator; it writes no net conductor segment, board-outline or test
 channel records. All unimplemented targets stay
 `unsupported` in the capability matrix and reject with

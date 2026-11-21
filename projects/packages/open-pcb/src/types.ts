@@ -174,6 +174,41 @@ export interface ImpedanceWidthReport {
     readonly dielectricConstant: number;
 }
 
+/** Options of `board.impedanceTable()`. */
+export interface ImpedanceTableOptions {
+    /** Trace geometry; defaults to `microstrip`. */
+    readonly structure?: ImpedanceStructure;
+    /** Target single-ended impedances in ohms; defaults to `[50]`. */
+    readonly targets?: readonly number[];
+    /** Overrides the stored dielectric height. */
+    readonly dielectricHeight?: number;
+    /** Overrides the stored dielectric constant. */
+    readonly dielectricConstant?: number;
+    /** Overrides the stored copper thickness. */
+    readonly copperThickness?: number;
+}
+
+/** One target impedance and the trace width that reaches it. */
+export interface ImpedanceTableRow {
+    readonly targetImpedance: number;
+    /** Suggested trace width, in millimetres. */
+    readonly width: number;
+    /** Impedance recomputed from the suggested width, in ohms. */
+    readonly impedance: number;
+}
+
+/** Result of `board.impedanceTable()`. */
+export interface ImpedanceTableReport {
+    readonly revision: number;
+    readonly units: 'mm';
+    readonly structure: ImpedanceStructure;
+    readonly targets: number;
+    readonly copperThickness: number;
+    readonly dielectricHeight: number;
+    readonly dielectricConstant: number;
+    readonly rows: readonly ImpedanceTableRow[];
+}
+
 /** Copper area of one copper layer, in square millimetres. */
 export interface CopperBalanceLayer {
     readonly layer: LayerId;
@@ -359,6 +394,8 @@ export interface BoardCapabilities {
     readonly stackup: SupportLevel;
     /** Whether microstrip and stripline impedance and width conversion are available. */
     readonly impedance: SupportLevel;
+    /** Whether a target-impedance trace-width table can be produced. */
+    readonly impedanceTable: SupportLevel;
 }
 
 /** Options of `OpenPCB.create()`. */
@@ -959,6 +996,7 @@ export interface Board {
     setStackup(options: SetStackupOptions): Promise<BoardEditResult>;
     impedance(options: ImpedanceOptions): Promise<ImpedanceReport>;
     impedanceWidth(options: ImpedanceWidthOptions): Promise<ImpedanceWidthReport>;
+    impedanceTable(options?: ImpedanceTableOptions): Promise<ImpedanceTableReport>;
     copperBalance(): Promise<CopperBalanceReport>;
     panelize(options: PanelizeOptions): Promise<PanelizeReport>;
     addWaiver(options: AddWaiverOptions): Promise<BoardEditResult>;

@@ -3005,6 +3005,27 @@ pub struct WidthRequest {
     pub copper_thickness: Option<f64>,
 }
 
+/// Request of [`crate::impedance_table`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpedanceTableRequest {
+    /// Trace geometry: `microstrip` (default) or `stripline`.
+    #[serde(default)]
+    pub structure: Option<String>,
+    /// Target single-ended impedances in ohms; defaults to `[50]`.
+    #[serde(default)]
+    pub targets: Option<Vec<f64>>,
+    /// Dielectric thickness in millimetres; defaults to the board stackup.
+    #[serde(default)]
+    pub dielectric_height: Option<f64>,
+    /// Relative permittivity; defaults to the board stackup.
+    #[serde(default)]
+    pub dielectric_constant: Option<f64>,
+    /// Copper foil thickness in millimetres; defaults to the board stackup or 0.035.
+    #[serde(default)]
+    pub copper_thickness: Option<f64>,
+}
+
 /// Request of [`crate::route`].
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]

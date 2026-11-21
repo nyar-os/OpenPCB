@@ -45,8 +45,8 @@ pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest,
     AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest, ImpedanceRequest,
-    MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest,
-    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest, WidthRequest,
+    ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
+    SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 pub use outline::OutlineGeometryRequest;
@@ -216,6 +216,7 @@ pub fn capabilities() -> Value {
         "testPoints": "supported",
         "stackup": "supported",
         "impedance": "supported",
+        "impedanceTable": "supported",
     })
 }
 
@@ -739,6 +740,51 @@ pub fn stackup_width(handle: u64, request: WidthRequest) -> Result<Value, Servic
             "copperThickness": round6(stackup.copper_thickness),
             "dielectricHeight": round6(stackup.dielectric_height),
             "dielectricConstant": round6(stackup.dielectric_constant),
+        }))
+    })?
+}
+
+/// Suggests the trace width for each target impedance on one stackup.
+///
+/// The table uses the same closed form as [`stackup_width`], then recomputes the
+/// impedance of the suggested width so the row can be verified. Targets default
+/// to `[50]`; up to 64 are accepted and each must be reachable.
+pub fn impedance_table(handle: u64, request: ImpedanceTableRequest) -> Result<Value, ServiceError> {
+    store::read(handle, |board| {
+        let structure = impedance::Structure::parse(request.structure.as_deref())?;
+        let stackup =
+            board.resolved_stackup(request.copper_thickness, request.dielectric_height, request.dielectric_constant)?;
+        let targets = request.targets.unwrap_or_else(|| vec![50.0]);
+        if targets.is_empty() {
+            return Err(argument("`targets` must list at least one impedance"));
+        }
+        if targets.len() > 64 {
+            return Err(argument("`targets` accepts at most 64 impedances"));
+        }
+        for target in &targets {
+            if !target.is_finite() || *target <= 0.0 {
+                return Err(argument("`targets` must list positive, finite impedances"));
+            }
+        }
+        let mut rows = Vec::with_capacity(targets.len());
+        for target in targets {
+            let width = impedance::width(structure, target, stackup)?;
+            let achieved = impedance::impedance(structure, width, stackup)?;
+            rows.push(json!({
+                "targetImpedance": round6(target),
+                "width": round6(width),
+                "impedance": round6(achieved),
+            }));
+        }
+        Ok(json!({
+            "revision": board.revision,
+            "units": "mm",
+            "structure": structure.name(),
+            "targets": rows.len(),
+            "copperThickness": round6(stackup.copper_thickness),
+            "dielectricHeight": round6(stackup.dielectric_height),
+            "dielectricConstant": round6(stackup.dielectric_constant),
+            "rows": rows,
         }))
     })?
 }

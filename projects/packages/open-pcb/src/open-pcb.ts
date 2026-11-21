@@ -41,6 +41,8 @@ import type {
     ExportReport,
     ImpedanceOptions,
     ImpedanceReport,
+    ImpedanceTableOptions,
+    ImpedanceTableReport,
     ImpedanceWidthOptions,
     ImpedanceWidthReport,
     InspectOptions,
@@ -554,6 +556,10 @@ function attach(
         async impedanceWidth(options: ImpedanceWidthOptions): Promise<ImpedanceWidthReport> {
             ensure();
             return service.impedanceWidth(handle, options);
+        },
+        async impedanceTable(options: ImpedanceTableOptions = {}): Promise<ImpedanceTableReport> {
+            ensure();
+            return service.impedanceTable(handle, options);
         },
         async copperBalance(): Promise<CopperBalanceReport> {
             ensure();

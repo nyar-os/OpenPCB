@@ -33,6 +33,8 @@ import type {
     ImportReport,
     ImpedanceOptions,
     ImpedanceReport,
+    ImpedanceTableOptions,
+    ImpedanceTableReport,
     ImpedanceWidthOptions,
     ImpedanceWidthReport,
     InspectCheck,
@@ -376,6 +378,13 @@ export function impedance(handle: number, options: ImpedanceOptions): ImpedanceR
 export function impedanceWidth(handle: number, options: ImpedanceWidthOptions): ImpedanceWidthReport {
     return decode<ImpedanceWidthReport>(() =>
         binding('board.impedanceWidth').stackup_width(handle, JSON.stringify(options)),
+    );
+}
+
+/** Suggests the trace width for each target impedance on one stackup. */
+export function impedanceTable(handle: number, options: ImpedanceTableOptions = {}): ImpedanceTableReport {
+    return decode<ImpedanceTableReport>(() =>
+        binding('board.impedanceTable').stackup_impedance_table(handle, JSON.stringify(options)),
     );
 }
 

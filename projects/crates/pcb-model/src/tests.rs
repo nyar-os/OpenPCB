@@ -15,16 +15,16 @@ use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest,
     AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
-    MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
-    SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, WidthRequest,
-    add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops,
-    add_test_point, add_track, add_via, add_waiver, add_zone, assign_net_class,
+    ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, SetOutlineRequest,
+    SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
+    WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot,
+    add_teardrops, add_test_point, add_track, add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
-    delete_severity, delete_slot, delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import,
-    inspect, move_footprint, open, outline_geometry, panelize, redo, route, save, set_outline, set_rules, set_severity,
-    set_stackup, set_via_back_drill, stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint,
-    update_layer,
+    delete_severity, delete_slot, delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export,
+    impedance_table, import, inspect, move_footprint, open, outline_geometry, panelize, redo, route, save, set_outline,
+    set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance, stackup_width, stitch_vias, store, summary,
+    undo, update_footprint, update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -231,6 +231,7 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["testPoints"], "supported");
     assert_eq!(matrix["stackup"], "supported");
     assert_eq!(matrix["impedance"], "supported");
+    assert_eq!(matrix["impedanceTable"], "supported");
 }
 
 #[test]
@@ -1134,6 +1135,77 @@ fn stackup_drives_impedance_and_width_conversion() {
     .expect_err("an unknown structure is rejected");
     assert_eq!(invalid.code, "session/argument-invalid");
     close(bare).expect("the bare board closes");
+}
+
+#[test]
+fn impedance_table_suggests_widths_for_each_target() {
+    let handle = created();
+    set_stackup(handle, SetStackupRequest { copper_thickness: 0.035, dielectric_height: 0.2, dielectric_constant: 4.2 })
+        .expect("the stackup is declared");
+
+    let report = impedance_table(
+        handle,
+        ImpedanceTableRequest {
+            structure: Some("microstrip".to_string()),
+            targets: Some(vec![50.0, 75.0]),
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("the table is produced");
+    assert_eq!(report["revision"], 2);
+    assert_eq!(report["units"], "mm");
+    assert_eq!(report["structure"], "microstrip");
+    assert_eq!(report["targets"], 2);
+    let rows = report["rows"].as_array().expect("rows is an array");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["targetImpedance"], 50.0);
+    let wide = rows[0]["width"].as_f64().expect("the first width is a number");
+    let narrow = rows[1]["width"].as_f64().expect("the second width is a number");
+    assert!(wide > narrow, "a lower target impedance needs a wider trace");
+    for row in rows {
+        let target = row["targetImpedance"].as_f64().expect("a target");
+        let achieved = row["impedance"].as_f64().expect("an achieved impedance");
+        assert!((achieved - target).abs() < 0.01, "the suggested width reaches {target} ohm: {achieved}");
+    }
+
+    let default = impedance_table(
+        handle,
+        ImpedanceTableRequest {
+            structure: None,
+            targets: None,
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("the default target is reported");
+    assert_eq!(default["targets"], 1);
+    assert_eq!(default["rows"][0]["targetImpedance"], 50.0);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn impedance_table_rejects_empty_and_unreachable_targets() {
+    let handle = created();
+    let request = |targets: Option<Vec<f64>>| ImpedanceTableRequest {
+        structure: None,
+        targets,
+        dielectric_height: Some(0.2),
+        dielectric_constant: Some(4.2),
+        copper_thickness: None,
+    };
+
+    let empty = impedance_table(handle, request(Some(Vec::new()))).expect_err("an empty target list is rejected");
+    assert_eq!(empty.code, "session/argument-invalid");
+
+    let unreachable = impedance_table(handle, request(Some(vec![1000.0]))).expect_err("an unreachable target is rejected");
+    assert_eq!(unreachable.code, "session/argument-invalid");
+
+    let negative = impedance_table(handle, request(Some(vec![-50.0]))).expect_err("a negative target is rejected");
+    assert_eq!(negative.code, "session/argument-invalid");
+    close(handle).expect("the board closes");
 }
 
 #[test]

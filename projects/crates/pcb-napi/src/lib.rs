@@ -541,6 +541,17 @@ fn stackup_width(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Suggests the trace width for each target impedance on one stackup.
+#[function]
+fn stackup_impedance_table(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::ImpedanceTableRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::impedance_table(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Reports copper area per layer and the coverage imbalance across them.
 #[function]
 fn board_copper_balance(ctx: CallContext) -> Result<JsValue> {
@@ -1289,6 +1300,7 @@ register_module![
     board_set_stackup,
     stackup_impedance,
     stackup_width,
+    stackup_impedance_table,
     board_copper_balance,
     board_panelize,
     board_outline_geometry,
