@@ -199,7 +199,7 @@ cli
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         if (file === undefined) {
-            ctx.fail('open-pcb.cli.file-required', { message: 'a KiCad PCB file is required' });
+            ctx.fail('open-pcb.cli.file-required', { message: 'a KiCad PCB or IPC-2581 file is required' });
             return 2;
         }
         const out = text(options, 'out');
@@ -207,7 +207,7 @@ cli
             ctx.fail('open-pcb.cli.out-required', { message: '`--out <file>` is required' });
             return 2;
         }
-        const imported = await app.importKicadPcb({
+        const imported = await app.importBoard({
             path: file,
             target: out,
             overwrite: flag(options, 'overwrite'),
@@ -220,11 +220,12 @@ cli
             ctx.emitResult(
                 {
                     ...saved,
+                    format: imported.format,
                     document,
                     losses: imported.losses,
                     lossCodes: imported.lossCodes,
                 },
-                `imported ${file} to ${out} revision=${revision}`
+                `imported ${imported.format} ${file} to ${out} revision=${revision}`
                     + ` nets=${counts.nets} footprints=${counts.footprints} tracks=${counts.tracks} vias=${counts.vias}`
                     + ` losses=${imported.losses.length}`,
             );

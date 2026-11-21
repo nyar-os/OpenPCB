@@ -3,6 +3,11 @@
 //! The document is built from board geometry only. Package definitions come
 //! from placed footprints, components carry their reference, part, value,
 //! layer, position and rotation, and copper features are grouped per layer.
+//!
+//! Features also carry the copper attributes the native model holds (`net` on
+//! pads and lines, `padDiameter`, `fromLayer` and `toLayer` on holes), so
+//! [`crate::ipc2581_import`] restores nets and via spans when the file is read
+//! back.
 
 use std::fmt::Write as _;
 
@@ -112,13 +117,14 @@ fn layer_feature(out: &mut String, board: &Board, layer: &str, kind: LayerKind, 
         return;
     }
 
-    let _ = writeln!(out, "        <LayerFeature layerRef=\"{}\">", escape(layer));
+    let _ = writeln!(out, "        <LayerFeature layerRef=\"{}\" kind=\"{}\">", escape(layer), kind_name(kind));
     out.push_str("          <Set>\n");
     for (footprint, pad) in pads {
         let center = pad_center(footprint, pad);
+        let net = pad.net.as_deref().map(|net| format!(" net=\"{}\"", escape(net))).unwrap_or_default();
         let _ = writeln!(
             out,
-            "            <Pad pinRef=\"{}.{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/>",
+            "            <Pad pinRef=\"{}.{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{net}/>",
             escape(&footprint.ref_),
             escape(&pad.number),
             number(center[0] * scale),
@@ -128,9 +134,10 @@ fn layer_feature(out: &mut String, board: &Board, layer: &str, kind: LayerKind, 
         );
     }
     for track in tracks {
+        let net = track.net.as_deref().map(|net| format!(" net=\"{}\"", escape(net))).unwrap_or_default();
         let _ = writeln!(
             out,
-            "            <Line startX=\"{}\" startY=\"{}\" endX=\"{}\" endY=\"{}\" width=\"{}\"/>",
+            "            <Line startX=\"{}\" startY=\"{}\" endX=\"{}\" endY=\"{}\" width=\"{}\"{net}/>",
             number(track.from[0] * scale),
             number(track.from[1] * scale),
             number(track.to[0] * scale),
@@ -141,12 +148,20 @@ fn layer_feature(out: &mut String, board: &Board, layer: &str, kind: LayerKind, 
     out.push_str("          </Set>\n");
     if holes {
         for via in &board.vias {
+            let net = via.net.as_deref().map(|net| format!(" net=\"{}\"", escape(net))).unwrap_or_default();
+            let span = match (&via.from_layer, &via.to_layer) {
+                (Some(from), Some(to)) => {
+                    format!(" fromLayer=\"{}\" toLayer=\"{}\"", escape(from), escape(to))
+                }
+                _ => String::new(),
+            };
             let _ = writeln!(
                 out,
-                "          <Hole x=\"{}\" y=\"{}\" diameter=\"{}\" plating=\"plated\"/>",
+                "          <Hole x=\"{}\" y=\"{}\" diameter=\"{}\" padDiameter=\"{}\" plating=\"plated\"{net}{span}/>",
                 number(via.at[0] * scale),
                 number(via.at[1] * scale),
-                number(via.drill * scale)
+                number(via.drill * scale),
+                number(via.diameter * scale)
             );
         }
     }
@@ -156,6 +171,17 @@ fn layer_feature(out: &mut String, board: &Board, layer: &str, kind: LayerKind, 
 /// Returns the package name of a footprint, with a stable fallback.
 fn package_name(footprint: &Footprint) -> String {
     if footprint.footprint.trim().is_empty() { "Package".to_string() } else { footprint.footprint.clone() }
+}
+
+/// Lowercase stackup role, readable by the importer and by other tools.
+fn kind_name(kind: LayerKind) -> &'static str {
+    match kind {
+        LayerKind::Copper => "copper",
+        LayerKind::Silkscreen => "silkscreen",
+        LayerKind::Soldermask => "soldermask",
+        LayerKind::Assembly => "assembly",
+        LayerKind::Mechanical => "mechanical",
+    }
 }
 
 /// Rotates one pad offset into board coordinates.

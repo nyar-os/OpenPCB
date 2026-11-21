@@ -10,12 +10,12 @@
 //! outputs derived from them. Every entry point reads the same capability
 //! matrix, so no surface can claim a different set of features.
 //!
-//! Implemented today: create, open, import a KiCad PCB, save, inspect, summary,
-//! close, undo and redo, layer management, footprint moves and pad
-//! add/update/delete, track and via deletion, a rectangular outline, a
-//! deterministic two-layer autorouter, a read-only SVG preview, and export to
-//! drill, BOM, pick-and-place, SVG, PDF, PNG, KiCad PCB, IPC-2581 and Gerber
-//! RS-274X. STEP remains declared but unimplemented and rejects with
+//! Implemented today: create, open, import a KiCad PCB or IPC-2581 document,
+//! save, inspect, summary, close, undo and redo, layer management, footprint
+//! moves and pad add/update/delete, track and via deletion, a rectangular
+//! outline, a deterministic two-layer autorouter, a read-only SVG preview, and
+//! export to drill, BOM, pick-and-place, SVG, PDF, PNG, KiCad PCB, IPC-2581 and
+//! Gerber RS-274X. STEP remains declared but unimplemented and rejects with
 //! `capability/not-implemented`.
 
 #![deny(missing_docs)]
@@ -24,6 +24,7 @@ mod board;
 mod export;
 mod inspect;
 mod ipc2581;
+mod ipc2581_import;
 mod kicad_import;
 mod kicad_pcb;
 mod route;
@@ -54,7 +55,7 @@ const RENDER_FORMATS: &[&str] = &["svg", "png", "pdf"];
 const EXPORT_TARGETS: &[&str] = &["kicad_pcb", "gbr", "drl", "pos", "bom", "step", "pdf", "ipc2581", "svg", "png"];
 
 /// Formats this build can read into the native document.
-const SUPPORTED_IMPORTS: &[&str] = &["kicad_pcb"];
+const SUPPORTED_IMPORTS: &[&str] = &["kicad_pcb", "ipc2581"];
 
 /// Stable failure of one board operation.
 #[derive(Debug)]
@@ -109,11 +110,10 @@ pub fn capabilities() -> Value {
     for &format in BOARD_FORMATS {
         let export = if export::SUPPORTED_EXPORTS.contains(&format) { "supported" } else { "unsupported" };
         let import = if SUPPORTED_IMPORTS.contains(&format) { "supported" } else { "unsupported" };
-        let loss_codes: Vec<Value> = if format == "kicad_pcb" {
-            kicad_import::LOSS_CODES.iter().map(|code| Value::String((*code).to_string())).collect()
-        }
-        else {
-            Vec::new()
+        let loss_codes: Vec<Value> = match format {
+            "kicad_pcb" => kicad_import::LOSS_CODES.iter().map(|code| Value::String((*code).to_string())).collect(),
+            "ipc2581" => ipc2581_import::LOSS_CODES.iter().map(|code| Value::String((*code).to_string())).collect(),
+            _ => Vec::new(),
         };
         formats.insert(
             format.to_string(),
@@ -190,30 +190,51 @@ pub fn open(path: &Path) -> Result<Value, ServiceError> {
     locate(handle)
 }
 
-/// Imports one KiCad PCB file as a native board and returns its handle.
+/// Imports one exchange board file as a native board and returns its handle.
 ///
-/// The report follows the export report shape and adds the loss ledger: every
-/// construct the document cannot hold is listed with a stable code. The board
-/// is validated before it receives a handle, so a successful import can always
-/// be saved to `.opcb` and reopened.
+/// The format is detected from the content: a document starting with `<` is
+/// read as IPC-2581, one starting with `(` as a KiCad PCB. The report follows
+/// the export report shape and adds the loss ledger: every construct the
+/// document cannot hold is listed with a stable code. The board is validated
+/// before it receives a handle, so a successful import can always be saved to
+/// `.opcb` and reopened.
 pub fn import(path: &Path) -> Result<Value, ServiceError> {
     let raw = fs::read(path).map_err(|error| invalid(format!("cannot read `{}`: {error}", path.display())))?;
     let bytes = raw.len() as u64;
     let text = String::from_utf8(raw).map_err(|error| invalid(format!("`{}` is not UTF-8: {error}", path.display())))?;
-    let imported = kicad_import::parse(&text, imported_board_id(text.as_bytes()))?;
-    board::validate(&imported.board)?;
-    let handle = store::insert(imported.board);
+    let digest = boost_source::content_digest_of(text.as_bytes());
+    let trimmed = text.trim_start();
+    let Some(first) = trimmed.chars().next()
+    else {
+        return Err(invalid(format!("`{}` is empty; expected a KiCad PCB or IPC-2581 document", path.display())));
+    };
+    let (board, losses, format) = if first == '<' {
+        let imported = ipc2581_import::parse(&text, format!("ipc2581-{digest:016x}"))?;
+        (imported.board, imported.losses, "ipc2581")
+    }
+    else if first == '(' {
+        let imported = kicad_import::parse(&text, format!("kicad-{digest:016x}"))?;
+        (imported.board, imported.losses, "kicad_pcb")
+    }
+    else {
+        return Err(invalid(format!(
+            "`{}` is neither a KiCad PCB nor an IPC-2581 document; it starts with `{first}`",
+            path.display()
+        )));
+    };
+    board::validate(&board)?;
+    let handle = store::insert(board);
     let summary = store::summary_of(handle)?;
     let mut loss_codes: Vec<String> = Vec::new();
-    for item in &imported.losses {
+    for item in &losses {
         if !loss_codes.iter().any(|code| code == item.code) {
             loss_codes.push(item.code.to_string());
         }
     }
-    let losses: Vec<Value> = imported.losses.iter().map(|item| json!({ "code": item.code, "message": item.message })).collect();
+    let losses: Vec<Value> = losses.iter().map(|item| json!({ "code": item.code, "message": item.message })).collect();
     Ok(json!({
         "handle": handle,
-        "format": "kicad_pcb",
+        "format": format,
         "path": path.display().to_string(),
         "bytes": bytes,
         "revision": summary["revision"],
@@ -222,15 +243,6 @@ pub fn import(path: &Path) -> Result<Value, ServiceError> {
         "losses": losses,
         "lossCodes": loss_codes,
     }))
-}
-
-/// Derives a stable board id from the source content.
-///
-/// Two imports of the same bytes therefore produce the same document, while
-/// different boards keep distinct ids. The digest is boost-source's FNV-1a
-/// fold, so it does not depend on the standard library's random hasher state.
-fn imported_board_id(bytes: &[u8]) -> String {
-    format!("kicad-{:016x}", boost_source::content_digest_of(bytes))
 }
 
 /// Writes one open board to a native document.

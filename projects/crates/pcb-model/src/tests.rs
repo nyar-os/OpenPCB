@@ -113,7 +113,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         assert_eq!(matrix["formats"][format]["export"], "supported", "{format} export");
         assert_eq!(matrix["formats"][format]["edit"], "unsupported", "{format} edit");
     }
-    for format in ["gbr", "drl", "bom", "pos", "svg", "pdf", "ipc2581", "png"] {
+    for format in ["gbr", "drl", "bom", "pos", "svg", "pdf", "png"] {
         assert_eq!(matrix["formats"][format]["import"], "unsupported", "{format} import");
     }
     assert_eq!(matrix["formats"]["kicad_pcb"]["import"], "supported", "KiCad import is implemented");
@@ -125,6 +125,16 @@ fn capability_matrix_matches_the_implemented_pack() {
         .collect();
     for code in ["kicad/construct-not-imported", "kicad/outline-not-rectangular", "kicad/pad-shape"] {
         assert!(loss_codes.contains(&code), "KiCad loss codes include {code}; got {loss_codes:?}");
+    }
+    assert_eq!(matrix["formats"]["ipc2581"]["import"], "supported", "IPC-2581 import is implemented");
+    let ipc_codes: Vec<&str> = matrix["formats"]["ipc2581"]["lossCodes"]
+        .as_array()
+        .expect("IPC-2581 import lists loss codes")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    for code in ["ipc2581/construct-not-imported", "ipc2581/outline-not-rectangular", "ipc2581/pin-without-size"] {
+        assert!(ipc_codes.contains(&code), "IPC-2581 loss codes include {code}; got {ipc_codes:?}");
     }
     assert_eq!(matrix["formats"]["step"]["export"], "unsupported", "step export");
     assert_eq!(matrix["formats"]["step"]["import"], "unsupported", "step import");
@@ -646,7 +656,7 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
         "<Pin number=\"1\"",
         "<Rect width=\"0.5\" height=\"0.5\"/>",
         "<Component ref=\"R1\"",
-        "<LayerFeature layerRef=\"F.Cu\">",
+        "<LayerFeature layerRef=\"F.Cu\" kind=\"copper\">",
         "<Hole",
     ] {
         assert!(text.contains(marker), "IPC-2581 output contains {marker}");
@@ -2167,6 +2177,230 @@ fn kicad_import_refuses_a_non_rectangular_outline() {
         imported["lossCodes"].as_array().expect("codes are listed").iter().filter_map(Value::as_str).collect();
     assert!(codes.contains(&"kicad/outline-not-rectangular"), "got {codes:?}");
     close(handle_of(&imported)).expect("the imported board closes");
+}
+
+#[test]
+fn ipc2581_import_round_trips_an_exported_board() {
+    let directory = TempDir::new();
+    let source = directory.join("blinker.ipc2581");
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("U1".to_string()),
+            value: Some("MCU".to_string()),
+            footprint: Some("QFN32".to_string()),
+            x: Some(30.0),
+            y: Some(20.0),
+            rotation: Some(0.0),
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the front footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.6,
+            h: 0.4,
+            net: Some("VCC".to_string()),
+        },
+    )
+    .expect("the pad is added");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("R1".to_string()),
+            value: Some("10k".to_string()),
+            footprint: Some("0402".to_string()),
+            x: Some(50.0),
+            y: Some(30.0),
+            rotation: Some(90.0),
+            layer: Some("B.Cu".to_string()),
+        },
+    )
+    .expect("the back footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-2".to_string(),
+            number: "1".to_string(),
+            x: 0.5,
+            y: -0.5,
+            w: 0.5,
+            h: 0.5,
+            net: Some("GND".to_string()),
+        },
+    )
+    .expect("the back pad is added");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("VCC".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [10.0, 10.0],
+            to: [30.0, 10.0],
+        },
+    )
+    .expect("the front track is routed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("GND".to_string()),
+            layer: "B.Cu".to_string(),
+            width: 0.3,
+            from: [30.0, 10.0],
+            to: [50.0, 10.0],
+        },
+    )
+    .expect("the back track is routed");
+    add_track(
+        handle,
+        AddTrackRequest { net: None, layer: "F.SilkS".to_string(), width: 0.2, from: [2.0, 2.0], to: [6.0, 2.0] },
+    )
+    .expect("the silkscreen legend is drawn");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [20.0, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [100.0, 80.0] }).expect("the outline is set");
+    export(handle, "ipc2581", &source).expect("IPC-2581 export writes");
+
+    let imported = import(&source).expect("the exported IPC-2581 board imports");
+    let imported_handle = handle_of(&imported);
+    assert_eq!(imported["format"], "ipc2581");
+    assert_eq!(imported["editable"], true);
+    assert_eq!(
+        imported["losses"].as_array().expect("losses is an array"),
+        &Vec::<Value>::new(),
+        "the exporter round trips without losses"
+    );
+    let document = &imported["document"];
+    assert_eq!(document["counts"]["nets"], 2);
+    assert_eq!(document["counts"]["footprints"], 2);
+    assert_eq!(document["counts"]["tracks"], 3);
+    assert_eq!(document["counts"]["vias"], 1);
+    assert_eq!(document["outline"]["from"][0], 0.0);
+    assert_eq!(document["outline"]["to"][1], 80.0);
+    let layers: Vec<&str> = document["layers"]
+        .as_array()
+        .expect("layers is an array")
+        .iter()
+        .map(|layer| layer["id"].as_str().expect("layer ids are strings"))
+        .collect();
+    assert_eq!(layers, ["F.Cu", "B.Cu", "F.SilkS", "B.SilkS", "Edge.Cuts"]);
+
+    let saved = directory.join("imported.opcb");
+    save(imported_handle, &saved, false).expect("the imported board saves as a native document");
+    let text = fs::read_to_string(&saved).expect("the native document is readable");
+    let native: Value = serde_json::from_str(&text).expect("the native document is JSON");
+    let board = &native["document"];
+    assert_eq!(board["nets"][0]["name"], "VCC");
+    assert_eq!(board["nets"][1]["name"], "GND");
+    assert_eq!(board["footprints"][0]["ref"], "U1");
+    assert_eq!(board["footprints"][0]["value"], "MCU");
+    assert_eq!(board["footprints"][0]["x"], 30.0);
+    assert_eq!(board["footprints"][0]["pads"][0]["net"], "VCC");
+    assert_eq!(board["footprints"][1]["rotation"], 90.0);
+    assert_eq!(board["footprints"][1]["pads"][0]["x"], 0.5);
+    assert_eq!(board["footprints"][1]["pads"][0]["y"], -0.5);
+    let tracks = board["tracks"].as_array().expect("tracks is an array");
+    assert_eq!(tracks.len(), 3);
+    let track_layers: Vec<&str> = tracks.iter().map(|track| track["layer"].as_str().expect("a layer")).collect();
+    assert_eq!(track_layers, ["F.Cu", "B.Cu", "F.SilkS"]);
+    assert_eq!(tracks[0]["net"], "VCC");
+    assert_eq!(tracks[1]["net"], "GND");
+    assert_eq!(tracks[2]["net"], Value::Null);
+    assert_eq!(board["vias"][0]["at"][0], 20.0);
+    assert_eq!(board["vias"][0]["diameter"], 0.6);
+    assert_eq!(board["vias"][0]["drill"], 0.3);
+    close(imported_handle).expect("the imported board closes");
+
+    let reopened = open(&saved).expect("the saved import reopens");
+    let reopened_handle = handle_of(&reopened);
+    let inspected = inspect(reopened_handle, None).expect("the imported board passes inspection");
+    assert_eq!(inspected["passed"], true, "{}", inspected["issues"]);
+    close(reopened_handle).expect("the reopened import closes");
+    close(handle).expect("the source board closes");
+}
+
+#[test]
+fn ipc2581_import_reads_namespaced_documents_and_reports_losses() {
+    let directory = TempDir::new();
+    let path = directory.join("panel.ipc2581");
+    let text = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+        <ipc:IPC-2581 xmlns:ipc=\"http://webstds.ipc.org/2581\" revision=\"B\" units=\"inch\">\n\
+          <!-- the reader ignores comments -->\n\
+          <ipc:Ecad><ipc:Content><ipc:Step name=\"Panel\">\n\
+            <ipc:Profile><ipc:Polyline>\n\
+              <ipc:Line startX=\"0\" startY=\"0\" endX=\"1\" endY=\"0\"/>\n\
+              <ipc:Line startX=\"1\" startY=\"0\" endX=\"0\" endY=\"1\"/>\n\
+              <ipc:Line startX=\"0\" startY=\"1\" endX=\"0\" endY=\"0\"/>\n\
+            </ipc:Polyline></ipc:Profile>\n\
+            <ipc:Package name=\"R0402\">\n\
+              <ipc:Pin number=\"1\"><ipc:Location x=\"0.1\" y=\"0\"/><ipc:StandardPrimitive><ipc:Rect width=\"0.05\" height=\"0.06\"/></ipc:StandardPrimitive></ipc:Pin>\n\
+              <ipc:Pin number=\"2\"><ipc:StandardPrimitive><ipc:Circle diameter=\"0.05\"/></ipc:StandardPrimitive></ipc:Pin>\n\
+            </ipc:Package>\n\
+            <ipc:Component refDes=\"R1\" part=\"R0402\" value=\"10k\" layerRef=\"TOP\" x=\"1\" y=\"1\"/>\n\
+            <ipc:Component refDes=\"R2\" part=\"MISSING\" layerRef=\"BOTTOM\" x=\"2\" y=\"1\"/>\n\
+            <ipc:LogicalNet name=\"GND\"/>\n\
+            <ipc:LayerFeature layerRef=\"TOP\"><ipc:Set>\n\
+              <ipc:Line startX=\"0\" startY=\"0\" endX=\"0.5\" endY=\"0\" width=\"0.01\" net=\"VCC\"/>\n\
+            </ipc:Set></ipc:LayerFeature>\n\
+            <ipc:LayerFeature layerRef=\"BOTTOM\">\n\
+              <ipc:Hole x=\"0.2\" y=\"0.2\" diameter=\"0.02\" plating=\"non-plated\"/>\n\
+            </ipc:LayerFeature>\n\
+          </ipc:Step></ipc:Content></ipc:Ecad>\n\
+        </ipc:IPC-2581>\n";
+    fs::write(&path, text).expect("the fixture is written");
+    let imported = import(&path).expect("the namespaced document imports");
+    assert_eq!(imported["format"], "ipc2581");
+    assert_eq!(imported["document"]["outline"], Value::Null, "a triangle is not approximated");
+    assert_eq!(imported["document"]["counts"]["nets"], 1);
+    assert_eq!(imported["document"]["counts"]["footprints"], 2, "a component with a missing package keeps its placement");
+    assert_eq!(imported["document"]["counts"]["tracks"], 1);
+    assert_eq!(imported["document"]["counts"]["vias"], 0);
+
+    let saved = directory.join("panel.opcb");
+    save(handle_of(&imported), &saved, false).expect("the imported board saves");
+    let native: Value =
+        serde_json::from_str(&fs::read_to_string(&saved).expect("the document is readable")).expect("the document is JSON");
+    let board = &native["document"];
+    assert_eq!(board["footprints"][0]["ref"], "R1");
+    assert_eq!(board["footprints"][0]["layer"], "F.Cu", "TOP maps to the front copper layer");
+    assert_eq!(board["footprints"][0]["x"], 25.4, "inches are scaled to millimetres");
+    assert_eq!(board["footprints"][0]["pads"][0]["w"], 1.27);
+    assert_eq!(board["footprints"][0]["pads"][1]["w"], 1.27, "a circular pin becomes a square pad");
+    assert_eq!(board["footprints"][1]["ref"], "R2");
+    assert_eq!(board["footprints"][1]["layer"], "B.Cu", "BOTTOM maps to the back copper layer");
+    assert_eq!(board["tracks"][0]["layer"], "F.Cu");
+    assert_eq!(board["tracks"][0]["net"], Value::Null, "an undeclared net is not invented");
+    assert_eq!(board["title"], "Panel");
+    close(handle_of(&imported)).expect("the imported board closes");
+
+    let codes: Vec<&str> =
+        imported["lossCodes"].as_array().expect("codes are listed").iter().filter_map(Value::as_str).collect();
+    for code in ["ipc2581/outline-not-rectangular", "ipc2581/package-missing", "ipc2581/net-unknown", "ipc2581/hole-not-plated"]
+    {
+        assert!(codes.contains(&code), "loss codes include {code}; got {codes:?}");
+    }
+}
+
+#[test]
+fn ipc2581_import_rejects_unknown_content() {
+    let directory = TempDir::new();
+    let path = directory.join("board.txt");
+    fs::write(&path, "not a board").expect("the fixture is written");
+    let error = import(&path).expect_err("unknown content is rejected");
+    assert_eq!(error.code, "format/invalid");
+    assert!(error.message.contains("neither a KiCad PCB nor an IPC-2581 document"), "{}", error.message);
 }
 
 #[test]

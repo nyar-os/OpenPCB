@@ -259,10 +259,28 @@ export interface KicadImportOptions {
     readonly overwrite?: boolean;
 }
 
+/** Exchange board formats the engine can read into an editable document. */
+export type BoardImportFormat = 'kicad_pcb' | 'ipc2581';
+
+/** Options of `OpenPCB.importBoard()`. */
+export interface BoardImportOptions {
+    /** KiCad PCB or IPC-2581 file to read. The engine detects the format from the content. */
+    readonly path: string;
+    /** Native `.opcb` document to write after import; the board keeps it as its target. */
+    readonly target?: string;
+    readonly overwrite?: boolean;
+}
+
+/** Result of `OpenPCB.importBoard()`: the board, the detected format and the loss ledger. */
+export interface BoardImportResult extends KicadImportResult {
+    /** Format the engine detected and read. */
+    readonly format: BoardImportFormat;
+}
+
 /** Low-level result of the native import operation: handle, document summary and loss ledger. */
 export interface ImportReport {
     readonly handle: number;
-    readonly format: 'kicad_pcb';
+    readonly format: BoardImportFormat;
     readonly path: string;
     readonly bytes: number;
     readonly revision: number;

@@ -87,7 +87,7 @@ fn board_open(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &opened)
 }
 
-/// Imports one KiCad PCB file and returns the handle plus its loss ledger.
+/// Imports one KiCad PCB or IPC-2581 file and returns the handle plus its loss ledger.
 #[function]
 fn board_import(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;

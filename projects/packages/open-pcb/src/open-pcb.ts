@@ -23,6 +23,8 @@ import type {
     BoardCapabilities,
     BoardCreateOptions,
     BoardEditResult,
+    BoardImportOptions,
+    BoardImportResult,
     BoardInput,
     BoardSummary,
     ExportOptions,
@@ -115,12 +117,14 @@ export class OpenPCB {
     }
 
     /**
-     * Imports one KiCad PCB file and wraps the native handle in a `Board`.
+     * Imports one exchange board file and wraps the native handle in a `Board`.
      *
-     * With `target` the imported document is saved immediately and the board
-     * keeps that path as its target, so later edits write it back in place.
+     * Both KiCad PCB and IPC-2581 documents are read; the engine detects the
+     * format from the content and reports it on the result. With `target` the
+     * imported document is saved immediately and the board keeps that path as
+     * its target, so later edits write it back in place.
      */
-    async importKicadPcb(options: KicadImportOptions): Promise<KicadImportResult> {
+    async importBoard(options: BoardImportOptions): Promise<BoardImportResult> {
         this.assertActive();
         assertImportOptions(options);
         const history = await this.sidecarApi();
@@ -139,11 +143,23 @@ export class OpenPCB {
         return {
             board,
             path: imported.path,
+            format: imported.format,
             bytes: imported.bytes,
             losses: imported.losses,
             lossCodes: imported.lossCodes,
             saved,
         };
+    }
+
+    /**
+     * Imports one KiCad PCB file and wraps the native handle in a `Board`.
+     *
+     * Kept for callers that only read KiCad files; `importBoard` is the same
+     * operation with the detected format on the result.
+     */
+    async importKicadPcb(options: KicadImportOptions): Promise<KicadImportResult> {
+        const { format: _format, ...result } = await this.importBoard(options);
+        return result;
     }
 
     /** Inspects an input without keeping a board handle. */
@@ -457,7 +473,7 @@ function assertCreateOptions(options: BoardCreateOptions): void {
     }
 }
 
-function assertImportOptions(options: KicadImportOptions): void {
+function assertImportOptions(options: BoardImportOptions): void {
     if (typeof options.path !== 'string' || options.path.length === 0) {
         throw new OpenPCBError('session/argument-invalid', '`path` must be a non-empty string');
     }
