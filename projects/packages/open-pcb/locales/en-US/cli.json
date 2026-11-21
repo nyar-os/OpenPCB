@@ -69,7 +69,7 @@
             "template": "Template the board starts from; blank is the only implemented value",
             "overwrite": "Replace the output file when it already exists",
             "checks": "Comma-separated checks: drc, connectivity, clearance, annular_rings, annular-ring, track-width, unrouted, stackup, outline, silkscreen, courtyard, netlist, hole-to-hole, copper-to-edge, edge-clearance, silkscreen-over-pad, diffpair, dangling-copper, netclass, keepout",
-            "format": "Export target: gbr, drl, drill_map, bom, pos, placement, svg, pdf, png, kicad_pcb and ipc2581 are implemented; step is not",
+            "format": "Export target: gbr, drl, drill_map, bom, pos, placement, testpoints, ipc_d_356, svg, pdf, png, kicad_pcb and ipc2581 are implemented; step is not",
             "ref": "Reference designator",
             "id": "Stable object id, for example fp-1",
             "value": "Component value",

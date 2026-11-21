@@ -115,7 +115,8 @@ fn widest(structure: Structure, stackup: Stackup) -> f64 {
     }
 }
 
-fn positive(value: f64, field: &str) -> Result<f64, ServiceError> {    if !value.is_finite() {
+fn positive(value: f64, field: &str) -> Result<f64, ServiceError> {
+    if !value.is_finite() {
         return Err(crate::argument(format!("`{field}` must be a finite number")));
     }
     if value > 0.0 { Ok(value) } else { Err(crate::argument(format!("`{field}` must be greater than zero"))) }

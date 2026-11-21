@@ -114,9 +114,21 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["project"]["edit"], "partial");
     assert_eq!(matrix["project"]["export"], "partial");
 
-    for format in
-        ["gbr", "drl", "drill_map", "bom", "pos", "placement", "testpoints", "svg", "pdf", "kicad_pcb", "ipc2581", "png"]
-    {
+    for format in [
+        "gbr",
+        "drl",
+        "drill_map",
+        "bom",
+        "pos",
+        "placement",
+        "testpoints",
+        "ipc_d_356",
+        "svg",
+        "pdf",
+        "kicad_pcb",
+        "ipc2581",
+        "png",
+    ] {
         assert_eq!(matrix["formats"][format]["export"], "supported", "{format} export");
         assert_eq!(matrix["formats"][format]["edit"], "unsupported", "{format} edit");
     }
@@ -172,9 +184,21 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["renderers"]["svg"], "supported");
     assert_eq!(matrix["renderers"]["png"], "unsupported");
     assert_eq!(matrix["renderers"]["pdf"], "unsupported");
-    for target in
-        ["gbr", "drl", "drill_map", "bom", "pos", "placement", "testpoints", "svg", "pdf", "kicad_pcb", "ipc2581", "png"]
-    {
+    for target in [
+        "gbr",
+        "drl",
+        "drill_map",
+        "bom",
+        "pos",
+        "placement",
+        "testpoints",
+        "ipc_d_356",
+        "svg",
+        "pdf",
+        "kicad_pcb",
+        "ipc2581",
+        "png",
+    ] {
         assert_eq!(matrix["exportTargets"][target], "supported", "{target} target");
     }
     assert_eq!(matrix["exportTargets"]["step"], "unsupported");
@@ -473,6 +497,45 @@ fn test_points_report_pad_and_via_probes() {
     delete_test_point(reopened, "testpoint-1").expect("the pad test point is deleted");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["testPoints"], 0);
     close(reopened).expect("the board closes");
+}
+
+#[test]
+fn ipc_d_356_lists_pads_and_vias_in_fixed_width_records() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 1.0,
+            y: 1.0,
+            w: 0.8,
+            h: 0.8,
+            net: Some("VCC".to_string()),
+        },
+    )
+    .expect("the pad is added");
+
+    let path = directory.join("board.d356");
+    let report = export(handle, "ipc_d_356", &path).expect("the IPC-D-356 export writes");
+    assert_eq!(report["format"], "ipc_d_356");
+    let text = fs::read_to_string(&path).expect("the netlist is readable");
+    assert_eq!(text.lines().next().map(str::trim_end), Some("C  IPC-D-356A"), "the file starts with its format comment");
+    assert!(text.contains("P  UNITS  CUST 1"), "units are metric: {text}");
+    assert!(text.contains("P  IMAGE  PRIMARY"), "the primary image is declared: {text}");
+    assert!(text.contains("327VCC"), "the pad is a surface-mount record: {text}");
+    assert!(text.contains("U1    -1"), "the reference and pin occupy their fields: {text}");
+    assert!(text.contains("X+031000Y+021000"), "the pad centre is written in 0.001 mm: {text}");
+    assert!(text.contains("317VCC"), "the through via is a plated-hole record: {text}");
+    assert!(text.contains("VIA   -1"), "a via names itself in the reference field: {text}");
+    assert!(text.contains("X+020000Y+020000"), "the via centre is written in 0.001 mm: {text}");
+    assert!(text.trim_end().ends_with("999"), "the file ends with the end-of-job code");
+    for line in text.lines() {
+        assert_eq!(line.len(), 80, "every record is 80 columns: {line}");
+    }
+    close(handle).expect("the board closes");
 }
 
 #[test]

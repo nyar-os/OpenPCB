@@ -51,15 +51,43 @@ use serde_json::{Map, Value, json};
 ///
 /// Covers the editable board, fabrication and assembly outputs, exchange
 /// containers and preview images.
-pub const BOARD_FORMATS: &[&str] =
-    &["kicad_pcb", "gbr", "drl", "drill_map", "pos", "placement", "bom", "testpoints", "step", "ipc2581", "svg", "pdf", "png"];
+pub const BOARD_FORMATS: &[&str] = &[
+    "kicad_pcb",
+    "gbr",
+    "drl",
+    "drill_map",
+    "pos",
+    "placement",
+    "bom",
+    "testpoints",
+    "ipc_d_356",
+    "step",
+    "ipc2581",
+    "svg",
+    "pdf",
+    "png",
+];
 
 /// Render targets declared for preview surfaces.
 const RENDER_FORMATS: &[&str] = &["svg", "png", "pdf"];
 
 /// Export targets declared by the command line.
-const EXPORT_TARGETS: &[&str] =
-    &["kicad_pcb", "gbr", "drl", "drill_map", "pos", "placement", "bom", "testpoints", "step", "pdf", "ipc2581", "svg", "png"];
+const EXPORT_TARGETS: &[&str] = &[
+    "kicad_pcb",
+    "gbr",
+    "drl",
+    "drill_map",
+    "pos",
+    "placement",
+    "bom",
+    "testpoints",
+    "ipc_d_356",
+    "step",
+    "pdf",
+    "ipc2581",
+    "svg",
+    "png",
+];
 
 /// Formats this build can read into the native document.
 const SUPPORTED_IMPORTS: &[&str] = &["kicad_pcb", "ipc2581"];

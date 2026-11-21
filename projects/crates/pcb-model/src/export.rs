@@ -19,8 +19,21 @@ use serde_json::{Value, json};
 use crate::{ServiceError, board::Board};
 
 /// Formats this build can write.
-pub(crate) const SUPPORTED_EXPORTS: &[&str] =
-    &["gbr", "drl", "drill_map", "bom", "pos", "placement", "testpoints", "svg", "pdf", "kicad_pcb", "ipc2581", "png"];
+pub(crate) const SUPPORTED_EXPORTS: &[&str] = &[
+    "gbr",
+    "drl",
+    "drill_map",
+    "bom",
+    "pos",
+    "placement",
+    "testpoints",
+    "ipc_d_356",
+    "svg",
+    "pdf",
+    "kicad_pcb",
+    "ipc2581",
+    "png",
+];
 
 /// Points per millimetre used by the vector PDF writer.
 const PT_PER_MM: f64 = 2.834646;
@@ -48,6 +61,7 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
         "bom" => bom(board).into_bytes(),
         "pos" => position(board).into_bytes(),
         "testpoints" => testpoints(board).into_bytes(),
+        "ipc_d_356" => ipc_d_356(board).into_bytes(),
         "placement" => placement(board)?.into_bytes(),
         "svg" => svg(board)?.into_bytes(),
         "pdf" => pdf(board)?,
@@ -528,6 +542,160 @@ fn testpoints(board: &Board) -> String {
         );
     }
     out
+}
+
+/// IPC-D-356A bare-board test netlist.
+///
+/// Every pad becomes a `327` surface-mount record and every via a `317` through
+/// or `307` blind/buried via record. Each line is padded to the 80-column record
+/// width, units are `CUST 1` (millimetres) and coordinates use the 0.001 mm
+/// field, so a test fixture can read probe positions without unit conversion.
+fn ipc_d_356(board: &Board) -> String {
+    let scale = board.millimetres();
+    let mut records: Vec<Ipc356Record> = Vec::new();
+    for footprint in &board.footprints {
+        let angle = footprint.rotation.to_radians();
+        let (sin, cos) = (angle.sin(), angle.cos());
+        let side = if footprint.layer.starts_with("B.") { "02" } else { "01" };
+        let mask = if footprint.layer.starts_with("B.") { 2 } else { 1 };
+        for pad in &footprint.pads {
+            let x = footprint.x + pad.x * cos - pad.y * sin;
+            let y = footprint.y + pad.x * sin + pad.y * cos;
+            records.push(Ipc356Record {
+                code: "327",
+                net: pad.net.clone(),
+                reference: footprint.ref_.clone(),
+                pin: pad.number.clone(),
+                hole: None,
+                access: side,
+                at: [x, y],
+                size: [pad.w, pad.h],
+                rotation: footprint.rotation,
+                mask,
+            });
+        }
+    }
+    for (index, via) in board.vias.iter().enumerate() {
+        let kind = board.via_kind(via);
+        records.push(Ipc356Record {
+            code: if kind == "through" { "317" } else { "307" },
+            net: via.net.clone(),
+            reference: "VIA".to_string(),
+            pin: format!("{}", index + 1),
+            hole: Some(via.drill),
+            access: "00",
+            at: via.at,
+            size: [via.diameter, via.diameter],
+            rotation: 0.0,
+            mask: 0,
+        });
+    }
+    records.sort_by(|left, right| {
+        let left_net = left.net.as_deref().unwrap_or("N/C");
+        let right_net = right.net.as_deref().unwrap_or("N/C");
+        left_net.cmp(right_net).then_with(|| left.reference.cmp(&right.reference)).then_with(|| left.pin.cmp(&right.pin))
+    });
+
+    let title = board.title.as_deref().filter(|title| !title.trim().is_empty()).unwrap_or(&board.id);
+    let mut out = String::new();
+    out.push_str(&ipc_record_line("C  IPC-D-356A"));
+    out.push_str(&ipc_parameter("JOB", &ipc_text(title)));
+    out.push_str(&ipc_parameter("CODE", "00"));
+    out.push_str(&ipc_parameter("UNITS", "CUST 1"));
+    out.push_str(&ipc_parameter("TITLE", &ipc_text(title)));
+    out.push_str(&ipc_parameter("NUM", &ipc_text(&board.id)));
+    out.push_str(&ipc_parameter("REV", &board.revision.to_string()));
+    out.push_str(&ipc_parameter("VER", "IPC-D-356A"));
+    out.push_str(&ipc_parameter("IMAGE", "PRIMARY"));
+    for record in &records {
+        out.push_str(&record.render(scale));
+    }
+    out.push_str(&ipc_record_line("999"));
+    out
+}
+
+/// One standard electrical test record of an IPC-D-356A file.
+struct Ipc356Record {
+    code: &'static str,
+    net: Option<String>,
+    reference: String,
+    pin: String,
+    hole: Option<f64>,
+    access: &'static str,
+    at: [f64; 2],
+    size: [f64; 2],
+    rotation: f64,
+    mask: u8,
+}
+
+impl Ipc356Record {
+    /// Renders the 80-column record.
+    fn render(&self, scale: f64) -> String {
+        let net = self.net.as_deref().map(ipc_text).filter(|name| !name.is_empty()).unwrap_or_else(|| "N/C".to_string());
+        let reference = ipc_text(&self.reference);
+        let pin = ipc_text(&self.pin);
+        let mut line = format!("{}{net:<14.14}   {reference:<6.6}-{pin:<4.4} ", self.code);
+        match self.hole {
+            Some(diameter) => {
+                line.push('D');
+                line.push_str(&format!("{:0>4}", ipc_micrometres(diameter, scale).min(9999)));
+                line.push('P');
+            }
+            None => line.push_str("      "),
+        }
+        line.push('A');
+        line.push_str(self.access);
+        let (x_sign, x) = ipc_coordinate(self.at[0], scale);
+        let (y_sign, y) = ipc_coordinate(self.at[1], scale);
+        line.push_str(&format!("X{x_sign}{x}Y{y_sign}{y}"));
+        line.push_str(&format!(
+            "X{:0>4}Y{:0>4}R{:0>3} ",
+            ipc_micrometres(self.size[0], scale).min(9999),
+            ipc_micrometres(self.size[1], scale).min(9999),
+            self.rotation.round().rem_euclid(360.0) as u32
+        ));
+        line.push('S');
+        line.push_str(&self.mask.to_string());
+        ipc_record_line(&line)
+    }
+}
+
+/// Pads an IPC-D-356A record to its fixed 80-column width.
+fn ipc_record_line(line: &str) -> String {
+    let mut record = line.chars().take(80).collect::<String>();
+    while record.len() < 80 {
+        record.push(' ');
+    }
+    record.push('\n');
+    record
+}
+
+/// Formats one `P` header parameter with its value in columns 10-72.
+fn ipc_parameter(parameter: &str, value: &str) -> String {
+    let mut line = format!("P  {parameter:<4}  {value}");
+    if line.len() > 72 {
+        line.truncate(72);
+    }
+    ipc_record_line(&line)
+}
+
+/// Replaces whitespace so a name fits one IPC-D-356A field.
+fn ipc_text(value: &str) -> String {
+    value.chars().map(|character| if character.is_whitespace() { '_' } else { character }).collect()
+}
+
+/// Converts one board coordinate to the 0.001 mm field and its sign column.
+fn ipc_coordinate(value: f64, scale: f64) -> (char, String) {
+    let micrometres = (value * scale * 1000.0).round();
+    let digits = if micrometres < 0.0 { -micrometres } else { micrometres };
+    let number = if digits.is_finite() { digits.min(999_999.0) as u64 } else { 0 };
+    (if micrometres < 0.0 { '-' } else { '+' }, format!("{number:0>6}"))
+}
+
+/// Converts one size to the 0.001 mm field.
+fn ipc_micrometres(value: f64, scale: f64) -> u64 {
+    let micrometres = (value * scale * 1000.0).round();
+    if micrometres.is_finite() && micrometres > 0.0 { micrometres.min(9999.0) as u64 } else { 0 }
 }
 
 /// Rounds a coordinate to three decimals without a negative zero.

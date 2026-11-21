@@ -126,6 +126,7 @@ const exportTargets: readonly ExportTarget[] = [
     'placement',
     'bom',
     'testpoints',
+    'ipc_d_356',
     'step',
     'ipc2581',
     'pdf',
@@ -1527,7 +1528,7 @@ cli
         const format = asExportTarget(text(options, 'format'));
         if (format === undefined) {
             ctx.fail('open-pcb.cli.format-required', {
-                message: '`--format` must be one of kicad_pcb, gbr, drl, drill_map, pos, placement, bom, step, ipc2581, pdf, svg',
+                message: '`--format` must be one of kicad_pcb, gbr, drl, drill_map, pos, placement, bom, testpoints, ipc_d_356, step, ipc2581, pdf, svg',
             });
             return 2;
         }

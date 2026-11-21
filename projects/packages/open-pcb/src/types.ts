@@ -186,6 +186,7 @@ export type ExportTarget =
     | 'placement'
     | 'bom'
     | 'testpoints'
+    | 'ipc_d_356'
     | 'step'
     | 'ipc2581'
     | 'pdf'
