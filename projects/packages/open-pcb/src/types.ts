@@ -78,7 +78,8 @@ export type InspectCheck =
     | 'edge-clearance'
     | 'silkscreen-over-pad'
     | 'diffpair'
-    | 'dangling-copper';
+    | 'dangling-copper'
+    | 'netclass';
 
 /** Rectangular board outline in board units. */
 export interface BoardOutline {
@@ -163,6 +164,8 @@ export interface BoardCapabilities {
     readonly routing: SupportLevel;
     /** Whether copper pour regions can be declared, previewed and written as Gerber regions. */
     readonly zones: SupportLevel;
+    /** Whether net classes with clearance and width targets are available. */
+    readonly netClasses: SupportLevel;
 }
 
 /** Options of `OpenPCB.create()`. */
@@ -199,6 +202,7 @@ export interface BoardSummaryCounts {
     readonly tracks: number;
     readonly vias: number;
     readonly zones: number;
+    readonly netClasses: number;
     readonly differentialPairs: number;
     readonly waivers: number;
 }
@@ -214,6 +218,17 @@ export interface BoardWaiver {
     readonly reason?: string;
 }
 
+/** One declared net class and its routing targets, in board units. */
+export interface BoardNetClass {
+    readonly id: ObjectId;
+    readonly name: string;
+    readonly width?: number;
+    readonly clearance?: number;
+    readonly viaDiameter?: number;
+    readonly viaDrill?: number;
+    readonly nets: readonly string[];
+}
+
 /** Summary of one board at its committed revision. */
 export interface BoardSummary {
     readonly id: BoardId;
@@ -227,6 +242,8 @@ export interface BoardSummary {
     readonly waivers: readonly BoardWaiver[];
     /** Severity overrides keyed by finding code. */
     readonly severityOverrides: Readonly<Record<string, Severity>>;
+    /** Declared net classes. */
+    readonly netClasses: readonly BoardNetClass[];
     readonly layers: readonly BoardSummaryLayer[];
     readonly counts: BoardSummaryCounts;
     /** Whether {@link Board.undo} can restore a snapshot. */
@@ -422,6 +439,28 @@ export interface AddZoneOptions {
     readonly points: readonly (readonly [number, number])[];
 }
 
+/** Options of `board.addNetClass()`. */
+export interface AddNetClassOptions {
+    /** Class name, unique on the board. */
+    readonly name: string;
+    /** Target trace width, in board units. */
+    readonly width?: number;
+    /** Minimum copper clearance for nets in the class, in board units. */
+    readonly clearance?: number;
+    /** Minimum via copper diameter, in board units. */
+    readonly viaDiameter?: number;
+    /** Minimum via finished drill, in board units. */
+    readonly viaDrill?: number;
+}
+
+/** Options of `board.assignNetClass()`. */
+export interface AssignNetClassOptions {
+    /** Declared net name to assign. */
+    readonly net: string;
+    /** Net class id or name. */
+    readonly class: string;
+}
+
 /** Back-drill geometry of one through via, in board units. */
 export interface BackDrill {
     /** Barrel depth removed from the secondary side; greater than zero. */
@@ -615,6 +654,9 @@ export interface Board {
     deleteVia(id: ObjectId): Promise<BoardEditResult>;
     addZone(options: AddZoneOptions): Promise<BoardEditResult>;
     deleteZone(id: ObjectId): Promise<BoardEditResult>;
+    addNetClass(options: AddNetClassOptions): Promise<BoardEditResult>;
+    deleteNetClass(id: ObjectId): Promise<BoardEditResult>;
+    assignNetClass(options: AssignNetClassOptions): Promise<BoardEditResult>;
     setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult>;
     addNet(options: AddNetOptions): Promise<BoardEditResult>;
     addTeardrops(options?: AddTeardropsOptions): Promise<BoardEditResult>;

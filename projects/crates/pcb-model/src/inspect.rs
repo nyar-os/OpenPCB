@@ -58,6 +58,7 @@ pub(crate) const CHECKS: &[&str] = &[
     "silkscreen-over-pad",
     "diffpair",
     "dangling-copper",
+    "netclass",
 ];
 
 /// Checks this build can actually run.
@@ -80,6 +81,7 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "silkscreen-over-pad",
     "diffpair",
     "dangling-copper",
+    "netclass",
 ];
 
 /// Runs the requested checks and returns an `InspectReport`.
@@ -115,6 +117,7 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "silkscreen-over-pad" => silkscreen_over_pad(board, &mut report),
             "diffpair" => diffpair(board, &mut report),
             "dangling-copper" => dangling_copper(board, &mut report),
+            "netclass" => netclass(board, &mut report),
             other => report.push(finding(
                 "check/unsupported",
                 Severity::Warning,
@@ -387,7 +390,8 @@ fn clearance(board: &Board, issues: &mut CheckReport) {
                 continue;
             }
             let gap = (centres - (track.width + other.width) / 2.0) * scale;
-            if gap < MIN_CLEARANCE_MM {
+            let required = required_clearance(board, track.net.as_deref(), other.net.as_deref());
+            if gap < required {
                 issues.push(finding(
                     "drc/clearance-violation",
                     Severity::Error,
@@ -396,13 +400,13 @@ fn clearance(board: &Board, issues: &mut CheckReport) {
                     Some(&track.id),
                     if gap < 0.0 {
                         format!(
-                            "tracks `{}` and `{}` overlap by {:.3} mm on {}; the minimum clearance is {MIN_CLEARANCE_MM} mm",
+                            "tracks `{}` and `{}` overlap by {:.3} mm on {}; the minimum clearance is {required} mm",
                             track.id, other.id, -gap, track.layer
                         )
                     }
                     else {
                         format!(
-                            "tracks `{}` and `{}` are {:.3} mm apart on {}; the minimum clearance is {MIN_CLEARANCE_MM} mm",
+                            "tracks `{}` and `{}` are {:.3} mm apart on {}; the minimum clearance is {required} mm",
                             track.id, other.id, gap, track.layer
                         )
                     },
@@ -410,6 +414,17 @@ fn clearance(board: &Board, issues: &mut CheckReport) {
             }
         }
     }
+}
+
+/// Clearance two nets need, taking the strictest class value.
+fn required_clearance(board: &Board, left: Option<&str>, right: Option<&str>) -> f64 {
+    let mut required = MIN_CLEARANCE_MM;
+    for net in [left, right].into_iter().flatten() {
+        if let Some(clearance) = board.class_of_net(net).and_then(|class| class.clearance) {
+            required = required.max(clearance);
+        }
+    }
+    required
 }
 
 fn annular_rings(board: &Board, issues: &mut CheckReport) {
@@ -482,6 +497,100 @@ fn track_width(board: &Board, issues: &mut CheckReport) {
                 format!(
                     "track `{}` is {width:.3} mm wide; narrower than the {TRACK_WIDTH_WARNING_MM} mm recommendation",
                     track.id
+                ),
+            ));
+        }
+    }
+}
+
+/// Enforces the width and via targets declared by net classes.
+///
+/// Only tracks and vias whose net belongs to a class are checked; a class with
+/// no targets sets nothing. Damage in the document itself, such as an
+/// undeclared net, is reported as an error too.
+fn netclass(board: &Board, issues: &mut CheckReport) {
+    let scale = board.millimetres();
+    for class in &board.net_classes {
+        for net in &class.nets {
+            if board.net(net).is_none() {
+                issues.push(finding(
+                    "netclass/undeclared-net",
+                    Severity::Error,
+                    board,
+                    None,
+                    None,
+                    format!("net class `{}` references undeclared net `{net}`", class.name),
+                ));
+            }
+        }
+    }
+    for track in &board.tracks {
+        if board.layer(&track.layer).is_none_or(|layer| layer.kind != LayerKind::Copper) {
+            continue;
+        }
+        let Some(net) = track.net.as_deref()
+        else {
+            continue;
+        };
+        let Some(class) = board.class_of_net(net)
+        else {
+            continue;
+        };
+        if let Some(width) = class.width {
+            let actual = track.width * scale;
+            if actual + 1e-9 < width {
+                issues.push(finding(
+                    "netclass/track-too-narrow",
+                    Severity::Error,
+                    board,
+                    Some(&track.layer),
+                    Some(&track.id),
+                    format!(
+                        "track `{}` on net `{net}` is {actual:.3} mm wide; net class `{}` requires {width} mm",
+                        track.id, class.name
+                    ),
+                ));
+            }
+        }
+    }
+    for via in &board.vias {
+        let Some(net) = via.net.as_deref()
+        else {
+            continue;
+        };
+        let Some(class) = board.class_of_net(net)
+        else {
+            continue;
+        };
+        let diameter = via.diameter * scale;
+        if let Some(target) = class.via_diameter
+            && diameter + 1e-9 < target
+        {
+            issues.push(finding(
+                "netclass/via-diameter-too-small",
+                Severity::Error,
+                board,
+                None,
+                Some(&via.id),
+                format!(
+                    "via `{}` on net `{net}` is {diameter:.3} mm wide; net class `{}` requires {target} mm",
+                    via.id, class.name
+                ),
+            ));
+        }
+        let drill = via.drill * scale;
+        if let Some(target) = class.via_drill
+            && drill + 1e-9 < target
+        {
+            issues.push(finding(
+                "netclass/via-drill-too-small",
+                Severity::Error,
+                board,
+                None,
+                Some(&via.id),
+                format!(
+                    "via `{}` on net `{net}` drills {drill:.3} mm; net class `{}` requires {target} mm",
+                    via.id, class.name
                 ),
             ));
         }

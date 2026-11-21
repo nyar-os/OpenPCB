@@ -686,6 +686,89 @@ zone
         return 0;
     });
 
+const netclass = cli.command('netclass', 'cli.cmd.netclass');
+netclass
+    .command('add', 'cli.cmd.netclass-add')
+    .option('--name <name>', 'cli.opt.name')
+    .option('--width <mm>', 'cli.opt.width')
+    .option('--clearance <mm>', 'cli.opt.clearance')
+    .option('--via-diameter <mm>', 'cli.opt.via-diameter')
+    .option('--via-drill <mm>', 'cli.opt.via-drill')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const name = text(options, 'name');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (name === undefined || name.length === 0) {
+            ctx.fail('open-pcb.cli.name-required', { message: '`--name <name>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addNetClass({
+                name,
+                width: numberOption(text(options, 'width')),
+                clearance: numberOption(text(options, 'clearance')),
+                viaDiameter: numberOption(text(options, 'via-diameter')),
+                viaDrill: numberOption(text(options, 'via-drill')),
+            });
+            ctx.emitResult(result, `declared ${result.object?.id ?? 'net class'} ${name}`);
+            return 0;
+        });
+        return 0;
+    });
+
+netclass
+    .command('delete', 'cli.cmd.netclass-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteNetClass(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+netclass
+    .command('assign', 'cli.cmd.netclass-assign')
+    .option('--net <name>', 'cli.opt.net')
+    .option('--class <name-or-id>', 'cli.opt.class')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const net = text(options, 'net');
+        const netClass = text(options, 'class');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (net === undefined || net.length === 0) {
+            ctx.fail('open-pcb.cli.net-required', { message: '`--net <name>` is required' });
+            return 2;
+        }
+        if (netClass === undefined || netClass.length === 0) {
+            ctx.fail('open-pcb.cli.class-required', { message: '`--class <name-or-id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.assignNetClass({ net, class: netClass });
+            ctx.emitResult(result, `assigned ${net} to ${netClass}`);
+            return 0;
+        });
+        return 0;
+    });
+
 const net = cli.command('net', 'cli.cmd.net');
 net
     .command('add', 'cli.cmd.net-add')

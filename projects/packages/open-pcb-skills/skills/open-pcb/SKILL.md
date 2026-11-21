@@ -24,6 +24,9 @@ Implemented:
 - Read and edit the design rules (`rules show`, `rules set`): drill-hole
   clearance, copper-, component- and hole-to-edge gaps and the solder-mask
   expansion. Values are millimetres; a partial update keeps the other rules.
+- Declare net classes (`netclass add`), move nets into them (`netclass assign`)
+  and let their optional width, clearance, via diameter and via drill targets
+  drive the `netclass` check; `clearance` also uses the strictest class value.
 - Waive a finding by code (`waiver add`) or override a code's severity
   (`severity set`). A waived error no longer blocks `passed`, but the issue stays
   in the report with `waived: true`, its waiver id and reason.
@@ -38,7 +41,7 @@ Implemented:
 - Checks: `drc`, `connectivity`, `clearance`, `annular_rings`, `annular-ring`,
   `track-width`, `unrouted`, `stackup`, `outline`, `silkscreen`, `courtyard`,
   `netlist`, `hole-to-hole`, `copper-to-edge`, `edge-clearance`,
-  `silkscreen-over-pad`, `diffpair`, `dangling-copper`.
+  `silkscreen-over-pad`, `diffpair`, `dangling-copper`, `netclass`.
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `drill_map`
   (hole map SVG with tool legend and back-drill marks), `bom`, `pos`,
   `placement` (millimetre JSON), `svg`, `pdf`, `png` (1024x768 RGB raster),
@@ -97,6 +100,9 @@ a format, check or target.
 | `open-pcb outline set <file.opcb> --from <x,y> --to <x,y>` | Set the rectangular board outline; width and height must be positive. |
 | `open-pcb zone add <file.opcb> --layer <layer> --net <name> --points <list>` | Add a copper pour region as a closed polygon of at least three `x,y` points separated by spaces or semicolons. The layer must be copper. |
 | `open-pcb zone delete <file.opcb> --id <id>` | Delete a copper pour region by id. |
+| `open-pcb netclass add <file.opcb> --name <name> [--width <mm>] [--clearance <mm>] [--via-diameter <mm>] [--via-drill <mm>]` | Declare a net class with optional routing targets. |
+| `open-pcb netclass assign <file.opcb> --net <name> --class <name-or-id>` | Move one declared net into a class; a net belongs to one class at a time. |
+| `open-pcb netclass delete <file.opcb> --id <id>` | Delete a net class by id. |
 | `open-pcb rules show <file.opcb>` | Print the design rules the checks and writers use. |
 | `open-pcb rules set <file.opcb> --hole-clearance <mm> --copper-to-edge <mm> --component-to-edge <mm> --hole-to-edge <mm> --solder-mask-expansion <mm>` | Replace one or more design rules in place; at least one value is required and none may be negative. |
 | `open-pcb waiver add <file.opcb> --code <code> --object <id> --reason <text>` | Waive a finding code, optionally narrowed to one object. `--object` and `--reason` are optional. |
@@ -140,7 +146,7 @@ mutating command also records the previous document for CLI undo/redo.
 
 1. `open-pcb list <file>` and record the revision under review.
 2. Run `open-pcb inspect <file> --checks <list>` with
-   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper`.
+   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper,netclass`.
 3. Report each finding with its code, layer and object. `passed` is false when
    any non-waived error-severity issue remains; `active` and `waived` count the
    findings after policy is applied. A waived issue stays in `issues` with

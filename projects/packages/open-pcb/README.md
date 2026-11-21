@@ -11,7 +11,7 @@ OpenPCB(options?)` creates a session; `create` and `open` return an editable
 `Board` with `inspect`, `save`, `export`, `close`, `undo`, `redo`,
 `addFootprint`, `moveFootprint`, `updateFootprint`, `deleteFootprint`,
 `addTrack`, `deleteTrack`, `addVia`, `deleteVia`, `addZone`, `deleteZone`,
-`addNet`, `route`, `addLayer`,
+`addNetClass`, `deleteNetClass`, `assignNetClass`, `addNet`, `route`, `addLayer`,
 `updateLayer`, `setOutline`, `setRules`, `addWaiver`, `deleteWaiver`,
 `setSeverity`, `deleteSeverity` and `list`. `importBoard` reads a KiCad PCB or
 IPC-2581 file, and `importKicadPcb` stays as the KiCad-only spelling of the same
@@ -23,8 +23,8 @@ pick-and-place, placement JSON, SVG, vector PDF, 1024x768 RGB PNG, KiCad PCB and
 IPC-2581. Implemented checks are DRC, connectivity, clearance, annular rings,
 annular-ring, track-width, unrouted, stackup, outline, silkscreen, courtyard,
 netlist, hole-to-hole, copper-to-edge, edge-clearance, silkscreen-over-pad,
-diffpair and dangling-copper. STEP export stays unsupported and rejects with
-`capability/not-implemented`.
+diffpair, dangling-copper and netclass. STEP export stays unsupported and rejects
+with `capability/not-implemented`.
 
 Classification is not a support claim: reads, writes and exports are reported by
 `capabilities()`, never inferred from an extension or a method name.
@@ -42,6 +42,8 @@ await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], t
 await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
 await board.setOutline({ from: [0, 0], to: [100, 80] });
 await board.addZone({ layer: 'F.Cu', net: 'VCC', points: [[5, 5], [40, 5], [40, 30], [5, 30]] });
+await board.addNetClass({ name: 'Power', width: 0.5, clearance: 0.6 });
+await board.assignNetClass({ net: 'VCC', class: 'Power' });
 await board.setRules({ holeClearance: 0.3, solderMaskExpansion: 0.1 });
 await board.route({ width: 0.25, clearance: 0.2, net: 'VCC' });
 await board.addLayer({ name: 'Inner1', kind: 'copper' });

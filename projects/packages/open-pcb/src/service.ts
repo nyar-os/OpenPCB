@@ -13,11 +13,13 @@ import type {
     AddFootprintOptions,
     AddTeardropsOptions,
     AddLayerOptions,
+    AddNetClassOptions,
     AddNetOptions,
     AddTrackOptions,
     AddViaOptions,
     AddWaiverOptions,
     AddZoneOptions,
+    AssignNetClassOptions,
     BoardCapabilities,
     BoardCreateOptions,
     BoardEditResult,
@@ -174,6 +176,25 @@ export function addZone(handle: number, options: AddZoneOptions): BoardEditResul
 /** Deletes one copper pour region from an open board. */
 export function deleteZone(handle: number, id: string): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.deleteZone').board_delete_zone(handle, id));
+}
+
+/** Declares one net class on an open board. */
+export function addNetClass(handle: number, options: AddNetClassOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.addNetClass').board_add_net_class(handle, JSON.stringify(options)),
+    );
+}
+
+/** Deletes one net class from an open board. */
+export function deleteNetClass(handle: number, id: string): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deleteNetClass').board_delete_net_class(handle, id));
+}
+
+/** Assigns one declared net to a net class on an open board. */
+export function assignNetClass(handle: number, options: AssignNetClassOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.assignNetClass').board_assign_net_class(handle, JSON.stringify(options)),
+    );
 }
 
 /** Moves one footprint on an open board. */

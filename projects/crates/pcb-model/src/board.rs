@@ -284,6 +284,55 @@ pub(crate) struct Outline {
     pub(crate) to: [f64; 2],
 }
 
+/// One named net class with routing targets.
+///
+/// Nets assigned to a class inherit its clearance and the width, via diameter
+/// and via drill minima that the `netclass` check enforces. Every value is
+/// optional, so a class can be declared first and filled in later.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NetClass {
+    /// Stable class id.
+    pub(crate) id: String,
+    /// Class name referenced by assignments.
+    pub(crate) name: String,
+    /// Target trace width, in board units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) width: Option<f64>,
+    /// Minimum copper clearance for nets in the class, in board units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) clearance: Option<f64>,
+    /// Minimum via copper diameter, in board units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) via_diameter: Option<f64>,
+    /// Minimum via finished drill, in board units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) via_drill: Option<f64>,
+    /// Net names assigned to the class.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) nets: Vec<String>,
+}
+
+impl NetClass {
+    /// Api projection of one class, omitting absent targets.
+    pub(crate) fn to_value(&self) -> Value {
+        let mut value = json!({ "id": self.id, "name": self.name, "nets": self.nets });
+        if let Some(width) = self.width {
+            value["width"] = json!(width);
+        }
+        if let Some(clearance) = self.clearance {
+            value["clearance"] = json!(clearance);
+        }
+        if let Some(via_diameter) = self.via_diameter {
+            value["viaDiameter"] = json!(via_diameter);
+        }
+        if let Some(via_drill) = self.via_drill {
+            value["viaDrill"] = json!(via_drill);
+        }
+        value
+    }
+}
+
 /// One copper pour region on a copper layer.
 ///
 /// A zone is a closed polygon with at least three vertices. It carries no fill
@@ -388,6 +437,9 @@ pub(crate) struct Board {
     /// Copper pour regions; absent on documents written before zones existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) zones: Vec<Zone>,
+    /// Declared net classes; absent on documents written before classes existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) net_classes: Vec<NetClass>,
     /// Declared differential pairs; absent on documents written before pairs existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) differential_pairs: Vec<DifferentialPair>,
@@ -412,6 +464,9 @@ pub(crate) struct Board {
     /// Next zone sequence number.
     #[serde(default = "one")]
     pub(crate) next_zone: u64,
+    /// Next net class sequence number.
+    #[serde(default = "one")]
+    pub(crate) next_net_class: u64,
     /// Next net sequence number.
     pub(crate) next_net: u64,
 }
@@ -464,6 +519,7 @@ impl Board {
             tracks: Vec::new(),
             vias: Vec::new(),
             zones: Vec::new(),
+            net_classes: Vec::new(),
             differential_pairs: Vec::new(),
             severity_overrides: BTreeMap::new(),
             waivers: Vec::new(),
@@ -473,6 +529,7 @@ impl Board {
             next_track: 1,
             next_via: 1,
             next_zone: 1,
+            next_net_class: 1,
             next_net: 1,
         })
     }
@@ -1199,6 +1256,76 @@ impl Board {
         Ok(removed.id)
     }
 
+    /// Declares one net class and returns its public object shape.
+    ///
+    /// The class starts with no nets; assign them with
+    /// [`Board::assign_net_class`]. Every provided target must be positive.
+    pub(crate) fn add_net_class(&mut self, request: AddNetClassRequest) -> Result<Value, ServiceError> {
+        let name = request.name.trim();
+        if name.is_empty() {
+            return Err(crate::argument("a net class needs a non-empty `name`"));
+        }
+        if self.net_classes.iter().any(|class| class.name == name) {
+            return Err(crate::argument(format!("net class `{name}` is already declared")));
+        }
+        let width = request.width.map(|value| positive(value, "width")).transpose()?;
+        let clearance = request.clearance.map(|value| positive(value, "clearance")).transpose()?;
+        let via_diameter = request.via_diameter.map(|value| positive(value, "viaDiameter")).transpose()?;
+        let via_drill = request.via_drill.map(|value| positive(value, "viaDrill")).transpose()?;
+        let id = format!("netclass-{}", self.next_net_class);
+        self.next_net_class += 1;
+        let class = NetClass { id, name: name.to_string(), width, clearance, via_diameter, via_drill, nets: Vec::new() };
+        let object = class.to_value();
+        self.net_classes.push(class);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Removes one net class by id and returns the removed id.
+    pub(crate) fn delete_net_class(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .net_classes
+            .iter()
+            .position(|class| class.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no net class with id `{id}`")))?;
+        let removed = self.net_classes.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
+    /// Assigns one declared net to a net class by id or name.
+    ///
+    /// A net belongs to at most one class, so assigning it again moves it.
+    /// Returns the updated class.
+    pub(crate) fn assign_net_class(&mut self, request: AssignNetClassRequest) -> Result<Value, ServiceError> {
+        let net = request.net.trim();
+        if net.is_empty() {
+            return Err(crate::argument("a net class assignment needs a non-empty `net`"));
+        }
+        if self.net(net).is_none() {
+            return Err(ServiceError::new("object/not-found", format!("net `{net}` is not declared on this board")));
+        }
+        let class = request.class.trim();
+        let index = self
+            .net_classes
+            .iter()
+            .position(|entry| entry.id == class || entry.name == class)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no net class with id or name `{class}`")))?;
+        for entry in &mut self.net_classes {
+            entry.nets.retain(|name| name != net);
+        }
+        if !self.net_classes[index].nets.iter().any(|name| name == net) {
+            self.net_classes[index].nets.push(net.to_string());
+        }
+        self.revision += 1;
+        Ok(self.net_classes[index].to_value())
+    }
+
+    /// Returns the class one net belongs to, when it is assigned.
+    pub(crate) fn class_of_net(&self, net: &str) -> Option<&NetClass> {
+        self.net_classes.iter().find(|class| class.nets.iter().any(|name| name == net))
+    }
+
     /// Replaces one or more design-rule values.
     ///
     /// Every value is in millimetres. The request must name at least one rule;
@@ -1725,6 +1852,45 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         }
     }
 
+    let mut class_ids = HashSet::new();
+    let mut class_names = HashSet::new();
+    let mut assigned_nets = HashSet::new();
+    for class in &board.net_classes {
+        if class.id.trim().is_empty() {
+            return Err(crate::invalid("a net class has an empty id"));
+        }
+        if !class_ids.insert(class.id.as_str()) {
+            return Err(crate::invalid(format!("net class id `{}` is duplicated", class.id)));
+        }
+        if class.name.trim().is_empty() {
+            return Err(crate::invalid(format!("net class `{}` has an empty name", class.id)));
+        }
+        if !class_names.insert(class.name.as_str()) {
+            return Err(crate::invalid(format!("net class name `{}` is duplicated", class.name)));
+        }
+        for (value, field) in [
+            (class.width, "width"),
+            (class.clearance, "clearance"),
+            (class.via_diameter, "viaDiameter"),
+            (class.via_drill, "viaDrill"),
+        ] {
+            if let Some(value) = value {
+                sizes(value, &format!("net class `{}` {field}", class.name))?;
+            }
+        }
+        for net in &class.nets {
+            if net.trim().is_empty() {
+                return Err(crate::invalid(format!("net class `{}` has an empty net name", class.name)));
+            }
+            if !net_names.contains(net.as_str()) {
+                return Err(crate::invalid(format!("net class `{}` references undeclared net `{net}`", class.name)));
+            }
+            if !assigned_nets.insert(net.as_str()) {
+                return Err(crate::invalid(format!("net `{net}` is assigned to more than one net class")));
+            }
+        }
+    }
+
     let mut zone_ids = HashSet::new();
     for zone in &board.zones {
         if zone.id.trim().is_empty() {
@@ -1850,6 +2016,7 @@ pub(crate) fn summary(board: &Board) -> Value {
         "rules": board.rules,
         "waivers": board.waivers.iter().map(Waiver::to_value).collect::<Vec<_>>(),
         "severityOverrides": board.severity_overrides,
+        "netClasses": board.net_classes.iter().map(NetClass::to_value).collect::<Vec<_>>(),
         "layers": layers,
         "counts": {
             "nets": board.nets.len(),
@@ -1857,6 +2024,7 @@ pub(crate) fn summary(board: &Board) -> Value {
             "tracks": board.tracks.len(),
             "vias": board.vias.len(),
             "zones": board.zones.len(),
+            "netClasses": board.net_classes.len(),
             "differentialPairs": board.differential_pairs.len(),
             "waivers": board.waivers.len(),
         },
@@ -1942,6 +2110,36 @@ pub struct DeletePadRequest {
     pub footprint: String,
     /// Pad number or name to delete.
     pub number: String,
+}
+
+/// Request of [`crate::add_net_class`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddNetClassRequest {
+    /// Class name, unique on the board.
+    pub name: String,
+    /// Target trace width, in board units.
+    #[serde(default)]
+    pub width: Option<f64>,
+    /// Minimum copper clearance for nets in the class, in board units.
+    #[serde(default)]
+    pub clearance: Option<f64>,
+    /// Minimum via copper diameter, in board units.
+    #[serde(default)]
+    pub via_diameter: Option<f64>,
+    /// Minimum via finished drill, in board units.
+    #[serde(default)]
+    pub via_drill: Option<f64>,
+}
+
+/// Request of [`crate::assign_net_class`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignNetClassRequest {
+    /// Declared net name to assign.
+    pub net: String,
+    /// Net class id or name.
+    pub class: String,
 }
 
 /// Request of [`crate::add_zone`].

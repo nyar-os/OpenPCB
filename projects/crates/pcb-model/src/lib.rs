@@ -37,10 +37,10 @@ mod tests;
 use std::{fs, path::Path};
 
 pub use board::{
-    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTeardropsRequest,
-    AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions,
-    SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    UpdatePadRequest,
+    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest, AddPadRequest,
+    AddTeardropsRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest,
+    DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
+    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 use serde_json::{Map, Value, json};
@@ -168,6 +168,7 @@ pub fn capabilities() -> Value {
         "drcPolicy": "supported",
         "routing": "supported",
         "zones": "supported",
+        "netClasses": "supported",
     })
 }
 
@@ -418,6 +419,36 @@ pub fn add_via(handle: u64, request: AddViaRequest) -> Result<Value, ServiceErro
     let mut object = Value::Null;
     store::mutate(handle, |board| {
         object = board.add_via(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Declares one net class on an open board.
+pub fn add_net_class(handle: u64, request: AddNetClassRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.add_net_class(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Deletes one net class from an open board.
+pub fn delete_net_class(handle: u64, id: &str) -> Result<Value, ServiceError> {
+    let mut deleted = String::new();
+    store::mutate(handle, |board| {
+        deleted = board.delete_net_class(id)?;
+        Ok(())
+    })?;
+    edit_result(handle, None, Some(deleted))
+}
+
+/// Assigns one declared net to a net class on an open board.
+pub fn assign_net_class(handle: u64, request: AssignNetClassRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.assign_net_class(request)?;
         Ok(())
     })?;
     edit_result(handle, Some(object), None)

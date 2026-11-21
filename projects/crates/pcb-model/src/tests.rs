@@ -12,14 +12,15 @@ use std::{
 use serde_json::Value;
 
 use crate::{
-    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTeardropsRequest,
-    AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, CreateRequest, MoveFootprintRequest, RouteOptions,
-    SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    add_differential_pair, add_footprint, add_layer, add_net, add_pad, add_teardrops, add_track, add_via, add_waiver, add_zone,
+    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest, AddPadRequest,
+    AddTeardropsRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest,
+    CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
+    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, add_differential_pair, add_footprint, add_layer,
+    add_net, add_net_class, add_pad, add_teardrops, add_track, add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
-    capabilities, close, create, delete_differential_pair, delete_footprint, delete_severity, delete_track, delete_via,
-    delete_waiver, delete_zone, export, import, inspect, move_footprint, open, redo, route, save, set_outline, set_rules,
-    set_severity, set_via_back_drill, store, summary, undo, update_footprint, update_layer,
+    capabilities, close, create, delete_differential_pair, delete_footprint, delete_net_class, delete_severity, delete_track,
+    delete_via, delete_waiver, delete_zone, export, import, inspect, move_footprint, open, redo, route, save, set_outline,
+    set_rules, set_severity, set_via_back_drill, store, summary, undo, update_footprint, update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -317,6 +318,81 @@ fn copper_zones_persist_and_write_gerber_regions() {
     let removed = delete_zone(reopened, "zone-1").expect("the zone is deleted");
     assert_eq!(removed["deleted"], "zone-1");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["zones"], 0);
+    close(reopened).expect("the board closes");
+}
+
+#[test]
+fn net_classes_apply_clearance_and_width_targets() {
+    let directory = TempDir::new();
+    let path = directory.join("classes.opcb");
+    let handle = created();
+    add_full_board(handle);
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the ground net is declared");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("GND".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [10.0, 10.6],
+            to: [30.0, 10.6],
+        },
+    )
+    .expect("the ground track is placed");
+    let clean = inspect(handle, Some(vec!["clearance".to_string()])).expect("the board is inspected");
+    assert_eq!(clean["passed"], true, "the default clearance accepts the pair");
+
+    let declared = add_net_class(
+        handle,
+        AddNetClassRequest {
+            name: "Power".to_string(),
+            width: Some(0.5),
+            clearance: Some(0.6),
+            via_diameter: Some(0.8),
+            via_drill: Some(0.4),
+        },
+    )
+    .expect("the class is declared");
+    assert_eq!(declared["object"]["id"], "netclass-1");
+    let duplicate = add_net_class(handle, AddNetClassRequest { name: "Power".to_string(), ..Default::default() })
+        .expect_err("class names are unique");
+    assert_eq!(duplicate.code, "session/argument-invalid");
+
+    let assigned = assign_net_class(handle, AssignNetClassRequest { net: "VCC".to_string(), class: "Power".to_string() })
+        .expect("the power net joins the class");
+    assert_eq!(assigned["object"]["nets"], serde_json::json!(["VCC"]));
+    assign_net_class(handle, AssignNetClassRequest { net: "GND".to_string(), class: "netclass-1".to_string() })
+        .expect("a class id also assigns");
+    let missing = assign_net_class(handle, AssignNetClassRequest { net: "NOPE".to_string(), class: "Power".to_string() })
+        .expect_err("an undeclared net cannot join a class");
+    assert_eq!(missing.code, "object/not-found");
+
+    let report = inspect(handle, Some(vec!["netclass".to_string(), "clearance".to_string()])).expect("the board is inspected");
+    assert_eq!(report["passed"], false);
+    let codes: Vec<&str> =
+        report["issues"].as_array().expect("issues are listed").iter().filter_map(|issue| issue["code"].as_str()).collect();
+    assert!(codes.contains(&"netclass/track-too-narrow"), "class width is enforced; got {codes:?}");
+    assert!(codes.contains(&"drc/clearance-violation"), "class clearance is enforced; got {codes:?}");
+    let clearance = report["issues"]
+        .as_array()
+        .expect("issues are listed")
+        .iter()
+        .find(|issue| issue["code"] == "drc/clearance-violation")
+        .expect("a clearance issue is listed");
+    assert!(
+        clearance["message"].as_str().is_some_and(|message| message.contains("0.6 mm")),
+        "the finding names the class clearance: {clearance:?}"
+    );
+
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    let listed = summary(reopened).expect("the board is listed");
+    assert_eq!(listed["counts"]["netClasses"], 1);
+    assert_eq!(listed["netClasses"][0]["name"], "Power");
+    assert_eq!(listed["netClasses"][0]["nets"], serde_json::json!(["VCC", "GND"]));
+    delete_net_class(reopened, "netclass-1").expect("the class is deleted");
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["netClasses"], 0);
     close(reopened).expect("the board closes");
 }
 

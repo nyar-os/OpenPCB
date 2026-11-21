@@ -182,6 +182,37 @@ fn board_add_via(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Declares one net class on an open board.
+#[function]
+fn board_add_net_class(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::AddNetClassRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::add_net_class(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Deletes one net class from an open board.
+#[function]
+fn board_delete_net_class(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let value = open_pcb_model::delete_net_class(handle, &id).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Assigns one declared net to a net class.
+#[function]
+fn board_assign_net_class(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::AssignNetClassRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::assign_net_class(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds one copper pour region to an open board.
 #[function]
 fn board_add_zone(ctx: CallContext) -> Result<JsValue> {
@@ -615,6 +646,23 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
             let id = rpc_text(value, "id")?;
             open_pcb_model::delete_zone(handle, id)
         }
+        "board.addNetClass" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::AddNetClassRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::add_net_class(handle, request)
+        }
+        "board.deleteNetClass" => {
+            let handle = rpc_handle(value)?;
+            let id = rpc_text(value, "id")?;
+            open_pcb_model::delete_net_class(handle, id)
+        }
+        "board.assignNetClass" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::AssignNetClassRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::assign_net_class(handle, request)
+        }
         "board.addNet" => {
             let handle = rpc_handle(value)?;
             let request: open_pcb_model::AddNetRequest = serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
@@ -1028,6 +1076,9 @@ register_module![
     board_set_via_back_drill,
     board_add_zone,
     board_delete_zone,
+    board_add_net_class,
+    board_delete_net_class,
+    board_assign_net_class,
     board_route,
     board_add_net,
     board_undo,

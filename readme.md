@@ -39,10 +39,13 @@ SDK and studio shell share one native model:
   tracks; repeated runs skip segments that already exist.
 - Run DRC, connectivity, clearance, annular ring, stackup, outline, silkscreen,
   courtyard, netlist, `annular-ring`, `track-width`, `unrouted`, `diffpair`,
-  `dangling-copper`, `hole-to-hole`, `copper-to-edge`, `edge-clearance` and
-  `silkscreen-over-pad` checks. Waive a finding by code (optionally narrowed to
-  one object) and override a code's severity; a waived error no longer blocks
-  `passed`, and every waived issue is still reported with its waiver.
+  `dangling-copper`, `hole-to-hole`, `copper-to-edge`, `edge-clearance`,
+  `silkscreen-over-pad` and `netclass` checks. Waive a finding by code (optionally
+  narrowed to one object) and override a code's severity; a waived error no longer
+  blocks `passed`, and every waived issue is still reported with its waiver.
+- Declare net classes with optional target width, clearance, via diameter and via
+  drill; assign nets to a class and let `clearance` use the strictest class value
+  and `netclass` enforce the width and via targets.
 - Import a KiCad PCB or IPC-2581 document into the native document: copper
   layers, nets, footprints and pads, tracks, through, blind and buried vias and a
   rectangular profile, with a stable loss ledger for everything the document
@@ -65,9 +68,10 @@ STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
 through, blind and buried vias, back drilling, linear teardrops, editable design
-rules, solder-mask Gerber layers, copper pour regions and waiver/severity policy
-as supported, micro vias as unsupported, and both `kicad_pcb` and `ipc2581`
-import as supported. `open-pcb capabilities` prints exactly that matrix.
+rules, solder-mask Gerber layers, copper pour regions, net classes and
+waiver/severity policy as supported, micro vias as unsupported, and both
+`kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities` prints
+exactly that matrix.
 
 ## Usage
 
@@ -118,6 +122,10 @@ open-pcb layer lock blinker.opcb --id Inner2 --locked true
 # Add a copper pour region and delete it by id
 open-pcb zone add blinker.opcb --layer F.Cu --net VCC --points "5,5 40,5 40,30 5,30"
 open-pcb zone delete blinker.opcb --id zone-1
+
+# Declare a net class and move nets into it
+open-pcb netclass add blinker.opcb --name Power --width 0.5 --clearance 0.6 --via-diameter 0.8 --via-drill 0.4
+open-pcb netclass assign blinker.opcb --net VCC --class Power
 
 # Set a rectangular outline, then undo or redo the last saved revision
 open-pcb outline set blinker.opcb --from 0,0 --to 100,80
@@ -176,6 +184,8 @@ await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
 await board.setViaBackDrill({ id: 'via-1', depth: 0.8, stub: 0.2 });
 await board.setOutline({ from: [0, 0], to: [100, 80] });
 await board.addZone({ layer: 'F.Cu', net: 'VCC', points: [[5, 5], [40, 5], [40, 30], [5, 30]] });
+await board.addNetClass({ name: 'Power', width: 0.5, clearance: 0.6, viaDiameter: 0.8, viaDrill: 0.4 });
+await board.assignNetClass({ net: 'VCC', class: 'Power' });
 await board.route(); // { routed, unrouted, tracks, vias }
 await board.addTeardrops({ shape: 'linear', length: 0.6 });
 
@@ -248,9 +258,11 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   the Excellon drill file. KiCad PCB import and export do not carry back drill,
   so that exchange path keeps the via without the back-drill information.
 - The router is a deterministic orthogonal MST router: it tries four
-  L-shaped candidates per edge and reports an edge as unrouted rather than
-  approximating a path. It does not rip up, use diagonal tracks or route
-  multi-layer inner copper.
+  L-shaped candidates per edge, reports an edge as unrouted rather than
+  approximating a path, and does not rip up, use diagonal tracks or route
+  multi-layer inner copper. It does not route against net-class targets: `route`
+  takes its width, clearance and via arguments directly, while `netclass` only
+  checks what is already placed.
 - Pad annulus is not checked because the document model stores no pad drill;
   `annular-ring` evaluates vias only. The drill map and the Excellon file
   therefore list via drills only.

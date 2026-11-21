@@ -18,11 +18,13 @@ import type {
     AddFootprintOptions,
     AddTeardropsOptions,
     AddLayerOptions,
+    AddNetClassOptions,
     AddNetOptions,
     AddTrackOptions,
     AddViaOptions,
     AddWaiverOptions,
     AddZoneOptions,
+    AssignNetClassOptions,
     Board,
     BoardCapabilities,
     BoardCreateOptions,
@@ -428,6 +430,18 @@ function attach(
         async deleteZone(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteZone(current, id));
+        },
+        async addNetClass(options: AddNetClassOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addNetClass(current, options));
+        },
+        async deleteNetClass(id: string): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deleteNetClass(current, id));
+        },
+        async assignNetClass(options: AssignNetClassOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.assignNetClass(current, options));
         },
         async setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult> {
             ensure();

@@ -29,6 +29,9 @@ export interface NativeBinding {
     board_set_via_back_drill(handle: number, requestJson: string): string;
     board_add_zone(handle: number, requestJson: string): string;
     board_delete_zone(handle: number, id: string): string;
+    board_add_net_class(handle: number, requestJson: string): string;
+    board_delete_net_class(handle: number, id: string): string;
+    board_assign_net_class(handle: number, requestJson: string): string;
     board_route(handle: number, optionsJson: string): string;
     board_add_net(handle: number, requestJson: string): string;
     board_undo(handle: number): string;
