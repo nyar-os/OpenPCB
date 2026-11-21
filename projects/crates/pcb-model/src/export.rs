@@ -104,6 +104,8 @@ fn gerber(board: &Board, path: &Path) -> Result<Value, ServiceError> {
     files.push(("B_SilkS.gbr".to_string(), silkscreen(board, "B.SilkS")));
     files.push(("F_Mask.gbr".to_string(), solder_mask(board, "F.Cu")));
     files.push(("B_Mask.gbr".to_string(), solder_mask(board, "B.Cu")));
+    files.push(("F_Paste.gbr".to_string(), solder_paste(board, "F.Cu")));
+    files.push(("B_Paste.gbr".to_string(), solder_paste(board, "B.Cu")));
     files.push(("Edge_Cuts.gbr".to_string(), edge_cuts(outline.from, outline.to, board.millimetres())));
     let mut artifacts = Vec::new();
     let mut total = 0u64;
@@ -213,6 +215,9 @@ fn aperture_function(file_function: &str) -> &'static str {
     else if file_function.starts_with("Soldermask") {
         "Soldermask"
     }
+    else if file_function.starts_with("Paste") {
+        "Paste"
+    }
     else if file_function.starts_with("Profile") {
         "Profile"
     }
@@ -298,6 +303,23 @@ fn solder_mask(board: &Board, layer: &str) -> String {
     }
     let position = if layer.starts_with("B.") { "Bot" } else { "Top" };
     gerber.render(&format!("Soldermask,{position}"))
+}
+
+/// Writes one solder-paste layer: every outer-layer pad opens a stencil window
+/// sized exactly to the copper pad. Vias stay tented and contribute no paste.
+fn solder_paste(board: &Board, layer: &str) -> String {
+    let scale = board.millimetres();
+    let mut gerber = Gerber::default();
+    for footprint in board.footprints.iter().filter(|footprint| footprint.layer == layer) {
+        for pad in &footprint.pads {
+            gerber.flash(
+                format!("R,{:.6}X{:.6}", pad.w * scale, pad.h * scale),
+                [(footprint.x + pad.x) * scale, (footprint.y + pad.y) * scale],
+            );
+        }
+    }
+    let position = if layer.starts_with("B.") { "Bot" } else { "Top" };
+    gerber.render(&format!("Paste,{position}"))
 }
 
 /// Writes the rectangular Edge.Cuts outline as four draws.

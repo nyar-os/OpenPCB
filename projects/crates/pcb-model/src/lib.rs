@@ -195,6 +195,7 @@ pub fn capabilities() -> Value {
         },
         "designRules": "supported",
         "solderMask": "supported",
+        "solderPaste": "supported",
         "gerberX2": "supported",
         "drcPolicy": "supported",
         "routing": "supported",

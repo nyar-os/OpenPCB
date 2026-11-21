@@ -213,6 +213,7 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["teardrops"]["arc"], "unsupported");
     assert_eq!(matrix["designRules"], "supported");
     assert_eq!(matrix["solderMask"], "supported");
+    assert_eq!(matrix["solderPaste"], "supported");
     assert_eq!(matrix["gerberX2"], "supported");
     assert_eq!(matrix["drcPolicy"], "supported");
     assert_eq!(matrix["routing"], "supported");
@@ -1279,9 +1280,22 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
     assert_eq!(report["format"], "gbr");
     assert_eq!(report["path"], gbr.display().to_string());
     let artifacts = report["artifacts"].as_array().expect("artifacts is an array");
-    assert_eq!(artifacts.len(), 7);
+    assert_eq!(artifacts.len(), 9);
     let names: Vec<&str> = artifacts.iter().map(|item| item["name"].as_str().expect("a name")).collect();
-    assert_eq!(names, ["F_Cu.gbr", "B_Cu.gbr", "F_SilkS.gbr", "B_SilkS.gbr", "F_Mask.gbr", "B_Mask.gbr", "Edge_Cuts.gbr"]);
+    assert_eq!(
+        names,
+        [
+            "F_Cu.gbr",
+            "B_Cu.gbr",
+            "F_SilkS.gbr",
+            "B_SilkS.gbr",
+            "F_Mask.gbr",
+            "B_Mask.gbr",
+            "F_Paste.gbr",
+            "B_Paste.gbr",
+            "Edge_Cuts.gbr"
+        ]
+    );
     for name in names {
         let path = gbr.join(name);
         assert!(path.is_file(), "{name} is written");
@@ -1314,6 +1328,13 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
     assert!(mask.contains("X30000000Y20000000D03*"), "the front pad opens the front mask");
     let back_mask = fs::read_to_string(gbr.join("B_Mask.gbr")).expect("the back solder mask is readable");
     assert!(!back_mask.contains("D03*"), "a footprint without pads opens no mask and vias stay tented");
+    let paste = fs::read_to_string(gbr.join("F_Paste.gbr")).expect("the front paste layer is readable");
+    assert!(paste.contains("%TF.FileFunction,Paste,Top*%"), "the paste function is declared");
+    assert!(paste.contains("%TA.AperFunction,Paste*%"), "paste apertures declare their function");
+    assert!(paste.contains("%ADD10R,0.500000X0.500000*%"), "the stencil window is the pad size, without mask expansion");
+    assert!(paste.contains("X30000000Y20000000D03*"), "the front pad opens the front paste layer");
+    let back_paste = fs::read_to_string(gbr.join("B_Paste.gbr")).expect("the back paste layer is readable");
+    assert!(!back_paste.contains("D03*"), "a front pad opens no back paste and vias stay tented");
     let edges = fs::read_to_string(gbr.join("Edge_Cuts.gbr")).expect("edge cuts are readable");
     assert!(edges.contains("%TF.FileFunction,Profile,NP*%"), "edge cuts declare the profile function");
     assert_eq!(edges.matches("D01*").count(), 4, "the outline is four draws");
@@ -2847,6 +2868,8 @@ fn exports_write_one_gerber_per_copper_layer_and_keep_every_hole() {
             "B_SilkS.gbr",
             "F_Mask.gbr",
             "B_Mask.gbr",
+            "F_Paste.gbr",
+            "B_Paste.gbr",
             "Edge_Cuts.gbr"
         ]
     );

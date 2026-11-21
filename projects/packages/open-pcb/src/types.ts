@@ -226,6 +226,8 @@ export interface BoardCapabilities {
     readonly designRules: SupportLevel;
     /** Whether Gerber solder-mask layers are written. */
     readonly solderMask: SupportLevel;
+    /** Whether Gerber solder-paste stencil layers are written. */
+    readonly solderPaste: SupportLevel;
     /** Whether Gerber files carry X2 file, aperture and polarity attributes. */
     readonly gerberX2: SupportLevel;
     /** Whether findings can be waived and their severity overridden. */
