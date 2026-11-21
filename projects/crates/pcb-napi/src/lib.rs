@@ -488,6 +488,39 @@ fn board_set_rules(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Declares the physical stackup used by controlled-impedance calculations.
+#[function]
+fn board_set_stackup(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::SetStackupRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::set_stackup(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Computes the single-ended impedance of one trace.
+#[function]
+fn stackup_impedance(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::ImpedanceRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::stackup_impedance(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Converts a target impedance to the trace width that reaches it.
+#[function]
+fn stackup_width(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::WidthRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::stackup_width(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Lists one open board as a summary.
 #[function]
 fn board_list(ctx: CallContext) -> Result<JsValue> {
@@ -852,6 +885,12 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
                 serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
             open_pcb_model::set_rules(handle, request)
         }
+        "board.setStackup" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::SetStackupRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::set_stackup(handle, request)
+        }
         "board.list" => {
             let handle = rpc_handle(value)?;
             let summary = open_pcb_model::list_board(handle)?;
@@ -1181,6 +1220,9 @@ register_module![
     board_update_layer,
     board_set_outline,
     board_set_rules,
+    board_set_stackup,
+    stackup_impedance,
+    stackup_width,
     board_list,
     open_gui,
     pump_events,

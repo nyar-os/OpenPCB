@@ -29,6 +29,10 @@ import type {
     ExportReport,
     ExportTarget,
     ImportReport,
+    ImpedanceOptions,
+    ImpedanceReport,
+    ImpedanceWidthOptions,
+    ImpedanceWidthReport,
     InspectCheck,
     InspectReport,
     MoveFootprintOptions,
@@ -36,6 +40,7 @@ import type {
     RouteReport,
     SaveReport,
     SetOutlineOptions,
+    SetStackupOptions,
     StitchViasOptions,
     SetRulesOptions,
     SetSeverityOptions,
@@ -320,5 +325,22 @@ export function setOutline(handle: number, options: SetOutlineOptions): BoardEdi
 /** Replaces one or more design-rule values on an open board. */
 export function setRules(handle: number, options: SetRulesOptions): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.setRules').board_set_rules(handle, JSON.stringify(options)));
+}
+
+/** Declares the physical stackup used by controlled-impedance calculations. */
+export function setStackup(handle: number, options: SetStackupOptions): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.setStackup').board_set_stackup(handle, JSON.stringify(options)));
+}
+
+/** Computes the single-ended impedance of one trace. */
+export function impedance(handle: number, options: ImpedanceOptions): ImpedanceReport {
+    return decode<ImpedanceReport>(() => binding('board.impedance').stackup_impedance(handle, JSON.stringify(options)));
+}
+
+/** Converts a target impedance to the trace width that reaches it. */
+export function impedanceWidth(handle: number, options: ImpedanceWidthOptions): ImpedanceWidthReport {
+    return decode<ImpedanceWidthReport>(() =>
+        binding('board.impedanceWidth').stackup_width(handle, JSON.stringify(options)),
+    );
 }
 

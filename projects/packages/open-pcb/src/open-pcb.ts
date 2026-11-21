@@ -37,6 +37,10 @@ import type {
     BoardSummary,
     ExportOptions,
     ExportReport,
+    ImpedanceOptions,
+    ImpedanceReport,
+    ImpedanceWidthOptions,
+    ImpedanceWidthReport,
     InspectOptions,
     InspectReport,
     KicadImportOptions,
@@ -50,6 +54,7 @@ import type {
     SetOutlineOptions,
     SetRulesOptions,
     SetSeverityOptions,
+    SetStackupOptions,
     SetViaBackDrillOptions,
     StitchViasOptions,
     UpdateFootprintOptions,
@@ -519,6 +524,18 @@ function attach(
         async setRules(options: SetRulesOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.setRules(current, options));
+        },
+        async setStackup(options: SetStackupOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.setStackup(current, options));
+        },
+        async impedance(options: ImpedanceOptions): Promise<ImpedanceReport> {
+            ensure();
+            return service.impedance(handle, options);
+        },
+        async impedanceWidth(options: ImpedanceWidthOptions): Promise<ImpedanceWidthReport> {
+            ensure();
+            return service.impedanceWidth(handle, options);
         },
         async addWaiver(options: AddWaiverOptions): Promise<BoardEditResult> {
             ensure();

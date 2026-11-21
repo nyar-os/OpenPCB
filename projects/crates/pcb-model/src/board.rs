@@ -284,6 +284,33 @@ pub(crate) struct Outline {
     pub(crate) to: [f64; 2],
 }
 
+/// Physical layer stack used by controlled-impedance calculations.
+///
+/// The values describe the copper foil and the dielectric between adjacent
+/// copper layers, in millimetres. The impedance helpers read this when a caller
+/// does not override a value per request.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Stackup {
+    /// Copper foil thickness, in millimetres.
+    pub(crate) copper_thickness: f64,
+    /// Dielectric thickness between adjacent copper layers, in millimetres.
+    pub(crate) dielectric_height: f64,
+    /// Relative permittivity of the dielectric.
+    pub(crate) dielectric_constant: f64,
+}
+
+impl Stackup {
+    /// Api projection of the stackup.
+    pub(crate) fn to_value(self) -> Value {
+        json!({
+            "copperThickness": self.copper_thickness,
+            "dielectricHeight": self.dielectric_height,
+            "dielectricConstant": self.dielectric_constant,
+        })
+    }
+}
+
 /// One named net class with routing targets.
 ///
 /// Nets assigned to a class inherit its clearance and the width, via diameter
@@ -472,6 +499,9 @@ pub(crate) struct Board {
     /// Design-rule values; absent on documents written before the rules existed.
     #[serde(default, skip_serializing_if = "DesignRules::is_default")]
     pub(crate) rules: DesignRules,
+    /// Physical stackup; absent until a controlled-impedance stack is declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stackup: Option<Stackup>,
     /// Stackup layers.
     pub(crate) layers: Vec<Layer>,
     /// Declared nets.
@@ -567,6 +597,7 @@ impl Board {
             units: Units::Mm,
             outline: None,
             rules: DesignRules::default(),
+            stackup: None,
             layers: vec![
                 layer("F.Cu", "F.Cu", LayerKind::Copper, "#c87533"),
                 layer("B.Cu", "B.Cu", LayerKind::Copper, "#2f6fb0"),
@@ -1356,6 +1387,53 @@ impl Board {
         Ok(json!(outline))
     }
 
+    /// Sets the physical stackup used by controlled-impedance calculations.
+    pub(crate) fn set_stackup(&mut self, request: SetStackupRequest) -> Result<Value, ServiceError> {
+        let copper_thickness = positive(request.copper_thickness, "copperThickness")?;
+        let dielectric_height = positive(request.dielectric_height, "dielectricHeight")?;
+        let dielectric_constant = finite(request.dielectric_constant, "dielectricConstant")?;
+        if dielectric_constant < 1.0 {
+            return Err(crate::argument("`dielectricConstant` must be at least 1"));
+        }
+        let stackup = Stackup { copper_thickness, dielectric_height, dielectric_constant };
+        self.stackup = Some(stackup);
+        self.revision += 1;
+        Ok(stackup.to_value())
+    }
+
+    /// Resolves stackup values for one impedance request.
+    ///
+    /// Explicit values override the stored stackup. When the board has no
+    /// stackup, `dielectricHeight` and `dielectricConstant` are required;
+    /// `copperThickness` falls back to 0.035 mm, the usual 1 oz foil.
+    pub(crate) fn resolved_stackup(
+        &self,
+        copper_thickness: Option<f64>,
+        dielectric_height: Option<f64>,
+        dielectric_constant: Option<f64>,
+    ) -> Result<Stackup, ServiceError> {
+        let stored = self.stackup;
+        let copper_thickness = copper_thickness.or(stored.map(|stackup| stackup.copper_thickness)).unwrap_or(0.035);
+        let dielectric_height = dielectric_height.or(stored.map(|stackup| stackup.dielectric_height)).ok_or_else(|| {
+            crate::argument("this board has no stackup; set one with `board.setStackup` or pass `dielectricHeight`")
+        })?;
+        let dielectric_constant =
+            dielectric_constant.or(stored.map(|stackup| stackup.dielectric_constant)).ok_or_else(|| {
+                crate::argument("this board has no stackup; set one with `board.setStackup` or pass `dielectricConstant`")
+            })?;
+        Ok(Stackup {
+            copper_thickness: positive(copper_thickness, "copperThickness")?,
+            dielectric_height: positive(dielectric_height, "dielectricHeight")?,
+            dielectric_constant: {
+                let value = finite(dielectric_constant, "dielectricConstant")?;
+                if value < 1.0 {
+                    return Err(crate::argument("`dielectricConstant` must be at least 1"));
+                }
+                value
+            },
+        })
+    }
+
     /// Adds one copper pour region and returns its public object shape.
     ///
     /// A zone needs a copper layer, at least three vertices and a non-zero
@@ -1994,6 +2072,14 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
             return Err(crate::invalid(format!("design rule `{field}` must not be negative")));
         }
     }
+    if let Some(stackup) = &board.stackup {
+        sizes(stackup.copper_thickness, "stackup copperThickness")?;
+        sizes(stackup.dielectric_height, "stackup dielectricHeight")?;
+        checks(stackup.dielectric_constant, "stackup dielectricConstant")?;
+        if stackup.dielectric_constant < 1.0 {
+            return Err(crate::invalid("stackup dielectricConstant must be at least 1"));
+        }
+    }
     if let Some(outline) = &board.outline {
         checks(outline.from[0], "outline from.x")?;
         checks(outline.from[1], "outline from.y")?;
@@ -2368,6 +2454,7 @@ pub(crate) fn summary(board: &Board) -> Value {
         "units": board.units,
         "outline": board.outline,
         "rules": board.rules,
+        "stackup": board.stackup.map(Stackup::to_value),
         "waivers": board.waivers.iter().map(Waiver::to_value).collect::<Vec<_>>(),
         "severityOverrides": board.severity_overrides,
         "netClasses": board.net_classes.iter().map(NetClass::to_value).collect::<Vec<_>>(),
@@ -2745,6 +2832,58 @@ pub struct SetRulesRequest {
     pub hole_to_edge: Option<f64>,
     /// Solder-mask expansion around each pad, per side and in millimetres.
     pub solder_mask_expansion: Option<f64>,
+}
+
+/// Request of [`crate::set_stackup`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetStackupRequest {
+    /// Copper foil thickness, in millimetres.
+    pub copper_thickness: f64,
+    /// Dielectric thickness between adjacent copper layers, in millimetres.
+    pub dielectric_height: f64,
+    /// Relative permittivity of the dielectric; at least 1.
+    pub dielectric_constant: f64,
+}
+
+/// Request of [`crate::stackup_impedance`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpedanceRequest {
+    /// Trace geometry: `microstrip` (default) or `stripline`.
+    #[serde(default)]
+    pub structure: Option<String>,
+    /// Trace width, in millimetres.
+    pub width: f64,
+    /// Dielectric thickness, in millimetres; defaults to the board stackup.
+    #[serde(default)]
+    pub dielectric_height: Option<f64>,
+    /// Relative permittivity; defaults to the board stackup.
+    #[serde(default)]
+    pub dielectric_constant: Option<f64>,
+    /// Copper foil thickness, in millimetres; defaults to the board stackup or 0.035.
+    #[serde(default)]
+    pub copper_thickness: Option<f64>,
+}
+
+/// Request of [`crate::stackup_width`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WidthRequest {
+    /// Trace geometry: `microstrip` (default) or `stripline`.
+    #[serde(default)]
+    pub structure: Option<String>,
+    /// Target single-ended impedance, in ohms.
+    pub impedance: f64,
+    /// Dielectric thickness, in millimetres; defaults to the board stackup.
+    #[serde(default)]
+    pub dielectric_height: Option<f64>,
+    /// Relative permittivity; defaults to the board stackup.
+    #[serde(default)]
+    pub dielectric_constant: Option<f64>,
+    /// Copper foil thickness, in millimetres; defaults to the board stackup or 0.035.
+    #[serde(default)]
+    pub copper_thickness: Option<f64>,
 }
 
 /// Request of [`crate::route`].

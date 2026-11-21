@@ -23,6 +23,7 @@
 
 mod board;
 mod export;
+mod impedance;
 mod inspect;
 mod ipc2581;
 mod ipc2581_import;
@@ -39,9 +40,9 @@ use std::{fs, path::Path};
 pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
     AddPadRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest,
-    AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions,
-    SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    UpdatePadRequest,
+    AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest, ImpedanceRequest, MoveFootprintRequest,
+    RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest,
+    UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 use serde_json::{Map, Value, json};
@@ -174,6 +175,8 @@ pub fn capabilities() -> Value {
         "viaStitching": "supported",
         "netClasses": "supported",
         "testPoints": "supported",
+        "stackup": "supported",
+        "impedance": "supported",
     })
 }
 
@@ -627,6 +630,57 @@ pub fn set_rules(handle: u64, request: SetRulesRequest) -> Result<Value, Service
     edit_result(handle, Some(object), None)
 }
 
+/// Declares the physical stackup used by controlled-impedance calculations.
+pub fn set_stackup(handle: u64, request: SetStackupRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.set_stackup(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Computes the single-ended impedance of one trace from the board stackup.
+///
+/// Request overrides replace the stored stackup per call, so a caller can test a
+/// width before committing a stackup. The structure defaults to microstrip.
+pub fn stackup_impedance(handle: u64, request: ImpedanceRequest) -> Result<Value, ServiceError> {
+    store::read(handle, |board| {
+        let structure = impedance::Structure::parse(request.structure.as_deref())?;
+        let stackup =
+            board.resolved_stackup(request.copper_thickness, request.dielectric_height, request.dielectric_constant)?;
+        let value = impedance::impedance(structure, request.width, stackup)?;
+        Ok(json!({
+            "revision": board.revision,
+            "structure": structure.name(),
+            "width": round6(request.width),
+            "impedance": round6(value),
+            "copperThickness": round6(stackup.copper_thickness),
+            "dielectricHeight": round6(stackup.dielectric_height),
+            "dielectricConstant": round6(stackup.dielectric_constant),
+        }))
+    })?
+}
+
+/// Converts a target impedance to the trace width that reaches it.
+pub fn stackup_width(handle: u64, request: WidthRequest) -> Result<Value, ServiceError> {
+    store::read(handle, |board| {
+        let structure = impedance::Structure::parse(request.structure.as_deref())?;
+        let stackup =
+            board.resolved_stackup(request.copper_thickness, request.dielectric_height, request.dielectric_constant)?;
+        let width = impedance::width(structure, request.impedance, stackup)?;
+        Ok(json!({
+            "revision": board.revision,
+            "structure": structure.name(),
+            "impedance": round6(request.impedance),
+            "width": round6(width),
+            "copperThickness": round6(stackup.copper_thickness),
+            "dielectricHeight": round6(stackup.dielectric_height),
+            "dielectricConstant": round6(stackup.dielectric_constant),
+        }))
+    })?
+}
+
 /// Declares one net on an open board.
 pub fn add_net(handle: u64, request: AddNetRequest) -> Result<Value, ServiceError> {
     let mut object = Value::Null;
@@ -717,6 +771,15 @@ fn edit_result(handle: u64, object: Option<Value>, deleted: Option<String>) -> R
         value["deleted"] = Value::String(deleted);
     }
     Ok(value)
+}
+
+/// Rounds a computed value for a readable API report without a negative zero.
+fn round6(value: f64) -> f64 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    let value = (value * 1_000_000.0).round() / 1_000_000.0;
+    if value == 0.0 { 0.0 } else { value }
 }
 
 /// Writes bytes through a temporary sibling and renames the result into place.

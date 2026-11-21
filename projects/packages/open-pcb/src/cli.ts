@@ -22,6 +22,7 @@ import type {
     BoardRules,
     BoardSummary,
     ExportTarget,
+    ImpedanceStructure,
     InspectCheck,
     InspectReport,
     LayerKind,
@@ -1357,6 +1358,139 @@ severity
         await withBoard(file, async (board) => {
             const result = await board.deleteSeverity(code);
             ctx.emitResult(result, `removed severity override for ${code}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const stackup = cli.command('stackup', 'cli.cmd.stackup');
+stackup
+    .command('set', 'cli.cmd.stackup-set')
+    .option('--copper-thickness <mm>', 'cli.opt.copper-thickness')
+    .option('--dielectric-height <mm>', 'cli.opt.dielectric-height')
+    .option('--dielectric-constant <er>', 'cli.opt.dielectric-constant')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const copperThickness = numberOption(text(options, 'copper-thickness'));
+        const dielectricHeight = numberOption(text(options, 'dielectric-height'));
+        const dielectricConstant = numberOption(text(options, 'dielectric-constant'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (copperThickness === undefined || copperThickness <= 0) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--copper-thickness <mm>` must be greater than zero' });
+            return 2;
+        }
+        if (dielectricHeight === undefined || dielectricHeight <= 0) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--dielectric-height <mm>` must be greater than zero' });
+            return 2;
+        }
+        if (dielectricConstant === undefined || dielectricConstant < 1) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--dielectric-constant <er>` must be at least 1' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.setStackup({ copperThickness, dielectricHeight, dielectricConstant });
+            ctx.emitResult(
+                result,
+                `stackup copper=${copperThickness}mm dielectric=${dielectricHeight}mm er=${dielectricConstant}`,
+            );
+            return 0;
+        });
+        return 0;
+    });
+
+stackup.command('show', 'cli.cmd.stackup-show').actionCtx(async (options, _args, ctx) => {
+    const file = input(options);
+    if (file === undefined) {
+        ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+        return 2;
+    }
+    await withBoard(file, async (board) => {
+        const summary = await board.list();
+        ctx.emitResult(summary.stackup, summary.stackup === null ? 'stackup unset' : JSON.stringify(summary.stackup));
+        return 0;
+    });
+    return 0;
+});
+
+function impedanceStructure(raw: string | undefined): ImpedanceStructure | undefined {
+    if (raw === undefined) {
+        return undefined;
+    }
+    return raw === 'microstrip' || raw === 'stripline' ? raw : undefined;
+}
+
+stackup
+    .command('impedance', 'cli.cmd.stackup-impedance')
+    .option('--structure <microstrip|stripline>', 'cli.opt.structure')
+    .option('--width <mm>', 'cli.opt.width')
+    .option('--dielectric-height <mm>', 'cli.opt.dielectric-height')
+    .option('--dielectric-constant <er>', 'cli.opt.dielectric-constant')
+    .option('--copper-thickness <mm>', 'cli.opt.copper-thickness')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const width = numberOption(text(options, 'width'));
+        const structure = impedanceStructure(text(options, 'structure'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (text(options, 'structure') !== undefined && structure === undefined) {
+            ctx.fail('open-pcb.cli.structure-invalid', { message: '`--structure` must be microstrip or stripline' });
+            return 2;
+        }
+        if (width === undefined || width <= 0) {
+            ctx.fail('open-pcb.cli.width-required', { message: '`--width <mm>` must be greater than zero' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.impedance({
+                structure,
+                width,
+                dielectricHeight: numberOption(text(options, 'dielectric-height')),
+                dielectricConstant: numberOption(text(options, 'dielectric-constant')),
+                copperThickness: numberOption(text(options, 'copper-thickness')),
+            });
+            ctx.emitResult(report, `${report.structure} width=${report.width}mm impedance=${report.impedance}ohm`);
+            return 0;
+        });
+        return 0;
+    });
+
+stackup
+    .command('width', 'cli.cmd.stackup-width')
+    .option('--structure <microstrip|stripline>', 'cli.opt.structure')
+    .option('--impedance <ohm>', 'cli.opt.impedance')
+    .option('--dielectric-height <mm>', 'cli.opt.dielectric-height')
+    .option('--dielectric-constant <er>', 'cli.opt.dielectric-constant')
+    .option('--copper-thickness <mm>', 'cli.opt.copper-thickness')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const target = numberOption(text(options, 'impedance'));
+        const structure = impedanceStructure(text(options, 'structure'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (text(options, 'structure') !== undefined && structure === undefined) {
+            ctx.fail('open-pcb.cli.structure-invalid', { message: '`--structure` must be microstrip or stripline' });
+            return 2;
+        }
+        if (target === undefined || target <= 0) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--impedance <ohm>` must be greater than zero' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.impedanceWidth({
+                structure,
+                impedance: target,
+                dielectricHeight: numberOption(text(options, 'dielectric-height')),
+                dielectricConstant: numberOption(text(options, 'dielectric-constant')),
+                copperThickness: numberOption(text(options, 'copper-thickness')),
+            });
+            ctx.emitResult(report, `${report.structure} impedance=${report.impedance}ohm width=${report.width}mm`);
             return 0;
         });
         return 0;

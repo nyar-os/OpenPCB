@@ -14,15 +14,15 @@ use serde_json::Value;
 use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
     AddPadRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest,
-    AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, MoveFootprintRequest, RouteOptions,
-    SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_teardrops,
-    add_test_point, add_track, add_via, add_waiver, add_zone, assign_net_class,
+    AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest, MoveFootprintRequest,
+    RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest,
+    UpdateFootprintRequest, UpdateLayerRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer,
+    add_net, add_net_class, add_pad, add_teardrops, add_test_point, add_track, add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class, delete_severity,
     delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import, inspect, move_footprint, open,
-    redo, route, save, set_outline, set_rules, set_severity, set_via_back_drill, stitch_vias, store, summary, undo,
-    update_footprint, update_layer,
+    redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance, stackup_width,
+    stitch_vias, store, summary, undo, update_footprint, update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -197,6 +197,8 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["viaStitching"], "supported");
     assert_eq!(matrix["netClasses"], "supported");
     assert_eq!(matrix["testPoints"], "supported");
+    assert_eq!(matrix["stackup"], "supported");
+    assert_eq!(matrix["impedance"], "supported");
 }
 
 #[test]
@@ -686,6 +688,113 @@ fn design_rules_are_editable_persistent_and_drive_solder_mask() {
     fs::write(&invalid_path, serde_json::to_string(&Document::new(invalid)).expect("the document serializes"))
         .expect("the invalid document is written");
     assert_eq!(open(&invalid_path).expect_err("a negative solder-mask rule is rejected").code, "format/invalid");
+}
+
+#[test]
+fn stackup_drives_impedance_and_width_conversion() {
+    let directory = TempDir::new();
+    let handle = created();
+    assert!(summary(handle).expect("the board is listed")["stackup"].is_null(), "a new board has no stackup");
+
+    let updated =
+        set_stackup(handle, SetStackupRequest { copper_thickness: 0.035, dielectric_height: 0.2, dielectric_constant: 4.2 })
+            .expect("the stackup is declared");
+    assert_eq!(updated["revision"], 2);
+    assert_eq!(updated["object"]["dielectricHeight"], 0.2);
+    assert_eq!(updated["board"]["stackup"]["copperThickness"], 0.035);
+
+    let microstrip = stackup_impedance(
+        handle,
+        ImpedanceRequest {
+            structure: Some("microstrip".to_string()),
+            width: 0.2,
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("microstrip impedance is computed");
+    let value = microstrip["impedance"].as_f64().expect("a number");
+    assert!((50.0..80.0).contains(&value), "microstrip impedance is plausible: {value}");
+    assert_eq!(microstrip["structure"], "microstrip");
+    assert_eq!(microstrip["dielectricHeight"], 0.2);
+
+    let stripline = stackup_impedance(
+        handle,
+        ImpedanceRequest {
+            structure: Some("stripline".to_string()),
+            width: 0.2,
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("stripline impedance is computed");
+    let stripline_value = stripline["impedance"].as_f64().expect("a number");
+    assert!(stripline_value < value, "a stripline is lower impedance than a microstrip at the same width");
+
+    let converted = stackup_width(
+        handle,
+        WidthRequest {
+            structure: Some("microstrip".to_string()),
+            impedance: 50.0,
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("the width for 50 ohm is solved");
+    let width = converted["width"].as_f64().expect("a number");
+    assert!(width > 0.0 && width < 5.0, "the solved width is bounded: {width}");
+    let round_trip = stackup_impedance(
+        handle,
+        ImpedanceRequest {
+            structure: Some("microstrip".to_string()),
+            width,
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("the solved width is evaluated");
+    let achieved = round_trip["impedance"].as_f64().expect("a number");
+    assert!((achieved - 50.0).abs() < 0.01, "the solved width reaches the target: {achieved}");
+
+    let path = directory.join("stackup.opcb");
+    save(handle, &path, false).expect("the stackup board saves");
+    let reopened = handle_of(&open(&path).expect("the stackup board reopens"));
+    let stackup = summary(reopened).expect("the reopened board is listed")["stackup"].clone();
+    assert_eq!(stackup["dielectricHeight"], 0.2);
+    assert_eq!(stackup["dielectricConstant"], 4.2);
+    close(reopened).expect("the reopened board closes");
+    close(handle).expect("the board closes");
+
+    let bare = created();
+    let missing = stackup_impedance(
+        bare,
+        ImpedanceRequest {
+            structure: None,
+            width: 0.2,
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect_err("a board without a stackup cannot compute impedance");
+    assert_eq!(missing.code, "session/argument-invalid");
+    let invalid = stackup_impedance(
+        bare,
+        ImpedanceRequest {
+            structure: Some("coplanar".to_string()),
+            width: 0.2,
+            dielectric_height: Some(0.2),
+            dielectric_constant: Some(4.2),
+            copper_thickness: None,
+        },
+    )
+    .expect_err("an unknown structure is rejected");
+    assert_eq!(invalid.code, "session/argument-invalid");
+    close(bare).expect("the bare board closes");
 }
 
 #[test]

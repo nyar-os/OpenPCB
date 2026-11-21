@@ -108,6 +108,71 @@ export interface BoardRules {
     readonly solderMaskExpansion: number;
 }
 
+/** Physical layer stack used by controlled-impedance calculations. */
+export interface BoardStackup {
+    /** Copper foil thickness, in millimetres. */
+    readonly copperThickness: number;
+    /** Dielectric thickness between adjacent copper layers, in millimetres. */
+    readonly dielectricHeight: number;
+    /** Relative permittivity of the dielectric; at least 1. */
+    readonly dielectricConstant: number;
+}
+
+/** Trace geometry accepted by the impedance helpers. */
+export type ImpedanceStructure = 'microstrip' | 'stripline';
+
+/** Options of `board.impedance()`. */
+export interface ImpedanceOptions {
+    /** Trace geometry; defaults to `microstrip`. */
+    readonly structure?: ImpedanceStructure;
+    /** Trace width, in millimetres. */
+    readonly width: number;
+    /** Overrides the stored dielectric height. */
+    readonly dielectricHeight?: number;
+    /** Overrides the stored dielectric constant. */
+    readonly dielectricConstant?: number;
+    /** Overrides the stored copper thickness. */
+    readonly copperThickness?: number;
+}
+
+/** Result of `board.impedance()`. */
+export interface ImpedanceReport {
+    readonly revision: number;
+    readonly structure: ImpedanceStructure;
+    readonly width: number;
+    /** Single-ended impedance, in ohms. */
+    readonly impedance: number;
+    readonly copperThickness: number;
+    readonly dielectricHeight: number;
+    readonly dielectricConstant: number;
+}
+
+/** Options of `board.impedanceWidth()`. */
+export interface ImpedanceWidthOptions {
+    /** Trace geometry; defaults to `microstrip`. */
+    readonly structure?: ImpedanceStructure;
+    /** Target single-ended impedance, in ohms. */
+    readonly impedance: number;
+    /** Overrides the stored dielectric height. */
+    readonly dielectricHeight?: number;
+    /** Overrides the stored dielectric constant. */
+    readonly dielectricConstant?: number;
+    /** Overrides the stored copper thickness. */
+    readonly copperThickness?: number;
+}
+
+/** Result of `board.impedanceWidth()`. */
+export interface ImpedanceWidthReport {
+    readonly revision: number;
+    readonly structure: ImpedanceStructure;
+    readonly impedance: number;
+    /** Trace width that reaches the target, in millimetres. */
+    readonly width: number;
+    readonly copperThickness: number;
+    readonly dielectricHeight: number;
+    readonly dielectricConstant: number;
+}
+
 /** Render targets declared for preview surfaces. */
 export type RenderFormat = 'svg' | 'png' | 'pdf';
 
@@ -176,6 +241,10 @@ export interface BoardCapabilities {
     readonly netClasses: SupportLevel;
     /** Whether declared test points can be reported. */
     readonly testPoints: SupportLevel;
+    /** Whether a physical stackup can be declared and read. */
+    readonly stackup: SupportLevel;
+    /** Whether microstrip and stripline impedance and width conversion are available. */
+    readonly impedance: SupportLevel;
 }
 
 /** Options of `OpenPCB.create()`. */
@@ -250,6 +319,8 @@ export interface BoardSummary {
     readonly outline: BoardOutline | null;
     /** Design-rule values the checks and writers read. */
     readonly rules: BoardRules;
+    /** Physical stackup, when one has been declared. */
+    readonly stackup: BoardStackup | null;
     /** Declared waivers. */
     readonly waivers: readonly BoardWaiver[];
     /** Severity overrides keyed by finding code. */
@@ -646,6 +717,16 @@ export interface SetRulesOptions {
     readonly solderMaskExpansion?: number;
 }
 
+/** Options of `board.setStackup()`. */
+export interface SetStackupOptions {
+    /** Copper foil thickness, in millimetres. */
+    readonly copperThickness: number;
+    /** Dielectric thickness between adjacent copper layers, in millimetres. */
+    readonly dielectricHeight: number;
+    /** Relative permittivity of the dielectric; at least 1. */
+    readonly dielectricConstant: number;
+}
+
 /** Options of `board.addWaiver()`. */
 export interface AddWaiverOptions {
     /** Finding code to silence, such as `drc/track-width-too-small`. */
@@ -712,6 +793,9 @@ export interface Board {
     updateLayer(options: UpdateLayerOptions): Promise<BoardEditResult>;
     setOutline(options: SetOutlineOptions): Promise<BoardEditResult>;
     setRules(options: SetRulesOptions): Promise<BoardEditResult>;
+    setStackup(options: SetStackupOptions): Promise<BoardEditResult>;
+    impedance(options: ImpedanceOptions): Promise<ImpedanceReport>;
+    impedanceWidth(options: ImpedanceWidthOptions): Promise<ImpedanceWidthReport>;
     addWaiver(options: AddWaiverOptions): Promise<BoardEditResult>;
     deleteWaiver(id: ObjectId): Promise<BoardEditResult>;
     setSeverity(options: SetSeverityOptions): Promise<BoardEditResult>;

@@ -55,6 +55,9 @@ export interface NativeBinding {
     board_update_layer(handle: number, requestJson: string): string;
     board_set_outline(handle: number, requestJson: string): string;
     board_set_rules(handle: number, requestJson: string): string;
+    board_set_stackup(handle: number, requestJson: string): string;
+    stackup_impedance(handle: number, requestJson: string): string;
+    stackup_width(handle: number, requestJson: string): string;
     board_list(handle: number): string;
     openGui(options?: { title?: string; contentDir?: string; width?: number; height?: number }): string;
     pumpEvents(): string;
