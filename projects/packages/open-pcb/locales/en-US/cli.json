@@ -59,6 +59,8 @@
             "at": "Via centre as x,y",
             "diameter": "Via copper diameter",
             "drill": "Via finished drill diameter",
+            "from-layer": "Top copper layer of a blind or buried via",
+            "to-layer": "Bottom copper layer of a blind or buried via",
             "name": "Net or layer name",
             "kind": "Layer kind: copper, silkscreen, soldermask, assembly or mechanical",
             "color": "Layer CSS colour, for example #c87533",

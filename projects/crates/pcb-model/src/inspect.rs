@@ -415,8 +415,9 @@ fn track_width(board: &Board, issues: &mut CheckReport) {
 /// Reports nets whose pads are not joined by tracks and vias.
 ///
 /// The graph connects a track to a pad when an endpoint touches the pad centre
-/// on the pad layer, to a via at a shared endpoint, and to another track of the
-/// same net that shares a same-layer endpoint.
+/// on the pad layer, to a via at a shared endpoint when the via reaches the
+/// track layer, and to another track of the same net that shares a same-layer
+/// endpoint. A via joins a pad only when it reaches the pad layer.
 fn unrouted(board: &Board, issues: &mut CheckReport) {
     let scale = board.millimetres();
     if scale <= 0.0 {
@@ -445,7 +446,9 @@ fn unrouted(board: &Board, issues: &mut CheckReport) {
                 }
             }
             for (via_index, via) in vias.iter().enumerate() {
-                if near(track.from, via.at, tolerance) || near(track.to, via.at, tolerance) {
+                if board.via_covers(via, &track.layer)
+                    && (near(track.from, via.at, tolerance) || near(track.to, via.at, tolerance))
+                {
                     groups.union(node, via_base + via_index);
                 }
             }
@@ -464,7 +467,7 @@ fn unrouted(board: &Board, issues: &mut CheckReport) {
         }
         for (via_index, via) in vias.iter().enumerate() {
             for (pad_index, pad) in pads.iter().enumerate() {
-                if near(via.at, pad.at, tolerance) {
+                if board.via_covers(via, pad.layer) && near(via.at, pad.at, tolerance) {
                     groups.union(via_base + via_index, pad_index);
                 }
             }

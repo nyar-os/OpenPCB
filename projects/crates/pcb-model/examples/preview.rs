@@ -109,7 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     for at in [[30.0, 20.0], [50.0, 20.0], [50.0, 40.0], [26.0, 40.0]] {
-        add_via(handle, AddViaRequest { net: Some("SIG".into()), at, diameter: 1.4, drill: 0.7 })?;
+        add_via(handle, AddViaRequest { net: Some("SIG".into()), at, diameter: 1.4, drill: 0.7, ..Default::default() })?;
     }
 
     for format in ["svg", "pdf", "png"] {

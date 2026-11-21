@@ -19,8 +19,8 @@ This repository ships a tested MVP of the board document. The command line,
 SDK and studio shell share one native model:
 
 - Create, open, save, inspect, export and close a revisioned `.opcb` document.
-- Add nets, footprints, tracks and vias; move and update footprints; delete
-  footprints, tracks and vias.
+- Add nets, footprints, tracks and through, blind or buried vias; move and
+  update footprints; delete footprints, tracks and vias.
 - Add, rename, hide and lock layers; set a rectangular board outline.
 - Undo and redo up to 32 snapshots per handle, optionally persisted in
   `<file>.history.json` with `history: 'sidecar'`, with `canUndo`/`canRedo` on
@@ -33,12 +33,15 @@ SDK and studio shell share one native model:
   footprints and pads, tracks, through vias and a rectangular `Edge.Cuts`
   outline, with a stable loss ledger for everything the document cannot hold.
 - Write Gerber RS-274X, Excellon drill, BOM, pick-and-place, SVG, vector PDF,
-  8-bit RGB PNG, KiCad PCB and IPC-2581 files atomically.
+  8-bit RGB PNG, KiCad PCB and IPC-2581 files atomically. Gerber writes one
+  file per copper layer plus `F_SilkS` and `Edge_Cuts`; one Excellon file lists
+  every drilled hole, including blind and buried vias.
 
 STEP export and IPC-2581 import remain declared and reject with
 `capability/not-implemented`. PNG is an export writer only; preview rendering
 stays SVG-only. The interactive viewport renderer is not implemented either.
-`open-pcb capabilities` prints exactly that matrix.
+The capability matrix reports through, blind and buried vias as supported and
+micro vias as unsupported. `open-pcb capabilities` prints exactly that matrix.
 
 ## Usage
 
@@ -57,6 +60,7 @@ open-pcb net add blinker.opcb --name VCC
 open-pcb footprint add blinker.opcb --ref U1 --value MCU --footprint QFN32 --x 30 --y 20 --rotation 0 --layer F.Cu
 open-pcb track add blinker.opcb --net VCC --layer F.Cu --from 10,10 --to 30,10 --width 0.25
 open-pcb via add blinker.opcb --net VCC --at 20,20 --diameter 0.6 --drill 0.3
+open-pcb via add blinker.opcb --net VCC --at 25,20 --diameter 0.6 --drill 0.3 --from-layer F.Cu --to-layer In1
 
 # Route all two-pad nets, then route only VCC at a wider width
 open-pcb route blinker.opcb
@@ -84,7 +88,7 @@ open-pcb redo blinker.opcb
 open-pcb list blinker.opcb
 open-pcb inspect blinker.opcb --checks drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline
 
-# Export the implemented targets; Gerber writes a directory of four files
+# Export the implemented targets; Gerber writes one file per copper layer plus silk and edge cuts
 open-pcb export blinker.opcb --format gbr --out gerber
 open-pcb export blinker.opcb --format drl --out blinker.drl
 open-pcb export blinker.opcb --format bom --out blinker.bom.csv

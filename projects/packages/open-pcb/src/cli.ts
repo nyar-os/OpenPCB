@@ -497,6 +497,8 @@ via
     .option('--at <x,y>', 'cli.opt.at')
     .option('--diameter <mm>', 'cli.opt.diameter')
     .option('--drill <mm>', 'cli.opt.drill')
+    .option('--from-layer <layer>', 'cli.opt.from-layer')
+    .option('--to-layer <layer>', 'cli.opt.to-layer')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         if (file === undefined) {
@@ -519,7 +521,14 @@ via
             return 2;
         }
         await withBoard(file, async (board) => {
-            const result = await board.addVia({ net: text(options, 'net'), at, diameter, drill });
+            const result = await board.addVia({
+                net: text(options, 'net'),
+                at,
+                diameter,
+                drill,
+                fromLayer: text(options, 'from-layer'),
+                toLayer: text(options, 'to-layer'),
+            });
             ctx.emitResult(result, `added ${result.object?.id ?? 'via'} at ${at[0]},${at[1]}`);
             return 0;
         });

@@ -89,8 +89,11 @@ fn add_full_board(handle: u64) {
         },
     )
     .expect("the track is routed");
-    add_via(handle, AddViaRequest { net: Some("VCC".to_string()), at: [20.0, 20.0], diameter: 0.6, drill: 0.3 })
-        .expect("the via is placed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [20.0, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
     set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [100.0, 80.0] }).expect("the outline is set");
 }
 
@@ -152,6 +155,10 @@ fn capability_matrix_matches_the_implemented_pack() {
     }
     assert_eq!(matrix["exportTargets"]["step"], "unsupported");
     assert_eq!(matrix["checks"]["outline"], "supported");
+    assert_eq!(matrix["vias"]["through"], "supported");
+    assert_eq!(matrix["vias"]["blind"], "supported");
+    assert_eq!(matrix["vias"]["buried"], "supported");
+    assert_eq!(matrix["vias"]["micro"], "unsupported");
     assert_eq!(matrix["routing"], "supported");
 }
 
@@ -415,8 +422,18 @@ fn drc_flags_via_rules_and_netlist() {
         at: [0.0, 0.0],
         diameter: 0.6,
         drill: 0.0,
+        from_layer: None,
+        to_layer: None,
     });
-    board.vias.push(Via { id: "via-ring".to_string(), net: None, at: [5.0, 0.0], diameter: 0.3, drill: 0.3 });
+    board.vias.push(Via {
+        id: "via-ring".to_string(),
+        net: None,
+        at: [5.0, 0.0],
+        diameter: 0.3,
+        drill: 0.3,
+        from_layer: None,
+        to_layer: None,
+    });
     board.footprints.push(Footprint {
         id: "fp-1".to_string(),
         ref_: "U1".to_string(),
@@ -867,7 +884,7 @@ fn editing_validates_arguments_and_tracks_revisions() {
     assert_eq!(thin.code, "session/argument-invalid");
 
     assert_eq!(
-        add_via(handle, AddViaRequest { net: None, at: [0.0, 0.0], diameter: 0.6, drill: 0.0 })
+        add_via(handle, AddViaRequest { net: None, at: [0.0, 0.0], diameter: 0.6, drill: 0.0, ..Default::default() })
             .expect_err("a zero drill is rejected")
             .code,
         "session/argument-invalid"
@@ -1026,7 +1043,8 @@ fn footprint_moves_updates_and_track_and_via_deletion() {
     .expect("the footprint is placed");
     add_track(handle, AddTrackRequest { net: None, layer: "F.Cu".to_string(), width: 0.25, from: [0.0, 0.0], to: [5.0, 0.0] })
         .expect("the track is routed");
-    add_via(handle, AddViaRequest { net: None, at: [2.0, 2.0], diameter: 0.6, drill: 0.3 }).expect("the via is placed");
+    add_via(handle, AddViaRequest { net: None, at: [2.0, 2.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the via is placed");
 
     let moved = move_footprint(
         handle,
@@ -1075,7 +1093,7 @@ fn footprint_moves_updates_and_track_and_via_deletion() {
     );
     assert_eq!(delete_footprint(handle, "fp-1").expect_err("a locked layer rejects deletes").code, "board/layer-locked");
     assert_eq!(
-        add_via(handle, AddViaRequest { net: None, at: [1.0, 1.0], diameter: 0.6, drill: 0.3 })
+        add_via(handle, AddViaRequest { net: None, at: [1.0, 1.0], diameter: 0.6, drill: 0.3, ..Default::default() })
             .expect_err("a locked copper layer rejects new vias")
             .code,
         "board/layer-locked"
@@ -1111,7 +1129,8 @@ fn outline_validation_and_outside_warnings() {
         AddTrackRequest { net: None, layer: "F.Cu".to_string(), width: 0.25, from: [200.0, 0.0], to: [210.0, 0.0] },
     )
     .expect("the track is routed");
-    add_via(handle, AddViaRequest { net: None, at: [300.0, 300.0], diameter: 0.6, drill: 0.3 }).expect("the via is placed");
+    add_via(handle, AddViaRequest { net: None, at: [300.0, 300.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the via is placed");
 
     let report = inspect(handle, Some(vec!["outline".to_string()])).expect("the outline check runs");
     let found = codes(&report);
@@ -1237,8 +1256,11 @@ fn kicad_import_round_trips_an_exported_board() {
         },
     )
     .expect("the back track is routed");
-    add_via(handle, AddViaRequest { net: Some("VCC".to_string()), at: [20.0, 20.0], diameter: 0.6, drill: 0.3 })
-        .expect("the via is placed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [20.0, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
     set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [100.0, 80.0] }).expect("the outline is set");
     export(handle, "kicad_pcb", &source).expect("KiCad export writes");
 
@@ -1487,8 +1509,11 @@ fn router_reports_a_failure_after_bounded_rip_up_retries() {
 fn new_checks_flag_annular_ring_track_width_and_unrouted_nets() {
     let handle = created();
     two_pad_net(handle, [10.0, 10.0], [20.0, 20.0]);
-    add_via(handle, AddViaRequest { net: Some("N1".to_string()), at: [2.0, 2.0], diameter: 0.6, drill: 0.55 })
-        .expect("the thin-ring via is placed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("N1".to_string()), at: [2.0, 2.0], diameter: 0.6, drill: 0.55, ..Default::default() },
+    )
+    .expect("the thin-ring via is placed");
     add_track(handle, AddTrackRequest { net: None, layer: "F.Cu".to_string(), width: 0.05, from: [0.0, 0.0], to: [5.0, 0.0] })
         .expect("the narrow track is routed");
 
@@ -1516,10 +1541,16 @@ fn hole_to_hole_flags_close_drills_of_different_nets_only() {
     for name in ["A", "B"] {
         add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
     }
-    add_via(handle, AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3 })
-        .expect("the first via is placed");
-    add_via(handle, AddViaRequest { net: Some("B".to_string()), at: [10.4, 10.0], diameter: 0.6, drill: 0.3 })
-        .expect("the second via is placed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the first via is placed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("B".to_string()), at: [10.4, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the second via is placed");
 
     let report = inspect(handle, Some(vec!["hole-to-hole".to_string()])).expect("the check runs");
     assert_eq!(codes(&report), ["drc/hole-to-hole"]);
@@ -1531,10 +1562,16 @@ fn hole_to_hole_flags_close_drills_of_different_nets_only() {
 
     let same_net = created();
     add_net(same_net, AddNetRequest { name: "A".to_string() }).expect("the net is declared");
-    add_via(same_net, AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3 })
-        .expect("the first via is placed");
-    add_via(same_net, AddViaRequest { net: Some("A".to_string()), at: [10.4, 10.0], diameter: 0.6, drill: 0.3 })
-        .expect("the second via is placed");
+    add_via(
+        same_net,
+        AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the first via is placed");
+    add_via(
+        same_net,
+        AddViaRequest { net: Some("A".to_string()), at: [10.4, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the second via is placed");
     let report = inspect(same_net, Some(vec!["hole-to-hole".to_string()])).expect("the check runs");
     assert_eq!(codes(&report), Vec::<&str>::new(), "holes on the same net are not a hole-to-hole violation");
     close(same_net).expect("the board closes");
@@ -1549,8 +1586,11 @@ fn copper_to_edge_flags_copper_near_the_border_and_stays_quiet_without_an_outlin
         AddTrackRequest { net: None, layer: "F.Cu".to_string(), width: 0.25, from: [0.2, 10.0], to: [10.0, 10.0] },
     )
     .expect("the track is routed");
-    add_via(handle, AddViaRequest { net: Some("A".to_string()), at: [0.5, 20.0], diameter: 0.6, drill: 0.3 })
-        .expect("the via is placed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [0.5, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
     set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
 
     let report = inspect(handle, Some(vec!["copper-to-edge".to_string()])).expect("the check runs");
@@ -1701,6 +1741,325 @@ fn test_crc32(data: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+fn inner_layers(handle: u64, names: &[&str]) {
+    for name in names {
+        add_layer(handle, AddLayerRequest { name: (*name).to_string(), kind: Some("copper".to_string()), color: None })
+            .expect("the inner copper layer is added");
+    }
+}
+
+#[test]
+fn blind_and_buried_vias_record_their_span() {
+    let handle = created();
+    inner_layers(handle, &["In1.Cu", "In2.Cu"]);
+
+    let through = add_via(handle, AddViaRequest { at: [1.0, 1.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the through via is placed");
+    assert_eq!(through["object"]["kind"], "through");
+    assert_eq!(through["object"]["fromLayer"], "F.Cu");
+    assert_eq!(through["object"]["toLayer"], "B.Cu");
+
+    let blind = add_via(
+        handle,
+        AddViaRequest {
+            at: [2.0, 2.0],
+            diameter: 0.6,
+            drill: 0.3,
+            from_layer: Some("F.Cu".to_string()),
+            to_layer: Some("In1.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the blind via is placed");
+    assert_eq!(blind["object"]["kind"], "blind");
+    assert_eq!(blind["object"]["fromLayer"], "F.Cu");
+    assert_eq!(blind["object"]["toLayer"], "In1.Cu");
+
+    let buried = add_via(
+        handle,
+        AddViaRequest {
+            at: [3.0, 3.0],
+            diameter: 0.6,
+            drill: 0.3,
+            from_layer: Some("In1.Cu".to_string()),
+            to_layer: Some("In2.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the buried via is placed");
+    assert_eq!(buried["object"]["kind"], "buried");
+    assert_eq!(buried["object"]["fromLayer"], "In1.Cu");
+    assert_eq!(buried["object"]["toLayer"], "In2.Cu");
+
+    let summary = summary(handle).expect("the board is open");
+    let count = |id: &str| {
+        summary["layers"]
+            .as_array()
+            .expect("layers is an array")
+            .iter()
+            .find(|layer| layer["id"] == id)
+            .expect("the layer is listed")["objects"]
+            .as_u64()
+            .expect("objects is a count")
+    };
+    assert_eq!(count("F.Cu"), 2, "the through and blind vias reach F.Cu");
+    assert_eq!(count("In1.Cu"), 3, "every via reaches In1");
+    assert_eq!(count("In2.Cu"), 2, "the through and buried vias reach In2");
+    assert_eq!(count("B.Cu"), 1, "only the through via reaches B.Cu");
+
+    let directory = TempDir::new();
+    let path = directory.join("vias.opcb");
+    save(handle, &path, false).expect("the board saves");
+    let value: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the document is readable")).expect("the document is JSON");
+    let vias = value["document"]["vias"].as_array().expect("vias is an array");
+    assert!(vias[0].get("from_layer").is_none(), "a through via omits its span");
+    assert!(vias[0].get("to_layer").is_none());
+    assert_eq!(vias[1]["from_layer"], "F.Cu");
+    assert_eq!(vias[1]["to_layer"], "In1.Cu");
+    assert_eq!(vias[2]["from_layer"], "In1.Cu");
+    assert_eq!(vias[2]["to_layer"], "In2.Cu");
+    close(handle).expect("the board closes");
+
+    let reopened = open(&path).expect("the document reopens");
+    let reopened_handle = handle_of(&reopened);
+    let kinds =
+        store::read(reopened_handle, |board| board.vias.iter().map(|via| board.via_kind(via).to_string()).collect::<Vec<_>>())
+            .expect("the board is readable");
+    assert_eq!(kinds, ["through", "blind", "buried"]);
+    close(reopened_handle).expect("the reopened board closes");
+}
+
+#[test]
+fn via_spans_reject_invalid_arguments_and_locked_layers() {
+    let handle = created();
+    inner_layers(handle, &["In1.Cu"]);
+
+    let request = |from: Option<&str>, to: Option<&str>| AddViaRequest {
+        at: [0.0, 0.0],
+        diameter: 0.6,
+        drill: 0.3,
+        from_layer: from.map(str::to_string),
+        to_layer: to.map(str::to_string),
+        ..Default::default()
+    };
+    for (from, to) in [
+        (None, Some("In1.Cu")),
+        (Some("In1.Cu"), None),
+        (Some("F.Cu"), Some("F.Cu")),
+        (Some("F.Cu"), Some("X.Cu")),
+        (Some("F.SilkS"), Some("B.Cu")),
+        (Some("B.Cu"), Some("F.Cu")),
+    ] {
+        assert_eq!(
+            add_via(handle, request(from, to)).expect_err("the span is rejected").code,
+            "session/argument-invalid",
+            "{from:?} -> {to:?}"
+        );
+    }
+
+    update_layer(handle, UpdateLayerRequest { id: "In1.Cu".to_string(), locked: Some(true), ..Default::default() })
+        .expect("the inner layer is locked");
+    assert_eq!(
+        add_via(handle, request(Some("F.Cu"), Some("In1.Cu"))).expect_err("a locked span layer is rejected").code,
+        "board/layer-locked"
+    );
+    assert_eq!(
+        add_via(handle, request(Some("In1.Cu"), Some("B.Cu"))).expect_err("a locked span layer is rejected").code,
+        "board/layer-locked"
+    );
+    add_via(handle, request(None, None)).expect("a through via keeps checking only the outer layers");
+    update_layer(handle, UpdateLayerRequest { id: "In1.Cu".to_string(), locked: Some(false), ..Default::default() })
+        .expect("the inner layer is unlocked");
+
+    let blind = add_via(handle, request(Some("F.Cu"), Some("In1.Cu"))).expect("the blind via is placed after unlocking");
+    let blind_id = blind["object"]["id"].as_str().expect("the via id").to_string();
+    update_layer(handle, UpdateLayerRequest { id: "In1.Cu".to_string(), locked: Some(true), ..Default::default() })
+        .expect("the inner layer is locked");
+    assert_eq!(delete_via(handle, &blind_id).expect_err("a locked span rejects deletes").code, "board/layer-locked");
+    close(handle).expect("the board closes");
+
+    let mut board = crafted();
+    board.vias.push(Via {
+        id: "via-1".to_string(),
+        net: None,
+        at: [0.0, 0.0],
+        diameter: 0.6,
+        drill: 0.3,
+        from_layer: Some("F.Cu".to_string()),
+        to_layer: None,
+    });
+    let directory = TempDir::new();
+    let path = directory.join("half-span.opcb");
+    fs::write(&path, serde_json::to_string(&Document::new(board)).expect("the document serializes"))
+        .expect("the document is written");
+    assert_eq!(open(&path).expect_err("a half span is rejected").code, "format/invalid");
+
+    let mut reversed = crafted();
+    reversed.vias.push(Via {
+        id: "via-1".to_string(),
+        net: None,
+        at: [0.0, 0.0],
+        diameter: 0.6,
+        drill: 0.3,
+        from_layer: Some("B.Cu".to_string()),
+        to_layer: Some("F.Cu".to_string()),
+    });
+    let reversed_path = directory.join("reversed-span.opcb");
+    fs::write(&reversed_path, serde_json::to_string(&Document::new(reversed)).expect("the document serializes"))
+        .expect("the document is written");
+    assert_eq!(open(&reversed_path).expect_err("a reversed span is rejected").code, "format/invalid");
+}
+
+#[test]
+fn unrouted_respects_the_via_layer_span() {
+    let handle = created();
+    inner_layers(handle, &["In1.Cu"]);
+    add_net(handle, AddNetRequest { name: "N1".to_string() }).expect("the net is declared");
+    for (index, (reference, layer)) in [("U1", "F.Cu"), ("U2", "B.Cu")].iter().enumerate() {
+        add_footprint(
+            handle,
+            AddFootprintRequest {
+                reference: Some((*reference).to_string()),
+                x: Some(10.0 + 20.0 * index as f64),
+                y: Some(10.0),
+                layer: Some((*layer).to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("the footprint is placed");
+        add_pad(
+            handle,
+            AddPadRequest {
+                footprint: format!("fp-{}", index + 1),
+                number: "1".to_string(),
+                x: 0.0,
+                y: 0.0,
+                w: 0.5,
+                h: 0.5,
+                net: Some("N1".to_string()),
+            },
+        )
+        .expect("the pad is added");
+    }
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("N1".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [10.0, 10.0],
+            to: [20.0, 10.0],
+        },
+    )
+    .expect("the front track is routed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("N1".to_string()),
+            layer: "B.Cu".to_string(),
+            width: 0.25,
+            from: [30.0, 10.0],
+            to: [20.0, 10.0],
+        },
+    )
+    .expect("the back track is routed");
+    add_via(
+        handle,
+        AddViaRequest {
+            net: Some("N1".to_string()),
+            at: [20.0, 10.0],
+            diameter: 0.6,
+            drill: 0.3,
+            from_layer: Some("F.Cu".to_string()),
+            to_layer: Some("In1.Cu".to_string()),
+        },
+    )
+    .expect("the blind via is placed");
+
+    let report = inspect(handle, Some(vec!["unrouted".to_string()])).expect("the check runs");
+    assert!(codes(&report).contains(&"drc/unrouted"), "a via that does not reach B.Cu does not join the B.Cu track: {report}");
+
+    add_via(
+        handle,
+        AddViaRequest { net: Some("N1".to_string()), at: [20.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the through via is placed");
+    let report = inspect(handle, Some(vec!["unrouted".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "a through via joins both copper layers");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn exports_write_one_gerber_per_copper_layer_and_keep_every_hole() {
+    let directory = TempDir::new();
+    let handle = created();
+    inner_layers(handle, &["In1.Cu", "In2.Cu"]);
+    add_via(
+        handle,
+        AddViaRequest {
+            at: [5.0, 5.0],
+            diameter: 0.6,
+            drill: 0.3,
+            from_layer: Some("F.Cu".to_string()),
+            to_layer: Some("In1.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the blind via is placed");
+    add_via(
+        handle,
+        AddViaRequest {
+            at: [6.0, 6.0],
+            diameter: 0.6,
+            drill: 0.3,
+            from_layer: Some("In1.Cu".to_string()),
+            to_layer: Some("In2.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the buried via is placed");
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [40.0, 30.0] }).expect("the outline is set");
+
+    let gbr = directory.join("gerber");
+    let report = export(handle, "gbr", &gbr).expect("Gerber export writes");
+    let artifacts = report["artifacts"].as_array().expect("artifacts is an array");
+    let names: Vec<&str> = artifacts.iter().map(|item| item["name"].as_str().expect("a name")).collect();
+    assert_eq!(names, ["F_Cu.gbr", "In1_Cu.gbr", "In2_Cu.gbr", "B_Cu.gbr", "F_SilkS.gbr", "Edge_Cuts.gbr"]);
+
+    let read = |name: &str| fs::read_to_string(gbr.join(name)).expect("the layer is readable");
+    let front = read("F_Cu.gbr");
+    assert!(front.contains("X5000000Y5000000D03*"), "the blind via is flashed on F.Cu");
+    assert!(!front.contains("X6000000Y6000000D03*"), "the buried via is not flashed on F.Cu");
+    let first_inner = read("In1_Cu.gbr");
+    assert!(first_inner.contains("X5000000Y5000000D03*"), "the blind via reaches In1");
+    assert!(first_inner.contains("X6000000Y6000000D03*"), "the buried via starts on In1");
+    let second_inner = read("In2_Cu.gbr");
+    assert!(!second_inner.contains("X5000000Y5000000D03*"), "the blind via does not reach In2");
+    assert!(second_inner.contains("X6000000Y6000000D03*"), "the buried via reaches In2");
+    let back = read("B_Cu.gbr");
+    assert!(!back.contains("D03*"), "neither via reaches B.Cu");
+
+    let drill = directory.join("board.drl");
+    export(handle, "drl", &drill).expect("drill export writes");
+    let drill = fs::read_to_string(&drill).expect("the drill file is readable");
+    assert!(drill.contains("X5.000Y5.000"), "the blind hole is drilled");
+    assert!(drill.contains("X6.000Y6.000"), "the buried hole is drilled");
+
+    let svg = directory.join("board.svg");
+    export(handle, "svg", &svg).expect("SVG export writes");
+    let svg = fs::read_to_string(&svg).expect("the SVG is readable");
+    let circles = svg.matches("<ellipse").count() + svg.matches("<circle").count();
+    assert!(circles >= 2, "both vias are drawn; got {circles}");
+
+    let kicad = directory.join("board.kicad_pcb");
+    export(handle, "kicad_pcb", &kicad).expect("KiCad export writes");
+    let kicad = fs::read_to_string(&kicad).expect("the KiCad board is readable");
+    assert!(kicad.contains("(layers \"F.Cu\" \"In1.Cu\")"), "the blind span is written: {kicad}");
+    assert!(kicad.contains("(layers \"In1.Cu\" \"In2.Cu\")"), "the buried span is written: {kicad}");
+    close(handle).expect("the board closes");
 }
 
 #[test]

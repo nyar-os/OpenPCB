@@ -53,6 +53,9 @@ export interface OpenPCBOptions {
 /** Disclosure level. `partial` always ships a loss path and diagnostic codes. */
 export type SupportLevel = 'supported' | 'partial' | 'unsupported';
 
+/** Via type as classified by the copper span it covers. */
+export type ViaKind = 'through' | 'blind' | 'buried' | 'micro';
+
 /** Board checks understood by `board.inspect()`: layout, stackup and connectivity rules. */
 export type InspectCheck =
     | 'drc'
@@ -107,6 +110,8 @@ export interface BoardCapabilities {
     readonly checks: Readonly<Record<InspectCheck, SupportLevel>>;
     readonly renderers: Readonly<Record<RenderFormat, SupportLevel>>;
     readonly exportTargets: Readonly<Record<ExportTarget, SupportLevel>>;
+    /** Whether each via kind can be placed and exported. */
+    readonly vias: Readonly<Record<ViaKind, SupportLevel>>;
     /** Whether `board.route()` ships in this engine. */
     readonly routing: SupportLevel;
 }
@@ -300,6 +305,13 @@ export interface AddViaOptions {
     readonly at: readonly [number, number];
     readonly diameter: number;
     readonly drill: number;
+    /**
+     * Copper layer the span starts on. Omit both span fields for a through via;
+     * set both for a blind or buried via.
+     */
+    readonly fromLayer?: string;
+    /** Copper layer the span ends on; must sit below `fromLayer` in the stack. */
+    readonly toLayer?: string;
 }
 
 /** Options of `board.addNet()`. */

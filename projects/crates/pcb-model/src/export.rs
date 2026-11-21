@@ -33,9 +33,6 @@ const PDF_MARGIN_PT: f64 = 28.34646;
 /// Preview renderers this build can produce without writing a file.
 pub(crate) const SUPPORTED_PREVIEWS: &[&str] = &["svg"];
 
-/// File names written into a Gerber output directory, in report order.
-const GERBER_FILES: [&str; 4] = ["F_Cu.gbr", "B_Cu.gbr", "F_SilkS.gbr", "Edge_Cuts.gbr"];
-
 /// Writes one export target and returns its report.
 pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, ServiceError> {
     if format == "gbr" {
@@ -84,12 +81,13 @@ fn gerber(board: &Board, path: &Path) -> Result<Value, ServiceError> {
         fs::create_dir_all(path).map_err(|error| crate::invalid(format!("cannot create `{}`: {error}", path.display())))?;
     }
 
-    let contents =
-        [copper(board, "F.Cu"), copper(board, "B.Cu"), silkscreen(), edge_cuts(outline.from, outline.to, board.millimetres())];
+    let mut files = board.copper_stack().into_iter().map(|id| (gerber_name(id), copper(board, id))).collect::<Vec<_>>();
+    files.push(("F_SilkS.gbr".to_string(), silkscreen()));
+    files.push(("Edge_Cuts.gbr".to_string(), edge_cuts(outline.from, outline.to, board.millimetres())));
     let mut artifacts = Vec::new();
     let mut total = 0u64;
-    for (name, content) in GERBER_FILES.iter().zip(contents) {
-        let bytes = crate::atomic_write(&path.join(name), content.as_bytes())?;
+    for (name, content) in files {
+        let bytes = crate::atomic_write(&path.join(&name), content.as_bytes())?;
         total += bytes;
         artifacts.push(json!({ "name": name, "bytes": bytes }));
     }
@@ -149,7 +147,12 @@ impl Gerber {
     }
 }
 
-/// Writes one copper layer: tracks as draws, pads and through vias as flashes.
+/// One Gerber file name for a layer id, with `.` replaced by `_`.
+fn gerber_name(layer: &str) -> String {
+    format!("{}.gbr", layer.replace('.', "_"))
+}
+
+/// Writes one copper layer: tracks as draws, pads and covered vias as flashes.
 fn copper(board: &Board, layer: &str) -> String {
     let scale = board.millimetres();
     let mut gerber = Gerber::default();
@@ -168,7 +171,7 @@ fn copper(board: &Board, layer: &str) -> String {
             );
         }
     }
-    for via in &board.vias {
+    for via in board.vias.iter().filter(|via| board.via_covers(via, layer)) {
         gerber.flash(format!("C,{:.6}", via.diameter * scale), [via.at[0] * scale, via.at[1] * scale]);
     }
     gerber.render()

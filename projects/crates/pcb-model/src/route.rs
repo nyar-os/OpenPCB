@@ -225,6 +225,8 @@ pub(crate) fn run(board: &mut Board, options: RouteOptions) -> Result<(Value, bo
             at: *at,
             diameter: settings.via_diameter,
             drill: settings.via_drill,
+            from_layer: None,
+            to_layer: None,
         });
     }
     let changed = added_tracks + added_vias > 0;

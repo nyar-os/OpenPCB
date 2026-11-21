@@ -161,7 +161,12 @@ pub(crate) struct PlacedPad<'a> {
     pub(crate) layer: &'a str,
 }
 
-/// One through via.
+/// One via.
+///
+/// A via without `from_layer`/`to_layer` spans the whole copper stack; vias
+/// that set both endpoints are blind or buried. The document stores the span
+/// in snake_case and omits it for through vias, so documents written before
+/// blind and buried vias existed reopen unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Via {
     /// Stable via id.
@@ -174,6 +179,12 @@ pub(crate) struct Via {
     pub(crate) diameter: f64,
     /// Finished drill diameter.
     pub(crate) drill: f64,
+    /// Copper layer the span starts on, for a blind or buried via.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) from_layer: Option<String>,
+    /// Copper layer the span ends on, for a blind or buried via.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) to_layer: Option<String>,
 }
 
 /// Rectangular board outline in board units.
@@ -327,6 +338,110 @@ impl Board {
     /// Looks a net up by name.
     pub(crate) fn net(&self, name: &str) -> Option<&Net> {
         self.nets.iter().find(|net| net.name == name)
+    }
+
+    /// Copper layers in stack order: `F.Cu` first, inner copper in declaration
+    /// order, `B.Cu` last.
+    pub(crate) fn copper_stack(&self) -> Vec<&str> {
+        let mut stack = Vec::new();
+        if self.layer("F.Cu").is_some_and(|layer| layer.kind == LayerKind::Copper) {
+            stack.push("F.Cu");
+        }
+        for layer in &self.layers {
+            if layer.kind == LayerKind::Copper && layer.id != "F.Cu" && layer.id != "B.Cu" {
+                stack.push(layer.id.as_str());
+            }
+        }
+        if self.layer("B.Cu").is_some_and(|layer| layer.kind == LayerKind::Copper) {
+            stack.push("B.Cu");
+        }
+        stack
+    }
+
+    /// Inclusive index span of one via in [`Board::copper_stack`].
+    ///
+    /// A via without endpoints covers the whole stack. `None` means an endpoint
+    /// is missing, is not a copper layer, or the span is reversed.
+    pub(crate) fn via_span(&self, via: &Via) -> Option<(usize, usize)> {
+        let stack = self.copper_stack();
+        if stack.is_empty() {
+            return None;
+        }
+        match (&via.from_layer, &via.to_layer) {
+            (None, None) => Some((0, stack.len() - 1)),
+            (Some(from), Some(to)) => {
+                let low = stack.iter().position(|id| *id == from)?;
+                let high = stack.iter().position(|id| *id == to)?;
+                (low < high).then_some((low, high))
+            }
+            _ => None,
+        }
+    }
+
+    /// Copper layers one via actually touches, as `from` and `to` ids.
+    ///
+    /// A through via reports the outer layers of the current stack.
+    pub(crate) fn via_endpoints(&self, via: &Via) -> (Option<String>, Option<String>) {
+        match (&via.from_layer, &via.to_layer) {
+            (Some(from), Some(to)) => (Some(from.clone()), Some(to.clone())),
+            _ => {
+                let stack = self.copper_stack();
+                match self.via_span(via) {
+                    Some((low, high)) => {
+                        (stack.get(low).map(|id| (*id).to_string()), stack.get(high).map(|id| (*id).to_string()))
+                    }
+                    None => (None, None),
+                }
+            }
+        }
+    }
+
+    /// Whether one via's copper reaches a layer.
+    pub(crate) fn via_covers(&self, via: &Via, layer: &str) -> bool {
+        let Some((low, high)) = self.via_span(via)
+        else {
+            return false;
+        };
+        self.copper_stack().iter().position(|id| *id == layer).is_some_and(|index| low <= index && index <= high)
+    }
+
+    /// Classifies one via as `through`, `blind` or `buried` by its endpoints.
+    pub(crate) fn via_kind(&self, via: &Via) -> &'static str {
+        let stack = self.copper_stack();
+        let (Some((low, high)), false) = (self.via_span(via), stack.is_empty())
+        else {
+            return "through";
+        };
+        let last = stack.len() - 1;
+        if low == 0 && high == last {
+            "through"
+        }
+        else if low == 0 || high == last {
+            "blind"
+        }
+        else {
+            "buried"
+        }
+    }
+
+    /// Api projection of one via, with camelCase span fields.
+    pub(crate) fn via_value(&self, via: &Via) -> Value {
+        let (from, to) = self.via_endpoints(via);
+        let mut value = json!({
+            "id": via.id,
+            "net": via.net,
+            "at": via.at,
+            "diameter": via.diameter,
+            "drill": via.drill,
+            "kind": self.via_kind(via),
+        });
+        if let (Some(from), Some(to)) = (from, to)
+            && let Some(object) = value.as_object_mut()
+        {
+            object.insert("fromLayer".to_string(), Value::String(from));
+            object.insert("toLayer".to_string(), Value::String(to));
+        }
+        value
     }
 
     /// Adds a footprint and returns the public object shape.
@@ -549,16 +664,67 @@ impl Board {
     }
 
     /// Adds a via and returns the public object shape.
+    ///
+    /// Omitting both `fromLayer` and `toLayer` places a through via. Setting
+    /// both places a blind or buried via; the span is validated against the
+    /// declared copper stack before anything is written.
     pub(crate) fn add_via(&mut self, request: AddViaRequest) -> Result<Value, ServiceError> {
-        self.editable_copper()?;
+        let (from_layer, to_layer) = match (request.from_layer, request.to_layer) {
+            (None, None) => (None, None),
+            (Some(from), Some(to)) => {
+                let from = from.trim().to_string();
+                let to = to.trim().to_string();
+                if from.is_empty() || to.is_empty() {
+                    return Err(crate::argument("`fromLayer` and `toLayer` must not be empty"));
+                }
+                if from == to {
+                    return Err(crate::argument("`fromLayer` and `toLayer` must name different copper layers"));
+                }
+                (Some(from), Some(to))
+            }
+            _ => return Err(crate::argument("a via span needs both `fromLayer` and `toLayer`, or neither")),
+        };
+        let stack = self.copper_stack();
+        if stack.is_empty() {
+            return Err(crate::argument("the board declares no copper layers"));
+        }
+        let (low, high) = match (&from_layer, &to_layer) {
+            (Some(from), Some(to)) => {
+                let low = stack
+                    .iter()
+                    .position(|id| *id == from)
+                    .ok_or_else(|| crate::argument(format!("`{from}` is not a declared copper layer")))?;
+                let high = stack
+                    .iter()
+                    .position(|id| *id == to)
+                    .ok_or_else(|| crate::argument(format!("`{to}` is not a declared copper layer")))?;
+                if low > high {
+                    return Err(crate::argument("`fromLayer` must sit above `toLayer` in the copper stack"));
+                }
+                (low, high)
+            }
+            _ => (0, stack.len() - 1),
+        };
+        let span = if from_layer.is_none() && to_layer.is_none() {
+            ["F.Cu", "B.Cu"].iter().map(|id| (*id).to_string()).collect::<Vec<_>>()
+        }
+        else {
+            stack[low..=high].iter().map(|id| (*id).to_string()).collect::<Vec<_>>()
+        };
+        drop(stack);
+        for id in &span {
+            if self.layer(id).is_some_and(|layer| layer.locked) {
+                return Err(ServiceError::new("board/layer-locked", format!("layer `{id}` is locked")));
+            }
+        }
         let net = self.declared_net(request.net.as_deref())?;
         let at = finite_pair(request.at, "at")?;
         let diameter = positive(request.diameter, "diameter")?;
         let drill = positive(request.drill, "drill")?;
         let id = format!("via-{}", self.next_via);
         self.next_via += 1;
-        let via = Via { id: id.clone(), net, at, diameter, drill };
-        let object = json!(via);
+        let via = Via { id, net, at, diameter, drill, from_layer, to_layer };
+        let object = self.via_value(&via);
         self.vias.push(via);
         self.revision += 1;
         Ok(object)
@@ -571,7 +737,8 @@ impl Board {
             .iter()
             .position(|via| via.id == id)
             .ok_or_else(|| ServiceError::new("object/not-found", format!("no via with id `{id}`")))?;
-        self.editable_copper()?;
+        let via = self.vias[index].clone();
+        self.editable_via(&via)?;
         let removed = self.vias.remove(index);
         self.revision += 1;
         Ok(removed.id)
@@ -640,8 +807,14 @@ impl Board {
                         track.layer = name.to_string();
                     }
                 }
-                // Vias pass through every copper layer: renaming a copper layer
-                // keeps them electrically equivalent, so they need no reference.
+                for via in &mut self.vias {
+                    if via.from_layer.as_deref() == Some(previous.as_str()) {
+                        via.from_layer = Some(name.to_string());
+                    }
+                    if via.to_layer.as_deref() == Some(previous.as_str()) {
+                        via.to_layer = Some(name.to_string());
+                    }
+                }
                 self.layers[index].id = name.to_string();
                 self.layers[index].name = name.to_string();
             }
@@ -731,10 +904,22 @@ impl Board {
         Ok(())
     }
 
-    /// Rejects a through via when either outer copper layer is locked.
-    fn editable_copper(&self) -> Result<(), ServiceError> {
-        for id in ["F.Cu", "B.Cu"] {
-            if self.layer(id).is_some_and(|layer| layer.locked) {
+    /// Rejects a via edit when a layer its span touches is locked.
+    ///
+    /// A through via keeps the historical check on the two outer layers; a
+    /// blind or buried via checks every layer between its endpoints.
+    fn editable_via(&self, via: &Via) -> Result<(), ServiceError> {
+        let ids = if via.from_layer.is_none() && via.to_layer.is_none() {
+            vec!["F.Cu".to_string(), "B.Cu".to_string()]
+        }
+        else {
+            match self.via_span(via) {
+                Some((low, high)) => self.copper_stack()[low..=high].iter().map(|id| (*id).to_string()).collect(),
+                None => Vec::new(),
+            }
+        };
+        for id in ids {
+            if self.layer(&id).is_some_and(|layer| layer.locked) {
                 return Err(ServiceError::new("board/layer-locked", format!("layer `{id}` is locked")));
             }
         }
@@ -952,6 +1137,26 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         if !via_ids.insert(via.id.as_str()) {
             return Err(crate::invalid(format!("via id `{}` is duplicated", via.id)));
         }
+        if via.from_layer.is_some() != via.to_layer.is_some() {
+            return Err(crate::invalid(format!("via `{}` declares only one end of its span", via.id)));
+        }
+        if let (Some(from), Some(to)) = (&via.from_layer, &via.to_layer) {
+            if from == to {
+                return Err(crate::invalid(format!("via `{}` needs two different copper layers", via.id)));
+            }
+            let stack = board.copper_stack();
+            let ordered =
+                match (stack.iter().position(|id| *id == from.as_str()), stack.iter().position(|id| *id == to.as_str())) {
+                    (Some(low), Some(high)) => low < high,
+                    _ => false,
+                };
+            if !ordered {
+                return Err(crate::invalid(format!(
+                    "via `{}` does not span two declared copper layers in stack order",
+                    via.id
+                )));
+            }
+        }
         checks(via.at[0], &format!("via `{}` at.x", via.id))?;
         checks(via.at[1], &format!("via `{}` at.y", via.id))?;
         sizes(via.diameter, &format!("via `{}` diameter", via.id))?;
@@ -1012,7 +1217,7 @@ fn objects_on(board: &Board, layer: &Layer) -> usize {
     let mut count = board.footprints.iter().filter(|footprint| footprint.layer == layer.id).count();
     count += board.tracks.iter().filter(|track| track.layer == layer.id).count();
     if layer.kind == LayerKind::Copper {
-        count += board.vias.len();
+        count += board.vias.iter().filter(|via| board.via_covers(via, &layer.id)).count();
     }
     count
 }
@@ -1106,7 +1311,7 @@ pub struct AddTrackRequest {
 }
 
 /// Request of [`crate::add_via`].
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddViaRequest {
     /// Declared net name, when assigned.
@@ -1118,6 +1323,12 @@ pub struct AddViaRequest {
     pub diameter: f64,
     /// Finished drill diameter.
     pub drill: f64,
+    /// Copper layer the span starts on; omit both span fields for a through via.
+    #[serde(default)]
+    pub from_layer: Option<String>,
+    /// Copper layer the span ends on; omit both span fields for a through via.
+    #[serde(default)]
+    pub to_layer: Option<String>,
 }
 
 /// Request of [`crate::add_net`].

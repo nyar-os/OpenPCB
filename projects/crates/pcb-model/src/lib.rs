@@ -146,6 +146,12 @@ pub fn capabilities() -> Value {
         "checks": Value::Object(checks),
         "renderers": Value::Object(renderers),
         "exportTargets": Value::Object(export_targets),
+        "vias": {
+            "through": "supported",
+            "blind": "supported",
+            "buried": "supported",
+            "micro": "unsupported",
+        },
         "routing": "supported",
     })
 }
