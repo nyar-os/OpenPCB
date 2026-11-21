@@ -89,6 +89,20 @@ export type LayerKind = 'copper' | 'silkscreen' | 'soldermask' | 'assembly' | 'm
 /** Coordinate unit of one board document. */
 export type BoardUnits = 'mm' | 'mil';
 
+/** Design-rule values the inspection checks and writers read, in millimetres. */
+export interface BoardRules {
+    /** Minimum gap between two drill holes of different nets. */
+    readonly holeClearance: number;
+    /** Minimum copper-to-board-edge gap. */
+    readonly copperToEdge: number;
+    /** Minimum component-to-board-edge gap. */
+    readonly componentToEdge: number;
+    /** Minimum drill-hole-to-board-edge gap. */
+    readonly holeToEdge: number;
+    /** Solder-mask expansion around each pad, per side. */
+    readonly solderMaskExpansion: number;
+}
+
 /** Render targets declared for preview surfaces. */
 export type RenderFormat = 'svg' | 'png' | 'pdf';
 
@@ -136,6 +150,10 @@ export interface BoardCapabilities {
     readonly backDrill: SupportLevel;
     /** Whether each teardrop shape can be generated. */
     readonly teardrops: Readonly<Record<'linear' | 'arc', SupportLevel>>;
+    /** Whether design-rule values can be read and edited. */
+    readonly designRules: SupportLevel;
+    /** Whether Gerber solder-mask layers are written. */
+    readonly solderMask: SupportLevel;
     /** Whether `board.route()` ships in this engine. */
     readonly routing: SupportLevel;
 }
@@ -183,6 +201,8 @@ export interface BoardSummary {
     readonly title: string | null;
     readonly units: BoardUnits;
     readonly outline: BoardOutline | null;
+    /** Design-rule values the checks and writers read. */
+    readonly rules: BoardRules;
     readonly layers: readonly BoardSummaryLayer[];
     readonly counts: BoardSummaryCounts;
     /** Whether {@link Board.undo} can restore a snapshot. */
@@ -493,6 +513,15 @@ export interface SetOutlineOptions {
     readonly to: readonly [number, number];
 }
 
+/** Options of `board.setRules()`. At least one value is required. */
+export interface SetRulesOptions {
+    readonly holeClearance?: number;
+    readonly copperToEdge?: number;
+    readonly componentToEdge?: number;
+    readonly holeToEdge?: number;
+    readonly solderMaskExpansion?: number;
+}
+
 /** Result of one editing call. */
 export interface BoardEditResult {
     readonly revision: number;
@@ -531,6 +560,7 @@ export interface Board {
     addLayer(options: AddLayerOptions): Promise<BoardEditResult>;
     updateLayer(options: UpdateLayerOptions): Promise<BoardEditResult>;
     setOutline(options: SetOutlineOptions): Promise<BoardEditResult>;
+    setRules(options: SetRulesOptions): Promise<BoardEditResult>;
     list(): Promise<BoardSummary>;
     close(): Promise<void>;
 }

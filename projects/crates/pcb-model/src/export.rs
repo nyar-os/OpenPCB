@@ -87,6 +87,8 @@ fn gerber(board: &Board, path: &Path) -> Result<Value, ServiceError> {
     let mut files = board.copper_stack().into_iter().map(|id| (gerber_name(id), copper(board, id))).collect::<Vec<_>>();
     files.push(("F_SilkS.gbr".to_string(), silkscreen(board, "F.SilkS")));
     files.push(("B_SilkS.gbr".to_string(), silkscreen(board, "B.SilkS")));
+    files.push(("F_Mask.gbr".to_string(), solder_mask(board, "F.Cu")));
+    files.push(("B_Mask.gbr".to_string(), solder_mask(board, "B.Cu")));
     files.push(("Edge_Cuts.gbr".to_string(), edge_cuts(outline.from, outline.to, board.millimetres())));
     let mut artifacts = Vec::new();
     let mut total = 0u64;
@@ -192,6 +194,24 @@ fn silkscreen(board: &Board, layer: &str) -> String {
             [track.from[0] * scale, track.from[1] * scale],
             [track.to[0] * scale, track.to[1] * scale],
         );
+    }
+    gerber.render()
+}
+
+/// Writes one solder-mask layer: every pad on the matching copper side is a
+/// rectangular opening expanded by the document's solder-mask rule per side.
+/// Vias stay tented, so they contribute no opening.
+fn solder_mask(board: &Board, layer: &str) -> String {
+    let scale = board.millimetres();
+    let expansion = board.rules.solder_mask_expansion * 2.0;
+    let mut gerber = Gerber::default();
+    for footprint in board.footprints.iter().filter(|footprint| footprint.layer == layer) {
+        for pad in &footprint.pads {
+            gerber.flash(
+                format!("R,{:.6}X{:.6}", pad.w * scale + expansion, pad.h * scale + expansion),
+                [(footprint.x + pad.x) * scale, (footprint.y + pad.y) * scale],
+            );
+        }
     }
     gerber.render()
 }

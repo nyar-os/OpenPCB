@@ -30,6 +30,7 @@ import type {
     RouteReport,
     SaveReport,
     SetOutlineOptions,
+    SetRulesOptions,
     SetViaBackDrillOptions,
     UpdateFootprintOptions,
     UpdateLayerOptions,
@@ -226,5 +227,10 @@ export function updateLayer(handle: number, options: UpdateLayerOptions): BoardE
 /** Sets the rectangular outline of an open board. */
 export function setOutline(handle: number, options: SetOutlineOptions): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.setOutline').board_set_outline(handle, JSON.stringify(options)));
+}
+
+/** Replaces one or more design-rule values on an open board. */
+export function setRules(handle: number, options: SetRulesOptions): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.setRules').board_set_rules(handle, JSON.stringify(options)));
 }
 

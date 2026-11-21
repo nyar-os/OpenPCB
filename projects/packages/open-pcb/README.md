@@ -11,9 +11,10 @@ OpenPCB(options?)` creates a session; `create` and `open` return an editable
 `Board` with `inspect`, `save`, `export`, `close`, `undo`, `redo`,
 `addFootprint`, `moveFootprint`, `updateFootprint`, `deleteFootprint`,
 `addTrack`, `deleteTrack`, `addVia`, `deleteVia`, `addNet`, `route`, `addLayer`,
-`updateLayer`, `setOutline` and `list`. `importBoard` reads a KiCad PCB or
-IPC-2581 file, and `importKicadPcb` stays as the KiCad-only spelling of the same
-operation. Each summary exposes `canUndo` and `canRedo`.
+`updateLayer`, `setOutline`, `setRules` and `list`. `importBoard` reads a KiCad
+PCB or IPC-2581 file, and `importKicadPcb` stays as the KiCad-only spelling of
+the same operation. Each summary exposes `canUndo`, `canRedo` and the design
+rules.
 
 Implemented outputs are Gerber RS-274X, drill, drill map SVG, BOM,
 pick-and-place, placement JSON, SVG, vector PDF, 1024x768 RGB PNG, KiCad PCB and
@@ -38,6 +39,7 @@ await board.addFootprint({ reference: 'U1', value: 'MCU', footprint: 'QFN32', x:
 await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], to: [30, 10] });
 await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
 await board.setOutline({ from: [0, 0], to: [100, 80] });
+await board.setRules({ holeClearance: 0.3, solderMaskExpansion: 0.1 });
 await board.route({ width: 0.25, clearance: 0.2, net: 'VCC' });
 await board.addLayer({ name: 'Inner1', kind: 'copper' });
 await board.moveFootprint({ id: 'fp-1', x: 40, y: 25, rotation: 90 });
@@ -54,7 +56,7 @@ await board.export({ format: 'png', target: 'blinker.png' });
 await board.export({ format: 'kicad_pcb', target: 'blinker.kicad_pcb' });
 await board.export({ format: 'ipc2581', target: 'blinker.ipc2581' });
 const gerber = await board.export({ format: 'gbr', target: 'gerber' });
-console.log(gerber.artifacts?.length); // 5
+console.log(gerber.artifacts?.length); // 7
 
 const imported = await pcb.importBoard({ path: 'blinker.ipc2581' });
 console.log(imported.format, imported.losses.length);
@@ -72,10 +74,15 @@ await pcb.dispose();
 - Undo and redo are per handle: `open` and `create` start with empty history,
   and `save` does not add a step. `board/history-empty` reports an exhausted
   direction.
-- Gerber export writes a directory of five files (`F_Cu`, `B_Cu`, `F_SilkS`,
-  `B_SilkS`, `Edge_Cuts`) and needs a board outline. The two silkscreen files
-  carry the legend tracks the document holds; they are valid empty layers when
-  the board has no silkscreen geometry.
+- Gerber export writes a directory of seven files (`F_Cu`, `B_Cu`, `F_SilkS`,
+  `B_SilkS`, `F_Mask`, `B_Mask`, `Edge_Cuts`) and needs a board outline. The two
+  silkscreen files carry the legend tracks the document holds; they are valid
+  empty layers when the board has no silkscreen geometry. The mask files open
+  every pad on their copper side by `solderMaskExpansion` per side (0.05 mm
+  default); vias stay tented and inner-layer pads open no mask.
+- The design rules are readable from every `BoardSummary` (`rules`) and editable
+  with `board.setRules()`; values are millimetres, a partial update keeps the
+  other rules, and a negative value is rejected.
 - PDF export is a single-page vector document sized to A4 landscape or to the
   board. KiCad PCB and IPC-2581 exports are deterministic projections of the
   native document; no net names are invented for KiCad.

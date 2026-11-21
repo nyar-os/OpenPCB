@@ -13,13 +13,13 @@ use serde_json::Value;
 
 use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTeardropsRequest,
-    AddTrackRequest, AddViaRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest,
+    AddTrackRequest, AddViaRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
     SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, add_differential_pair, add_footprint, add_layer,
     add_net, add_pad, add_teardrops, add_track, add_via,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, create, delete_differential_pair, delete_footprint, delete_track, delete_via, export, import, inspect,
-    move_footprint, open, redo, route, save, set_outline, set_via_back_drill, store, summary, undo, update_footprint,
-    update_layer,
+    move_footprint, open, redo, route, save, set_outline, set_rules, set_via_back_drill, store, summary, undo,
+    update_footprint, update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -178,6 +178,8 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["backDrill"], "supported");
     assert_eq!(matrix["teardrops"]["linear"], "supported");
     assert_eq!(matrix["teardrops"]["arc"], "unsupported");
+    assert_eq!(matrix["designRules"], "supported");
+    assert_eq!(matrix["solderMask"], "supported");
     assert_eq!(matrix["routing"], "supported");
 }
 
@@ -291,7 +293,78 @@ fn documents_without_design_rules_open_with_defaults() {
     assert_eq!(rules.copper_to_edge, 0.3);
     assert_eq!(rules.component_to_edge, 0.25);
     assert_eq!(rules.hole_to_edge, 0.3);
+    assert_eq!(rules.solder_mask_expansion, 0.05);
     close(handle).expect("the board closes");
+}
+
+#[test]
+fn design_rules_are_editable_persistent_and_drive_solder_mask() {
+    let directory = TempDir::new();
+    let handle = created();
+    let initial = store::summary_of(handle).expect("the board is listed");
+    assert_eq!(initial["rules"]["holeClearance"], 0.25);
+    assert_eq!(initial["rules"]["solderMaskExpansion"], 0.05);
+
+    let updated = set_rules(
+        handle,
+        SetRulesRequest { hole_clearance: Some(0.3), solder_mask_expansion: Some(0.1), ..Default::default() },
+    )
+    .expect("the rules are updated");
+    assert_eq!(updated["revision"], 2);
+    assert_eq!(updated["object"]["holeClearance"], 0.3);
+    assert_eq!(updated["object"]["copperToEdge"], 0.3, "untouched rules keep their value");
+    assert_eq!(updated["board"]["rules"]["solderMaskExpansion"], 0.1);
+
+    let empty = set_rules(handle, SetRulesRequest::default()).expect_err("an empty update is rejected");
+    assert_eq!(empty.code, "session/argument-invalid");
+    let negative = set_rules(handle, SetRulesRequest { hole_to_edge: Some(-1.0), ..Default::default() })
+        .expect_err("a negative rule is rejected");
+    assert_eq!(negative.code, "session/argument-invalid");
+    assert_eq!(store::summary_of(handle).expect("the board is listed")["revision"], 2, "rejected edits keep the revision");
+
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("U1".to_string()),
+            value: Some("MCU".to_string()),
+            footprint: Some("QFN32".to_string()),
+            x: Some(10.0),
+            y: Some(10.0),
+            rotation: Some(0.0),
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), x: 0.0, y: 0.0, w: 1.0, h: 1.0, net: None },
+    )
+    .expect("the pad is added");
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [40.0, 30.0] }).expect("the outline is set");
+
+    let gbr = directory.join("gerber");
+    export(handle, "gbr", &gbr).expect("Gerber export writes");
+    let front = fs::read_to_string(gbr.join("F_Mask.gbr")).expect("the front mask is readable");
+    assert!(front.contains("%ADD10R,1.200000X1.200000*%"), "the mask opening adds twice the expansion per side: {front}");
+    assert!(front.contains("X10000000Y10000000D03*"), "the pad flashes on the front mask");
+    let back = fs::read_to_string(gbr.join("B_Mask.gbr")).expect("the back mask is readable");
+    assert!(!back.contains("D03*"), "a front pad opens no back mask and vias stay tented");
+
+    let path = directory.join("rules.opcb");
+    save(handle, &path, false).expect("the board saves");
+    let reopened = handle_of(&open(&path).expect("the board reopens"));
+    let rules = store::summary_of(reopened).expect("the reopened board is listed");
+    assert_eq!(rules["rules"]["holeClearance"], 0.3);
+    assert_eq!(rules["rules"]["solderMaskExpansion"], 0.1);
+    close(reopened).expect("the reopened board closes");
+    close(handle).expect("the board closes");
+
+    let mut invalid = crafted();
+    invalid.rules.solder_mask_expansion = -0.1;
+    let invalid_path = directory.join("invalid-rules.opcb");
+    fs::write(&invalid_path, serde_json::to_string(&Document::new(invalid)).expect("the document serializes"))
+        .expect("the invalid document is written");
+    assert_eq!(open(&invalid_path).expect_err("a negative solder-mask rule is rejected").code, "format/invalid");
 }
 
 #[test]
@@ -624,9 +697,9 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
     assert_eq!(report["format"], "gbr");
     assert_eq!(report["path"], gbr.display().to_string());
     let artifacts = report["artifacts"].as_array().expect("artifacts is an array");
-    assert_eq!(artifacts.len(), 5);
+    assert_eq!(artifacts.len(), 7);
     let names: Vec<&str> = artifacts.iter().map(|item| item["name"].as_str().expect("a name")).collect();
-    assert_eq!(names, ["F_Cu.gbr", "B_Cu.gbr", "F_SilkS.gbr", "B_SilkS.gbr", "Edge_Cuts.gbr"]);
+    assert_eq!(names, ["F_Cu.gbr", "B_Cu.gbr", "F_SilkS.gbr", "B_SilkS.gbr", "F_Mask.gbr", "B_Mask.gbr", "Edge_Cuts.gbr"]);
     for name in names {
         let path = gbr.join(name);
         assert!(path.is_file(), "{name} is written");
@@ -641,6 +714,11 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
     assert!(copper.contains("D03*"), "the via is a flash");
     let bottom = fs::read_to_string(gbr.join("B_Cu.gbr")).expect("the bottom copper layer is readable");
     assert!(bottom.contains("D03*"), "a through via is flashed on both outer layers");
+    let mask = fs::read_to_string(gbr.join("F_Mask.gbr")).expect("the front solder mask is readable");
+    assert!(mask.contains("%ADD10R,0.600000X0.600000*%"), "the opening is the pad plus twice the 0.05mm expansion");
+    assert!(mask.contains("X30000000Y20000000D03*"), "the front pad opens the front mask");
+    let back_mask = fs::read_to_string(gbr.join("B_Mask.gbr")).expect("the back solder mask is readable");
+    assert!(!back_mask.contains("D03*"), "a footprint without pads opens no mask and vias stay tented");
     let edges = fs::read_to_string(gbr.join("Edge_Cuts.gbr")).expect("edge cuts are readable");
     assert_eq!(edges.matches("D01*").count(), 4, "the outline is four draws");
 
@@ -2162,7 +2240,20 @@ fn exports_write_one_gerber_per_copper_layer_and_keep_every_hole() {
     let report = export(handle, "gbr", &gbr).expect("Gerber export writes");
     let artifacts = report["artifacts"].as_array().expect("artifacts is an array");
     let names: Vec<&str> = artifacts.iter().map(|item| item["name"].as_str().expect("a name")).collect();
-    assert_eq!(names, ["F_Cu.gbr", "In1_Cu.gbr", "In2_Cu.gbr", "B_Cu.gbr", "F_SilkS.gbr", "B_SilkS.gbr", "Edge_Cuts.gbr"]);
+    assert_eq!(
+        names,
+        [
+            "F_Cu.gbr",
+            "In1_Cu.gbr",
+            "In2_Cu.gbr",
+            "B_Cu.gbr",
+            "F_SilkS.gbr",
+            "B_SilkS.gbr",
+            "F_Mask.gbr",
+            "B_Mask.gbr",
+            "Edge_Cuts.gbr"
+        ]
+    );
 
     let read = |name: &str| fs::read_to_string(gbr.join(name)).expect("the layer is readable");
     let front = read("F_Cu.gbr");

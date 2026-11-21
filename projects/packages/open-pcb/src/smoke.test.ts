@@ -152,6 +152,8 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.checks.courtyard, 'supported');
     assert.equal(matrix.renderers.svg, 'supported');
     assert.equal(matrix.renderers.png, 'unsupported');
+    assert.equal(matrix.designRules, 'supported');
+    assert.equal(matrix.solderMask, 'supported');
     assert.equal(matrix.routing, 'supported');
     assert.equal(matrix.exportTargets.drl, 'supported');
     assert.equal(matrix.exportTargets.gbr, 'supported');
@@ -182,6 +184,11 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
             layer: 'F.Cu',
         });
         assert.equal(footprint.object?.id, 'fp-1');
+        assert.equal(board.summary.rules.solderMaskExpansion, 0.05);
+        const rules = await board.setRules({ holeClearance: 0.3, solderMaskExpansion: 0.1 });
+        assert.equal(rules.board.rules.holeClearance, 0.3);
+        assert.equal(rules.board.rules.solderMaskExpansion, 0.1);
+        assert.equal(rules.board.rules.componentToEdge, 0.25, 'untouched rules keep their value');
         await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], to: [30, 10] });
         await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
         await board.setOutline({ from: [0, 0], to: [100, 80] });
@@ -224,9 +231,9 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
 
         const gerber = path.join(directory, 'gerber');
         const artifacts = await board.export({ format: 'gbr', target: gerber });
-        assert.equal(artifacts.artifacts?.length, 5);
+        assert.equal(artifacts.artifacts?.length, 7);
         assert.equal(artifacts.bytes, artifacts.artifacts?.reduce((total, item) => total + item.bytes, 0));
-        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'B_SilkS.gbr', 'Edge_Cuts.gbr']) {
+        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'B_SilkS.gbr', 'F_Mask.gbr', 'B_Mask.gbr', 'Edge_Cuts.gbr']) {
             const content = fs.readFileSync(path.join(gerber, name), 'utf8');
             assert.match(content, /%FSLAX46Y46\*%/);
             assert.match(content, /M02\*/);
@@ -478,6 +485,9 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         run('layer', 'lock', document, '--id', 'Inner2', '--locked', 'true');
         run('layer', 'lock', document, '--id', 'Inner2', '--locked', 'false');
         run('outline', 'set', document, '--from', '0,0', '--to', '100,80');
+        assert.match(run('rules', 'show', document), /solderMaskExpansion=0.05/);
+        run('rules', 'set', document, '--hole-clearance', '0.3', '--solder-mask-expansion', '0.1');
+        assert.match(run('rules', 'show', document), /holeClearance=0.3 .*solderMaskExpansion=0.1/);
 
         const listed = run('list', document);
         assert.match(listed, /nets=1 footprints=1 tracks=2 vias=1/);
@@ -501,7 +511,7 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
 
         const gerber = path.join(directory, 'gerber');
         run('export', document, '--format', 'gbr', '--out', gerber);
-        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'B_SilkS.gbr', 'Edge_Cuts.gbr']) {
+        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'B_SilkS.gbr', 'F_Mask.gbr', 'B_Mask.gbr', 'Edge_Cuts.gbr']) {
             const content = fs.readFileSync(path.join(gerber, name), 'utf8');
             assert.match(content, /%FSLAX46Y46\*%/, `${name} declares the coordinate format`);
             assert.match(content, /M02\*/, `${name} ends with M02`);

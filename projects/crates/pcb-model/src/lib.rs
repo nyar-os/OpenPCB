@@ -13,9 +13,10 @@
 //! Implemented today: create, open, import a KiCad PCB or IPC-2581 document,
 //! save, inspect, summary, close, undo and redo, layer management, footprint
 //! moves and pad add/update/delete, track and via deletion, a rectangular
-//! outline, a deterministic two-layer autorouter, a read-only SVG preview, and
-//! export to drill, BOM, pick-and-place, SVG, PDF, PNG, KiCad PCB, IPC-2581 and
-//! Gerber RS-274X. STEP remains declared but unimplemented and rejects with
+//! outline, editable design rules, a deterministic two-layer autorouter, a
+//! read-only SVG preview, and export to drill, BOM, pick-and-place, SVG, PDF,
+//! PNG, KiCad PCB, IPC-2581 and Gerber RS-274X (copper, silkscreen, solder mask
+//! and edge cuts). STEP remains declared but unimplemented and rejects with
 //! `capability/not-implemented`.
 
 #![deny(missing_docs)]
@@ -37,7 +38,7 @@ use std::{fs, path::Path};
 
 pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTeardropsRequest,
-    AddTrackRequest, AddViaRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest,
+    AddTrackRequest, AddViaRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
     SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
@@ -161,6 +162,8 @@ pub fn capabilities() -> Value {
             "linear": "supported",
             "arc": "unsupported",
         },
+        "designRules": "supported",
+        "solderMask": "supported",
         "routing": "supported",
     })
 }
@@ -497,6 +500,19 @@ pub fn set_outline(handle: u64, request: SetOutlineRequest) -> Result<Value, Ser
     let mut object = Value::Null;
     store::mutate(handle, |board| {
         object = board.set_outline(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Replaces one or more design-rule values on an open board.
+///
+/// Every value is in millimetres. At least one rule is required, and a
+/// rejected request leaves the board and its revision untouched.
+pub fn set_rules(handle: u64, request: SetRulesRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.set_rules(request)?;
         Ok(())
     })?;
     edit_result(handle, Some(object), None)

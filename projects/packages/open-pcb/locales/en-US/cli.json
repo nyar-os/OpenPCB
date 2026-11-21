@@ -32,6 +32,9 @@
             "layer-lock": "Lock or unlock a layer in place",
             "outline": "Edit the board outline",
             "outline-set": "Set a rectangular board outline in place",
+            "rules": "Read or edit the design rules of a board document",
+            "rules-show": "Print the design-rule values used by the checks and writers",
+            "rules-set": "Replace one or more design-rule values in place",
             "gui": "Open the OpenPCB Studio window on the native board"
         },
         "opt": {
@@ -65,7 +68,12 @@
             "kind": "Layer kind: copper, silkscreen, soldermask, assembly or mechanical",
             "color": "Layer CSS colour, for example #c87533",
             "visible": "Layer visibility as true or false",
-            "locked": "Layer lock state as true or false"
+            "locked": "Layer lock state as true or false",
+            "hole-clearance": "Minimum gap between two drill holes of different nets, in mm",
+            "copper-to-edge": "Minimum copper-to-board-edge gap, in mm",
+            "component-to-edge": "Minimum component-to-board-edge gap, in mm",
+            "hole-to-edge": "Minimum drill-hole-to-board-edge gap, in mm",
+            "solder-mask-expansion": "Solder-mask expansion around each pad, per side and in mm"
         }
     }
 }

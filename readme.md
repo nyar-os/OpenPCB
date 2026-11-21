@@ -22,7 +22,9 @@ SDK and studio shell share one native model:
 - Add nets, footprints, tracks and through, blind or buried vias; record a
   back-drill depth and remaining stub on a through via; move and update
   footprints; delete footprints, tracks and vias.
-- Add, rename, hide and lock layers; set a rectangular board outline.
+- Add, rename, hide and lock layers; set a rectangular board outline; read and
+  edit the design rules the checks and writers use, including the solder-mask
+  expansion.
 - Undo and redo up to 32 snapshots per handle, optionally persisted in
   `<file>.history.json` with `history: 'sidecar'`, with `canUndo`/`canRedo` on
   every summary and edit result.
@@ -43,9 +45,10 @@ SDK and studio shell share one native model:
   being approximated.
 - Write Gerber RS-274X, Excellon drill, drill map SVG, BOM, pick-and-place,
   placement JSON, SVG, vector PDF, 8-bit RGB PNG, KiCad PCB and IPC-2581 files
-  atomically. Gerber writes one file per copper layer plus `F_SilkS`, `B_SilkS`
-  and `Edge_Cuts`; the two silkscreen files carry the legend tracks the document
-  holds. One Excellon file lists every drilled hole, including blind and buried
+  atomically. Gerber writes one file per copper layer plus `F_SilkS`, `B_SilkS`,
+  `F_Mask`, `B_Mask` and `Edge_Cuts`; the two silkscreen files carry the legend
+  tracks the document holds, and the mask files open every outer-layer pad by the
+  document's solder-mask expansion while vias stay tented. One Excellon file lists every drilled hole, including blind and buried
   vias; back-drilled vias repeat their hit under a `;Back drill` comment carrying
   the depth and stub. The drill map draws every plated hole with a tool legend and
   marks back-drilled hits. IPC-2581 holes carry `backDrillDepth` and
@@ -107,6 +110,8 @@ open-pcb layer lock blinker.opcb --id Inner2 --locked true
 
 # Set a rectangular outline, then undo or redo the last saved revision
 open-pcb outline set blinker.opcb --from 0,0 --to 100,80
+open-pcb rules show blinker.opcb
+open-pcb rules set blinker.opcb --hole-clearance 0.3 --solder-mask-expansion 0.1
 open-pcb undo blinker.opcb
 open-pcb redo blinker.opcb
 
@@ -114,7 +119,7 @@ open-pcb redo blinker.opcb
 open-pcb list blinker.opcb
 open-pcb inspect blinker.opcb --checks drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,edge-clearance
 
-# Export the implemented targets; Gerber writes one file per copper layer plus silk and edge cuts
+# Export the implemented targets; Gerber writes one file per copper layer plus silk, mask and edge cuts
 open-pcb export blinker.opcb --format gbr --out gerber
 open-pcb export blinker.opcb --format drl --out blinker.drl
 open-pcb export blinker.opcb --format drill_map --out blinker.drill-map.svg
@@ -251,6 +256,9 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   `B_SilkS`, and the `silkscreen-over-pad` check reads them. DRC treats a
   silkscreen track as legend rather than a copper rule violation.
 - It does not rotate rectangular pad apertures in Gerber output.
+- Solder-mask openings are rectangular, follow the pad's outer copper side and
+  add the document's expansion per side; vias stay tented and inner-layer pads
+  open no mask. Paste layers and mask-defined pad shapes are not written.
 - It does not edit zones, use templates other than `blank`, persist undo
   history inside `.opcb`, or resolve concurrent edits against an older revision.
 - It does not claim a format is supported because an extension is known.

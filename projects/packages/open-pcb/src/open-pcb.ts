@@ -42,6 +42,7 @@ import type {
     SaveOptions,
     SaveReport,
     SetOutlineOptions,
+    SetRulesOptions,
     SetViaBackDrillOptions,
     UpdateFootprintOptions,
     UpdateLayerOptions,
@@ -466,6 +467,10 @@ function attach(
         async setOutline(options: SetOutlineOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.setOutline(current, options));
+        },
+        async setRules(options: SetRulesOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.setRules(current, options));
         },
         async list(): Promise<BoardSummary> {
             ensure();

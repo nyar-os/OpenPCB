@@ -19,6 +19,7 @@ import { OpenPCB } from './open-pcb.js';
 import type {
     Board,
     BoardCapabilities,
+    BoardRules,
     BoardSummary,
     ExportTarget,
     InspectCheck,
@@ -145,6 +146,16 @@ function describeReport(report: InspectReport): string {
         lines.push(`  ${issue.severity} ${issue.code} ${issue.layerId ?? '-'} ${issue.message}`);
     }
     return lines.join('\n');
+}
+
+function describeRules(rules: BoardRules): string {
+    return [
+        `holeClearance=${rules.holeClearance}`,
+        `copperToEdge=${rules.copperToEdge}`,
+        `componentToEdge=${rules.componentToEdge}`,
+        `holeToEdge=${rules.holeToEdge}`,
+        `solderMaskExpansion=${rules.solderMaskExpansion}`,
+    ].join(' ');
 }
 
 cli.command('capabilities', 'cli.cmd.capabilities').actionCtx(async (_options, _args, ctx) => {
@@ -868,6 +879,66 @@ outline
         await withBoard(file, async (board) => {
             const result = await board.setOutline({ from, to });
             ctx.emitResult(result, `outline ${from[0]},${from[1]} to ${to[0]},${to[1]}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const rules = cli.command('rules', 'cli.cmd.rules');
+rules.command('show', 'cli.cmd.rules-show').actionCtx(async (options, _args, ctx) => {
+    const file = input(options);
+    if (file === undefined) {
+        ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+        return 2;
+    }
+    await withBoard(file, async (board) => {
+        const summary = await board.list();
+        ctx.emitResult(summary.rules, describeRules(summary.rules));
+        return 0;
+    });
+    return 0;
+});
+
+rules
+    .command('set', 'cli.cmd.rules-set')
+    .option('--hole-clearance <mm>', 'cli.opt.hole-clearance')
+    .option('--copper-to-edge <mm>', 'cli.opt.copper-to-edge')
+    .option('--component-to-edge <mm>', 'cli.opt.component-to-edge')
+    .option('--hole-to-edge <mm>', 'cli.opt.hole-to-edge')
+    .option('--solder-mask-expansion <mm>', 'cli.opt.solder-mask-expansion')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        const keys = ['hole-clearance', 'copper-to-edge', 'component-to-edge', 'hole-to-edge', 'solder-mask-expansion'] as const;
+        const values = new Map<string, number>();
+        for (const key of keys) {
+            const raw = text(options, key);
+            if (raw === undefined) {
+                continue;
+            }
+            const value = Number(raw);
+            if (!Number.isFinite(value)) {
+                ctx.fail('open-pcb.cli.number-invalid', { message: `\`--${key}\` must be a finite number` });
+                return 2;
+            }
+            values.set(key, value);
+        }
+        if (values.size === 0) {
+            ctx.fail('open-pcb.cli.rules-required', { message: 'at least one design rule option is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.setRules({
+                holeClearance: values.get('hole-clearance'),
+                copperToEdge: values.get('copper-to-edge'),
+                componentToEdge: values.get('component-to-edge'),
+                holeToEdge: values.get('hole-to-edge'),
+                solderMaskExpansion: values.get('solder-mask-expansion'),
+            });
+            ctx.emitResult(result, `rules revision=${result.revision} ${describeRules(result.board.rules)}`);
             return 0;
         });
         return 0;

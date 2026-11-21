@@ -18,6 +18,9 @@ Implemented:
   remaining stub on a through via; move, update and delete footprints; delete
   tracks and vias.
 - Add, rename, hide and lock layers; set a rectangular outline.
+- Read and edit the design rules (`rules show`, `rules set`): drill-hole
+  clearance, copper-, component- and hole-to-edge gaps and the solder-mask
+  expansion. Values are millimetres; a partial update keeps the other rules.
 - Route every net with at least two pads through a deterministic two-layer
   autorouter; it reports unroutable edges instead of approximating them.
 - Declare differential pairs (`diffpair add`) with a target width, gap and
@@ -33,7 +36,8 @@ Implemented:
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `drill_map`
   (hole map SVG with tool legend and back-drill marks), `bom`, `pos`,
   `placement` (millimetre JSON), `svg`, `pdf`, `png` (1024x768 RGB raster),
-  `kicad_pcb` and `ipc2581`.
+  `kicad_pcb` and `ipc2581`. The Gerber directory holds one file per copper
+  layer plus `F_SilkS`, `B_SilkS`, `F_Mask`, `B_Mask` and `Edge_Cuts`.
 - Import a KiCad PCB or IPC-2581 document with a loss ledger for unrepresentable
   constructs; the CLI and SDK detect the format from the content.
 
@@ -46,7 +50,9 @@ Excellon file and as dashed rings in the drill map; KiCad PCB exchange does not
 carry back drill. The outline is rectangular, so closure and self-intersection
 are guaranteed by construction and `edge-clearance` only measures component and
 drill spacing to the four edges. Teardrops are only generated as linear copper
-tracks; arc teardrops stay unimplemented. All unimplemented targets stay
+tracks; arc teardrops stay unimplemented. Solder-mask openings are rectangular
+and cover outer-layer pads only; vias stay tented, inner-layer pads open no mask,
+and paste layers are not written. All unimplemented targets stay
 `unsupported` in the capability matrix and reject with
 `capability/not-implemented`. Do not fill the gap with local parsers, routers,
 geometry code or fabricated reports.
@@ -83,6 +89,8 @@ a format, check or target.
 | `open-pcb layer visible <file.opcb> --id <id> --visible <true\|false>` | Set layer visibility. |
 | `open-pcb layer lock <file.opcb> --id <id> --locked <true\|false>` | Lock or unlock a layer. Edits on a locked layer fail with `board/layer-locked`. |
 | `open-pcb outline set <file.opcb> --from <x,y> --to <x,y>` | Set the rectangular board outline; width and height must be positive. |
+| `open-pcb rules show <file.opcb>` | Print the design rules the checks and writers use. |
+| `open-pcb rules set <file.opcb> --hole-clearance <mm> --copper-to-edge <mm> --component-to-edge <mm> --hole-to-edge <mm> --solder-mask-expansion <mm>` | Replace one or more design rules in place; at least one value is required and none may be negative. |
 | `open-pcb inspect <file.opcb> --checks <list>` | Run the implemented checks. |
 | `open-pcb export <file.opcb> --format <format> --out <file-or-directory>` | Write one implemented projection: `gbr` (directory), `drl`, `drill_map`, `bom`, `pos`, `placement`, `svg`, `pdf`, `png`, `kicad_pcb` or `ipc2581`. |
 | `open-pcb gui` | Open the OpenPCB Studio window. |
@@ -138,15 +146,17 @@ mutating command also records the previous document for CLI undo/redo.
 1. Confirm the stackup, drill sizes and outline the export depends on. Gerber
    edge cuts and the outline checks need `open-pcb outline set` first.
 2. Export `gbr` to an explicit directory; the writer produces `F_Cu.gbr`,
-   `B_Cu.gbr`, `F_SilkS.gbr`, `B_SilkS.gbr` and `Edge_Cuts.gbr`. Export `drl`,
-   `drill_map`, `pos`, `placement`, `bom`, `svg`, `pdf`, `png`, `kicad_pcb` and
-   `ipc2581` to explicit paths.
+   `B_Cu.gbr`, `F_SilkS.gbr`, `B_SilkS.gbr`, `F_Mask.gbr`, `B_Mask.gbr` and
+   `Edge_Cuts.gbr`. Export `drl`, `drill_map`, `pos`, `placement`, `bom`, `svg`,
+   `pdf`, `png`, `kicad_pcb` and `ipc2581` to explicit paths.
 3. State exactly which targets were written and which reject, then inspect the
    files for the expected markers (`%FSLAX46Y46*%` and `M02*` in every Gerber
    file, `M48` and `M30` in drill, a `Designator` header in position, a
    `placements` array in placement, `OpenPCB drill map` in the drill map,
    `<svg` in the SVG). Back-drilled vias appear again under `;Back drill`
    comments with their depth and stub and gain a dashed ring in the drill map.
+   Each mask file flashes a rectangular opening per pad on its side, expanded by
+   `solderMaskExpansion` per side; vias never open a mask.
 
 ## Hard rules
 
@@ -154,7 +164,7 @@ mutating command also records the previous document for CLI undo/redo.
   connectivity, clearance or annular ring results. A board without an outline
   fails `stackup` and `outline` with `drc/outline-missing`.
 - Never describe a format as supported because an extension is listed; read the
-  capability matrix. Gerber export needs an outline and writes five files; it is
+  capability matrix. Gerber export needs an outline and writes seven files; it is
   not a single-file target.
 - Keep one board model: copper layers, stackup, footprints, nets, tracks and vias
   must agree on the same revision.

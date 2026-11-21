@@ -335,6 +335,17 @@ fn board_set_outline(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Replaces one or more design-rule values on an open board.
+#[function]
+fn board_set_rules(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::SetRulesRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::set_rules(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Lists one open board as a summary.
 #[function]
 fn board_list(ctx: CallContext) -> Result<JsValue> {
@@ -615,6 +626,12 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
             let request: open_pcb_model::SetOutlineRequest =
                 serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
             open_pcb_model::set_outline(handle, request)
+        }
+        "board.setRules" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::SetRulesRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::set_rules(handle, request)
         }
         "board.list" => {
             let handle = rpc_handle(value)?;
@@ -930,6 +947,7 @@ register_module![
     board_add_layer,
     board_update_layer,
     board_set_outline,
+    board_set_rules,
     board_list,
     open_gui,
     pump_events,

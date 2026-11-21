@@ -263,6 +263,9 @@ const DEFAULT_COMPONENT_TO_EDGE_MM: f64 = 0.25;
 /// Default minimum drill-hole to board-edge gap, in mm.
 const DEFAULT_HOLE_TO_EDGE_MM: f64 = 0.3;
 
+/// Default solder-mask expansion around a pad, per side and in mm.
+const DEFAULT_SOLDER_MASK_EXPANSION_MM: f64 = 0.05;
+
 /// Design-rule values the inspection checks read.
 ///
 /// Every field carries a serde default, so documents written before the rules
@@ -278,6 +281,8 @@ pub(crate) struct DesignRules {
     pub(crate) component_to_edge: f64,
     /// Minimum drill-hole-to-board-edge gap, in millimetres.
     pub(crate) hole_to_edge: f64,
+    /// Solder-mask expansion around each pad, per side and in millimetres.
+    pub(crate) solder_mask_expansion: f64,
 }
 
 impl Default for DesignRules {
@@ -287,6 +292,7 @@ impl Default for DesignRules {
             copper_to_edge: DEFAULT_COPPER_TO_EDGE_MM,
             component_to_edge: DEFAULT_COMPONENT_TO_EDGE_MM,
             hole_to_edge: DEFAULT_HOLE_TO_EDGE_MM,
+            solder_mask_expansion: DEFAULT_SOLDER_MASK_EXPANSION_MM,
         }
     }
 }
@@ -1079,6 +1085,40 @@ impl Board {
         Ok(json!(outline))
     }
 
+    /// Replaces one or more design-rule values.
+    ///
+    /// Every value is in millimetres. The request must name at least one rule;
+    /// a rejected request leaves the board and its revision untouched.
+    pub(crate) fn set_rules(&mut self, request: SetRulesRequest) -> Result<Value, ServiceError> {
+        if request.hole_clearance.is_none()
+            && request.copper_to_edge.is_none()
+            && request.component_to_edge.is_none()
+            && request.hole_to_edge.is_none()
+            && request.solder_mask_expansion.is_none()
+        {
+            return Err(crate::argument("a rules update needs at least one design rule value"));
+        }
+        let mut rules = self.rules;
+        if let Some(value) = request.hole_clearance {
+            rules.hole_clearance = non_negative(value, "holeClearance")?;
+        }
+        if let Some(value) = request.copper_to_edge {
+            rules.copper_to_edge = non_negative(value, "copperToEdge")?;
+        }
+        if let Some(value) = request.component_to_edge {
+            rules.component_to_edge = non_negative(value, "componentToEdge")?;
+        }
+        if let Some(value) = request.hole_to_edge {
+            rules.hole_to_edge = non_negative(value, "holeToEdge")?;
+        }
+        if let Some(value) = request.solder_mask_expansion {
+            rules.solder_mask_expansion = non_negative(value, "solderMaskExpansion")?;
+        }
+        self.rules = rules;
+        self.revision += 1;
+        Ok(json!(rules))
+    }
+
     /// Declares a net and returns the public object shape.
     pub(crate) fn add_net(&mut self, request: AddNetRequest) -> Result<Value, ServiceError> {
         let name = request.name.trim();
@@ -1310,6 +1350,11 @@ fn positive(value: f64, field: &str) -> Result<f64, ServiceError> {
     if value > 0.0 { Ok(value) } else { Err(crate::argument(format!("`{field}` must be greater than zero"))) }
 }
 
+fn non_negative(value: f64, field: &str) -> Result<f64, ServiceError> {
+    let value = finite(value, field)?;
+    if value < 0.0 { Err(crate::argument(format!("`{field}` must not be negative"))) } else { Ok(value) }
+}
+
 /// Validates a board loaded from disk before it receives a handle.
 ///
 /// Failures use `format/invalid`; a version mismatch is reported by the caller
@@ -1323,6 +1368,7 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         (board.rules.copper_to_edge, "copperToEdge"),
         (board.rules.component_to_edge, "componentToEdge"),
         (board.rules.hole_to_edge, "holeToEdge"),
+        (board.rules.solder_mask_expansion, "solderMaskExpansion"),
     ] {
         checks(value, &format!("design rule `{field}`"))?;
         if value < 0.0 {
@@ -1551,6 +1597,7 @@ pub(crate) fn summary(board: &Board) -> Value {
         "title": board.title,
         "units": board.units,
         "outline": board.outline,
+        "rules": board.rules,
         "layers": layers,
         "counts": {
             "nets": board.nets.len(),
@@ -1797,6 +1844,22 @@ pub struct SetOutlineRequest {
     pub from: [f64; 2],
     /// Upper-right corner in board units.
     pub to: [f64; 2],
+}
+
+/// Request of [`crate::set_rules`]. At least one rule is required.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRulesRequest {
+    /// Minimum gap between two drill holes of different nets, in millimetres.
+    pub hole_clearance: Option<f64>,
+    /// Minimum copper-to-board-edge gap, in millimetres.
+    pub copper_to_edge: Option<f64>,
+    /// Minimum component-to-board-edge gap, in millimetres.
+    pub component_to_edge: Option<f64>,
+    /// Minimum drill-hole-to-board-edge gap, in millimetres.
+    pub hole_to_edge: Option<f64>,
+    /// Solder-mask expansion around each pad, per side and in millimetres.
+    pub solder_mask_expansion: Option<f64>,
 }
 
 /// Request of [`crate::route`].
