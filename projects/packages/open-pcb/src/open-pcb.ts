@@ -49,6 +49,8 @@ import type {
     KicadImportResult,
     MoveFootprintOptions,
     OpenPCBOptions,
+    PanelizeOptions,
+    PanelizeReport,
     RouteOptions,
     RouteReport,
     SaveOptions,
@@ -550,6 +552,10 @@ function attach(
         async copperBalance(): Promise<CopperBalanceReport> {
             ensure();
             return service.copperBalance(handle);
+        },
+        async panelize(options: PanelizeOptions): Promise<PanelizeReport> {
+            ensure();
+            return service.panelize(handle, options);
         },
         async addWaiver(options: AddWaiverOptions): Promise<BoardEditResult> {
             ensure();

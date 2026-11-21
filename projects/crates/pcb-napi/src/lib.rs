@@ -549,6 +549,17 @@ fn board_copper_balance(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Builds the panelization report of one open board.
+#[function]
+fn board_panelize(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::PanelizeRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::panelize(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Lists one open board as a summary.
 #[function]
 fn board_list(ctx: CallContext) -> Result<JsValue> {
@@ -1268,6 +1279,7 @@ register_module![
     stackup_impedance,
     stackup_width,
     board_copper_balance,
+    board_panelize,
     board_list,
     open_gui,
     pump_events,

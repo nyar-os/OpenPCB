@@ -20,6 +20,10 @@ Implemented:
 - Add, rename, hide and lock layers; set a rectangular outline.
 - Report copper area per copper layer (`copper balance`) from tracks, vias, pads
   and pours, plus each layer's coverage and the imbalance across layers.
+- Estimate a panel from the rectangular outline (`Board.panelize`): columns,
+  rows, gaps, an edge rail and a `v-cut`, `mouse-bite` or `none` tab style. The
+  report gives the panel outline, every placement, seam lines, tab placeholders
+  and the board and panel areas with utilization.
 - Declare copper pour regions on copper layers as closed polygons (`zone add`);
   each one is written as a `G36`/`G37` region in its layer's Gerber file and
   drawn by the SVG and PDF previews.
@@ -91,7 +95,9 @@ carry them, and DRC does not treat a slot as copper or as a hole. The copper
 balance report sums feature areas rather than a union, and coverage and imbalance
 need a rectangular outline. Via
 stitching follows the rectangular outline only, places through vias, skips
-occupied positions and does not test the new vias against existing copper. Solder-mask openings are rectangular
+occupied positions and does not test the new vias against existing copper. Panel
+estimation reads the rectangular outline only and reports seam and tab
+placeholders; it writes no fabrication file. Solder-mask openings are rectangular
 and cover outer-layer pads only; vias stay tented and inner-layer pads open no
 mask. Solder-paste windows are rectangular and exactly the outer pad size, with
 no paste expansion rule. The stackup is a single copper thickness, dielectric

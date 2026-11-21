@@ -9,21 +9,21 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest,
     AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
-    MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest,
-    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, WidthRequest, add_differential_pair, add_footprint,
-    add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_track, add_via,
-    add_waiver, add_zone, assign_net_class,
+    MoveFootprintRequest, PanelizeRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
+    SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, WidthRequest, add_differential_pair,
+    add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_track,
+    add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
     delete_severity, delete_slot, delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import,
-    inspect, move_footprint, open, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill,
-    stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_layer,
+    inspect, move_footprint, open, panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup,
+    set_via_back_drill, stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -224,6 +224,7 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["viaStitching"], "supported");
     assert_eq!(matrix["slots"], "supported");
     assert_eq!(matrix["copperBalance"], "supported");
+    assert_eq!(matrix["panelization"], "supported");
     assert_eq!(matrix["netClasses"], "supported");
     assert_eq!(matrix["testPoints"], "supported");
     assert_eq!(matrix["stackup"], "supported");
@@ -502,6 +503,74 @@ fn copper_balance_without_an_outline_reports_areas_without_coverage() {
     assert_eq!(report["imbalancePercent"], Value::Null);
     assert_eq!(report["totalArea"], 2.0);
     assert_eq!(report["layers"][1]["area"], 2.0);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn panelization_tiles_the_outline_and_reports_utilization() {
+    let handle = created();
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [100.0, 80.0] }).expect("the outline is set");
+    let report = panelize(
+        handle,
+        PanelizeRequest {
+            columns: 2,
+            rows: 2,
+            gap_x: Some(5.0),
+            gap_y: Some(5.0),
+            rail: Some(2.0),
+            tab: Some("mouse-bite".to_string()),
+            tab_width: Some(5.0),
+            tab_spacing: Some(20.0),
+        },
+    )
+    .expect("the panel is reported");
+
+    assert_eq!(report["revision"], 2);
+    assert_eq!(report["units"], "mm");
+    assert_eq!(report["boardCount"], 4);
+    assert_eq!(report["panelSize"]["width"], 209.0);
+    assert_eq!(report["panelSize"]["height"], 169.0);
+    assert_eq!(report["panelOutline"]["from"], json!([-2.0, -2.0]));
+    assert_eq!(report["panelOutline"]["to"], json!([207.0, 167.0]));
+    assert_eq!(report["placements"][0]["from"], json!([0.0, 0.0]));
+    assert_eq!(report["placements"][3]["from"], json!([105.0, 85.0]));
+    assert_eq!(report["placements"][3]["to"], json!([205.0, 165.0]));
+    assert_eq!(report["seams"].as_array().expect("seams is an array").len(), 2);
+    assert_eq!(report["tabCount"], 18);
+    assert_eq!(report["boardArea"], 8000.0);
+    assert_eq!(report["panelArea"], 35321.0);
+    let utilization = report["utilizationPercent"].as_f64().expect("utilization is a number");
+    assert!((90.0..91.0).contains(&utilization), "utilization is plausible: {utilization}");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn panelization_rejects_an_absent_outline_and_invalid_tabs() {
+    let handle = created();
+    let request = |columns, rows, tab: Option<&str>, gap| PanelizeRequest {
+        columns,
+        rows,
+        gap_x: Some(gap),
+        gap_y: Some(gap),
+        rail: None,
+        tab: tab.map(str::to_string),
+        tab_width: Some(5.0),
+        tab_spacing: Some(20.0),
+    };
+
+    let missing = panelize(handle, request(2, 1, None, 0.0)).expect_err("a board without an outline cannot be panelized");
+    assert_eq!(missing.code, "session/argument-invalid");
+
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [100.0, 80.0] }).expect("the outline is set");
+
+    let empty = panelize(handle, request(0, 1, None, 0.0)).expect_err("an empty array is rejected");
+    assert_eq!(empty.code, "session/argument-invalid");
+
+    let tabs = panelize(handle, request(2, 1, Some("mouse-bite"), 0.0)).expect_err("tabs need a positive gap");
+    assert_eq!(tabs.code, "session/argument-invalid");
+
+    let style = panelize(handle, request(2, 1, Some("castellated"), 2.0)).expect_err("an unknown tab style is rejected");
+    assert_eq!(style.code, "session/argument-invalid");
     close(handle).expect("the board closes");
 }
 

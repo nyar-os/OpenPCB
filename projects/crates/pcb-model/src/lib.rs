@@ -31,6 +31,7 @@ mod ipc2581;
 mod ipc2581_import;
 mod kicad_import;
 mod kicad_pcb;
+mod panel;
 mod route;
 mod store;
 
@@ -47,6 +48,7 @@ pub use board::{
     SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
+pub use panel::PanelizeRequest;
 use serde_json::{Map, Value, json};
 
 /// PCB board formats the product must classify.
@@ -206,6 +208,7 @@ pub fn capabilities() -> Value {
         "viaStitching": "supported",
         "slots": "supported",
         "copperBalance": "supported",
+        "panelization": "supported",
         "netClasses": "supported",
         "testPoints": "supported",
         "stackup": "supported",
@@ -814,6 +817,16 @@ pub fn delete_severity(handle: u64, code: &str) -> Result<Value, ServiceError> {
 /// rectangular outline.
 pub fn copper_balance(handle: u64) -> Result<Value, ServiceError> {
     store::read(handle, copper::report)
+}
+
+/// Builds the panelization report of one open board.
+///
+/// The panel repeats the rectangular outline across `columns` and `rows` with
+/// the requested gaps and edge rail. The report carries the panel outline,
+/// every placement, the area utilization and the seam or tab placeholders of
+/// the requested style.
+pub fn panelize(handle: u64, request: PanelizeRequest) -> Result<Value, ServiceError> {
+    store::read(handle, |board| panel::report(board, request))?
 }
 
 /// Lists one open board as a summary.

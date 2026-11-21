@@ -201,6 +201,81 @@ export interface CopperBalanceReport {
     readonly imbalancePercent: number | null;
 }
 
+/** Tab style used between adjacent boards in a panel. */
+export type PanelTabStyle = 'v-cut' | 'mouse-bite' | 'none';
+
+/** Options of `board.panelize()`. Lengths are in millimetres. */
+export interface PanelizeOptions {
+    /** Boards across one row; at least one. */
+    readonly columns: number;
+    /** Rows of boards; at least one. */
+    readonly rows: number;
+    /** Gap between neighbouring columns; defaults to 0. */
+    readonly gapX?: number;
+    /** Gap between neighbouring rows; defaults to 0. */
+    readonly gapY?: number;
+    /** Border around the array; defaults to 0. */
+    readonly rail?: number;
+    /** Tab style; defaults to `v-cut`. */
+    readonly tab?: PanelTabStyle;
+    /** Length of one mouse-bite tab; defaults to 5. */
+    readonly tabWidth?: number;
+    /** Distance between tab centres; defaults to 20. */
+    readonly tabSpacing?: number;
+}
+
+/** One board placement inside a panel, in millimetres. */
+export interface PanelPlacement {
+    readonly column: number;
+    readonly row: number;
+    readonly from: readonly [number, number];
+    readonly to: readonly [number, number];
+}
+
+/** One internal seam a `v-cut` scores, in millimetres. */
+export interface PanelSeam {
+    readonly orientation: 'vertical' | 'horizontal';
+    readonly at: number;
+    readonly from: readonly [number, number];
+    readonly to: readonly [number, number];
+    readonly length: number;
+}
+
+/** One mouse-bite tab placeholder over a gap, in millimetres. */
+export interface PanelTab {
+    readonly orientation: 'vertical' | 'horizontal';
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+}
+
+/** Result of `board.panelize()`. Lengths are in millimetres and areas in square millimetres. */
+export interface PanelizeReport {
+    readonly revision: number;
+    readonly units: 'mm';
+    readonly columns: number;
+    readonly rows: number;
+    readonly boardCount: number;
+    readonly gapX: number;
+    readonly gapY: number;
+    readonly rail: number;
+    readonly boardSize: { readonly width: number; readonly height: number };
+    readonly panelSize: { readonly width: number; readonly height: number };
+    readonly panelOutline: {
+        readonly from: readonly [number, number];
+        readonly to: readonly [number, number];
+    };
+    readonly boardArea: number;
+    readonly panelArea: number;
+    readonly utilizationPercent: number;
+    readonly tab: PanelTabStyle;
+    readonly seams: readonly PanelSeam[];
+    readonly tabs: readonly PanelTab[];
+    readonly tabCount: number;
+    readonly placements: readonly PanelPlacement[];
+}
+
 /** Render targets declared for preview surfaces. */
 export type RenderFormat = 'svg' | 'png' | 'pdf';
 
@@ -272,6 +347,8 @@ export interface BoardCapabilities {
     readonly slots: SupportLevel;
     /** Whether a copper area and balance report can be produced. */
     readonly copperBalance: SupportLevel;
+    /** Whether a rectangular board can be arrayed into a panel with seams or tabs. */
+    readonly panelization: SupportLevel;
     /** Whether net classes with clearance and width targets are available. */
     readonly netClasses: SupportLevel;
     /** Whether declared test points can be reported. */
@@ -847,6 +924,7 @@ export interface Board {
     impedance(options: ImpedanceOptions): Promise<ImpedanceReport>;
     impedanceWidth(options: ImpedanceWidthOptions): Promise<ImpedanceWidthReport>;
     copperBalance(): Promise<CopperBalanceReport>;
+    panelize(options: PanelizeOptions): Promise<PanelizeReport>;
     addWaiver(options: AddWaiverOptions): Promise<BoardEditResult>;
     deleteWaiver(id: ObjectId): Promise<BoardEditResult>;
     setSeverity(options: SetSeverityOptions): Promise<BoardEditResult>;

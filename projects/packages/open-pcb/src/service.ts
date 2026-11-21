@@ -38,6 +38,8 @@ import type {
     InspectCheck,
     InspectReport,
     MoveFootprintOptions,
+    PanelizeOptions,
+    PanelizeReport,
     RouteOptions,
     RouteReport,
     SaveReport,
@@ -337,6 +339,13 @@ export function setOutline(handle: number, options: SetOutlineOptions): BoardEdi
 /** Reports copper area per layer and the coverage imbalance across them. */
 export function copperBalance(handle: number): CopperBalanceReport {
     return decode<CopperBalanceReport>(() => binding('board.copperBalance').board_copper_balance(handle));
+}
+
+/** Builds the panelization report of one open board. */
+export function panelize(handle: number, options: PanelizeOptions): PanelizeReport {
+    return decode<PanelizeReport>(() =>
+        binding('board.panelize').board_panelize(handle, JSON.stringify(options)),
+    );
 }
 
 /** Replaces one or more design-rule values on an open board. */
