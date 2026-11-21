@@ -11,14 +11,15 @@ OpenPCB(options?)` creates a session; `create` and `open` return an editable
 `Board` with `inspect`, `save`, `export`, `close`, `undo`, `redo`,
 `addFootprint`, `moveFootprint`, `updateFootprint`, `deleteFootprint`,
 `addTrack`, `deleteTrack`, `addVia`, `deleteVia`, `addNet`, `route`, `addLayer`,
-`updateLayer`, `setOutline` and `list`. Each summary exposes `canUndo` and
-`canRedo`.
+`updateLayer`, `setOutline` and `list`. `importBoard` reads a KiCad PCB or
+IPC-2581 file, and `importKicadPcb` stays as the KiCad-only spelling of the same
+operation. Each summary exposes `canUndo` and `canRedo`.
 
 Implemented outputs are Gerber RS-274X, drill, BOM, pick-and-place, SVG, vector
 PDF, 1024x768 RGB PNG, KiCad PCB and IPC-2581. Implemented checks are DRC,
 connectivity, clearance, annular rings, annular-ring, track-width, unrouted,
-stackup, outline, silkscreen, courtyard and netlist. STEP export and IPC-2581
-import stay unsupported and reject with `capability/not-implemented`.
+stackup, outline, silkscreen, courtyard and netlist. STEP export stays
+unsupported and rejects with `capability/not-implemented`.
 
 Classification is not a support claim: reads, writes and exports are reported by
 `capabilities()`, never inferred from an extension or a method name.
@@ -49,7 +50,11 @@ await board.export({ format: 'png', target: 'blinker.png' });
 await board.export({ format: 'kicad_pcb', target: 'blinker.kicad_pcb' });
 await board.export({ format: 'ipc2581', target: 'blinker.ipc2581' });
 const gerber = await board.export({ format: 'gbr', target: 'gerber' });
-console.log(gerber.artifacts?.length); // 4
+console.log(gerber.artifacts?.length); // 5
+
+const imported = await pcb.importBoard({ path: 'blinker.ipc2581' });
+console.log(imported.format, imported.losses.length);
+await imported.board.close();
 
 await board.close();
 await pcb.dispose();
@@ -63,11 +68,16 @@ await pcb.dispose();
 - Undo and redo are per handle: `open` and `create` start with empty history,
   and `save` does not add a step. `board/history-empty` reports an exhausted
   direction.
-- Gerber export writes a directory of four files (`F_Cu`, `B_Cu`, `F_SilkS`,
-  `Edge_Cuts`) and needs a board outline.
+- Gerber export writes a directory of five files (`F_Cu`, `B_Cu`, `F_SilkS`,
+  `B_SilkS`, `Edge_Cuts`) and needs a board outline. The two silkscreen files
+  carry the legend tracks the document holds; they are valid empty layers when
+  the board has no silkscreen geometry.
 - PDF export is a single-page vector document sized to A4 landscape or to the
   board. KiCad PCB and IPC-2581 exports are deterministic projections of the
   native document; no net names are invented for KiCad.
+- `importBoard` detects the format from the content and reports it. KiCad PCB
+  and IPC-2581 imports keep every construct the document can hold and return a
+  loss ledger for the rest; `importKicadPcb` is the KiCad-only spelling.
 - `board.route()` is a deterministic two-layer orthogonal router. It returns
   `{ routed, unrouted, tracks, vias }`; an edge it cannot place is reported, not
   approximated, and it never invents connectivity.

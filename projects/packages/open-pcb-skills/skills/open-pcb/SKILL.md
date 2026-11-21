@@ -24,16 +24,15 @@ Implemented:
   `netlist`.
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `bom`, `pos`,
   `svg`, `pdf`, `png` (1024x768 RGB raster), `kicad_pcb` and `ipc2581`.
-- Import a KiCad PCB with a loss ledger for unrepresentable constructs.
+- Import a KiCad PCB or IPC-2581 document with a loss ledger for unrepresentable
+  constructs; the CLI and SDK detect the format from the content.
 
-Not implemented: STEP export, IPC-2581 import, the interactive viewport
-renderer, silkscreen text/shapes, pad drills (so `annular-ring` covers vias
-only), diagonal or rip-up routing, and templates other than `blank`. Gerber
-F_SilkS is a valid empty layer because the document has no silkscreen geometry,
-and rectangular pad apertures are not rotated. All unimplemented targets stay
-`unsupported` in the capability matrix and reject with
-`capability/not-implemented`. Do not fill the gap with local parsers, routers,
-geometry code or fabricated reports.
+Not implemented: STEP export, the interactive viewport renderer, silkscreen
+text/shapes, pad drills (so `annular-ring` covers vias only), diagonal or rip-up
+routing, and templates other than `blank`. Rectangular pad apertures are not
+rotated in Gerber output. All unimplemented targets stay `unsupported` in the
+capability matrix and reject with `capability/not-implemented`. Do not fill the
+gap with local parsers, routers, geometry code or fabricated reports.
 
 Always confirm the installed matrix with `open-pcb capabilities` before promising
 a format, check or target.
@@ -45,6 +44,7 @@ a format, check or target.
 | `open-pcb capabilities` | Print the implemented format, check, renderer and export matrix. |
 | `open-pcb create --out <file.opcb> --title <title> --template <name>` | Create a board with F.Cu, B.Cu and silkscreen; the outline starts unset. `blank` is the only implemented template. |
 | `open-pcb open <file.opcb>` | Open a document and print its revision and layers. |
+| `open-pcb import <file.kicad_pcb\|file.ipc2581> --out <file.opcb>` | Import a KiCad PCB or IPC-2581 document into a native board and report the detected format plus the loss ledger. |
 | `open-pcb list <file.opcb>` | Print the revision, stackup and object counts. |
 | `open-pcb undo <file.opcb>` / `open-pcb redo <file.opcb>` | Restore the previous or next saved document. The CLI keeps up to 32 snapshots in `<file>.history.json`. |
 | `open-pcb net add <file.opcb> --name <name>` | Declare a net in place. |
@@ -112,8 +112,9 @@ mutating command also records the previous document for CLI undo/redo.
 1. Confirm the stackup, drill sizes and outline the export depends on. Gerber
    edge cuts and the outline checks need `open-pcb outline set` first.
 2. Export `gbr` to an explicit directory; the writer produces `F_Cu.gbr`,
-   `B_Cu.gbr`, `F_SilkS.gbr` and `Edge_Cuts.gbr`. Export `drl`, `pos`, `bom`,
-   `svg`, `pdf`, `png`, `kicad_pcb` and `ipc2581` to explicit paths.
+   `B_Cu.gbr`, `F_SilkS.gbr`, `B_SilkS.gbr` and `Edge_Cuts.gbr`. Export `drl`,
+   `pos`, `bom`, `svg`, `pdf`, `png`, `kicad_pcb` and `ipc2581` to explicit
+   paths.
 3. State exactly which targets were written and which reject, then inspect the
    files for the expected markers (`%FSLAX46Y46*%` and `M02*` in every Gerber
    file, `M48` and `M30` in drill, a `Designator` header in position, `<svg` in
@@ -125,7 +126,7 @@ mutating command also records the previous document for CLI undo/redo.
   connectivity, clearance or annular ring results. A board without an outline
   fails `stackup` and `outline` with `drc/outline-missing`.
 - Never describe a format as supported because an extension is listed; read the
-  capability matrix. Gerber export needs an outline and writes four files; it is
+  capability matrix. Gerber export needs an outline and writes five files; it is
   not a single-file target.
 - Keep one board model: copper layers, stackup, footprints, nets, tracks and vias
   must agree on the same revision.

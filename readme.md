@@ -29,20 +29,23 @@ SDK and studio shell share one native model:
   autorouter that reports collisions instead of inventing copper.
 - Run DRC, connectivity, clearance, annular ring, stackup, outline, silkscreen,
   courtyard, netlist, `annular-ring`, `track-width` and `unrouted` checks.
-- Import a KiCad PCB file into the native document: copper layers, nets,
-  footprints and pads, tracks, through, blind and buried vias and a rectangular
-  `Edge.Cuts` outline, with a stable loss ledger for everything the document
-  cannot hold. Micro vias stay in that ledger instead of being approximated.
+- Import a KiCad PCB or IPC-2581 document into the native document: copper
+  layers, nets, footprints and pads, tracks, through, blind and buried vias and a
+  rectangular profile, with a stable loss ledger for everything the document
+  cannot hold. Micro vias imported from KiCad stay in that ledger instead of
+  being approximated.
 - Write Gerber RS-274X, Excellon drill, BOM, pick-and-place, SVG, vector PDF,
   8-bit RGB PNG, KiCad PCB and IPC-2581 files atomically. Gerber writes one
-  file per copper layer plus `F_SilkS` and `Edge_Cuts`; one Excellon file lists
-  every drilled hole, including blind and buried vias.
+  file per copper layer plus `F_SilkS`, `B_SilkS` and `Edge_Cuts`; the two
+  silkscreen files carry the legend tracks the document holds. One Excellon file
+  lists every drilled hole, including blind and buried vias.
 
-STEP export and IPC-2581 import remain declared and reject with
-`capability/not-implemented`. PNG is an export writer only; preview rendering
-stays SVG-only. The interactive viewport renderer is not implemented either.
-The capability matrix reports through, blind and buried vias as supported and
-micro vias as unsupported. `open-pcb capabilities` prints exactly that matrix.
+STEP export remains declared and rejects with `capability/not-implemented`. PNG
+is an export writer only; preview rendering stays SVG-only. The interactive
+viewport renderer is not implemented either. The capability matrix reports
+through, blind and buried vias as supported, micro vias as unsupported, and
+both `kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities`
+prints exactly that matrix.
 
 ## Usage
 
@@ -53,8 +56,10 @@ open-pcb capabilities
 # Create a native board document
 open-pcb create --out blinker.opcb --title "Blinker" --template blank
 
-# Import a KiCad board and report every construct the document could not keep
+# Import a KiCad board or an IPC-2581 document and report every construct the
+# document could not keep; the format is detected from the content
 open-pcb import legacy.kicad_pcb --out legacy.opcb
+open-pcb import panel.ipc2581 --out panel.opcb
 
 # Declare a net, place a footprint, route a track and add a via
 open-pcb net add blinker.opcb --name VCC
@@ -134,18 +139,20 @@ await board.export({ format: 'gbr', target: 'gerber' });
 await board.undo();
 await board.redo();
 
-// Import a KiCad PCB and keep the wrapped document for further edits
-const imported = await pcb.importKicadPcb({ path: 'legacy.kicad_pcb', target: 'legacy.opcb' });
-console.log(imported.board.summary.counts.footprints, imported.losses.length);
+// Import a KiCad PCB or IPC-2581 document and keep the wrapped document for
+// further edits; `format` reports what the engine detected
+const imported = await pcb.importBoard({ path: 'panel.ipc2581', target: 'panel.opcb' });
+console.log(imported.format, imported.board.summary.counts.footprints, imported.losses.length);
 
 await imported.board.close();
 await board.close();
 await pcb.dispose();
 ```
 
-`capabilities()`, `create`, `open`, `importKicadPcb`, `inspect` and `dispose`
+`capabilities()`, `create`, `open`, `importBoard`, `inspect` and `dispose`
 belong to the session; every edit, inspection, save and export is a `Board`
-method, so no command bypasses the document.
+method, so no command bypasses the document. `importKicadPcb` remains as the
+KiCad-only spelling of `importBoard`.
 
 `new OpenPCB({ history: 'sidecar' })` persists undo history in
 `<file>.history.json` beside the document, so `undo` and `redo` cross process
@@ -168,6 +175,7 @@ flowchart LR
     Model --> Store["Handle store"]
     Model --> Checks["DRC and connectivity"]
     Model --> Route["deterministic two-layer router"]
+    Model --> Readers["kicad_pcb / ipc2581 readers"]
     Model --> Writers["gbr / drl / bom / pos / svg / pdf / png / kicad_pcb / ipc2581 writers"]
 ```
 
@@ -178,11 +186,14 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
 
 ## What it does NOT do
 
-- It does not import STEP or IPC-2581 files. KiCad PCB import maps copper
-  layers, nets, footprints and pads, tracks, through, blind and buried vias and
-  a rectangular outline; zones, dimensions, text, arcs, polygons, micro vias,
+- It does not import STEP files. KiCad PCB import maps copper layers, nets,
+  footprints and pads, tracks, through, blind and buried vias and a rectangular
+  `Edge.Cuts` outline; zones, dimensions, text, arcs, polygons, micro vias,
   footprint graphics and non-rectangular outlines are reported in the import
-  loss ledger instead of being approximated.
+  loss ledger instead of being approximated. IPC-2581 import reads a rectangular
+  profile, packages and pins, components, logical nets, line features and plated
+  holes; footprints on non-copper layers, non-rectangular profiles, non-plated
+  holes and undeclared nets are reported in its own loss ledger.
 - It does not export STEP. PNG export is a fixed 1024x768 top-down raster; it
   does not render silkscreen text, zones or a live viewport.
 - The router is a deterministic orthogonal MST router: it tries four
@@ -196,9 +207,10 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
 - It does not store silkscreen text or shapes. The `silkscreen` check therefore
   reports `silkscreen/no-reference-text` as a warning while still checking pad
   placement against the outline.
-- It does not draw silkscreen geometry into the Gerber F_SilkS file; the file is
-  a valid empty layer because the document has no silkscreen shapes. Vector PDF
-  draws the F.SilkS tracks the document holds, when present.
+- Silkscreen legend geometry is stored as tracks on silkscreen layers: the SVG
+  and PDF writers draw them, the Gerber writer emits them into `F_SilkS` and
+  `B_SilkS`, and the `silkscreen-over-pad` check reads them. DRC treats a
+  silkscreen track as legend rather than a copper rule violation.
 - It does not rotate rectangular pad apertures in Gerber output.
 - It does not edit zones, use templates other than `blank`, persist undo
   history inside `.opcb`, or resolve concurrent edits against an older revision.

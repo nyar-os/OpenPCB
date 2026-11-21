@@ -9,9 +9,10 @@ algorithms.
 Executable. `skills/open-pcb/SKILL.md` records the commands, workflows and
 evidence rules for board creation, editing, DRC review and fabrication or
 assembly delivery. The skill covers only the implemented surface: document core,
-undo and redo, layer and outline edits, seven checks and the Gerber, drill, BOM,
-position and SVG writers. STEP, IPC-2581, KiCad, PDF and the viewport remain
-explicitly unsupported.
+undo and redo, layer and outline edits, the implemented checks, KiCad PCB and
+IPC-2581 import, and the Gerber, drill, BOM, position, SVG, PDF, PNG, KiCad and
+IPC-2581 writers. STEP export and the interactive viewport remain explicitly
+unsupported.
 
 ## Layout
 
