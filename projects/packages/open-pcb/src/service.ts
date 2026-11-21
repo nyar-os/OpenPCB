@@ -12,6 +12,7 @@ import type {
     AddDifferentialPairOptions,
     AddFootprintOptions,
     AddTeardropsOptions,
+    AddTestPointOptions,
     AddLayerOptions,
     AddNetClassOptions,
     AddNetOptions,
@@ -195,6 +196,18 @@ export function assignNetClass(handle: number, options: AssignNetClassOptions): 
     return decode<BoardEditResult>(() =>
         binding('board.assignNetClass').board_assign_net_class(handle, JSON.stringify(options)),
     );
+}
+
+/** Declares one test point on an existing pad or via. */
+export function addTestPoint(handle: number, options: AddTestPointOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.addTestPoint').board_add_test_point(handle, JSON.stringify(options)),
+    );
+}
+
+/** Deletes one declared test point from an open board. */
+export function deleteTestPoint(handle: number, id: string): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deleteTestPoint').board_delete_test_point(handle, id));
 }
 
 /** Moves one footprint on an open board. */

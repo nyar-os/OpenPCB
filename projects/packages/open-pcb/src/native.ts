@@ -32,6 +32,8 @@ export interface NativeBinding {
     board_add_net_class(handle: number, requestJson: string): string;
     board_delete_net_class(handle: number, id: string): string;
     board_assign_net_class(handle: number, requestJson: string): string;
+    board_add_test_point(handle: number, requestJson: string): string;
+    board_delete_test_point(handle: number, id: string): string;
     board_route(handle: number, optionsJson: string): string;
     board_add_net(handle: number, requestJson: string): string;
     board_undo(handle: number): string;

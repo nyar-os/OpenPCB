@@ -119,6 +119,7 @@ export type ExportTarget =
     | 'pos'
     | 'placement'
     | 'bom'
+    | 'testpoints'
     | 'step'
     | 'ipc2581'
     | 'pdf'
@@ -166,6 +167,8 @@ export interface BoardCapabilities {
     readonly zones: SupportLevel;
     /** Whether net classes with clearance and width targets are available. */
     readonly netClasses: SupportLevel;
+    /** Whether declared test points can be reported. */
+    readonly testPoints: SupportLevel;
 }
 
 /** Options of `OpenPCB.create()`. */
@@ -203,6 +206,7 @@ export interface BoardSummaryCounts {
     readonly vias: number;
     readonly zones: number;
     readonly netClasses: number;
+    readonly testPoints: number;
     readonly differentialPairs: number;
     readonly waivers: number;
 }
@@ -461,6 +465,12 @@ export interface AssignNetClassOptions {
     readonly class: string;
 }
 
+/** Options of `board.addTestPoint()`. */
+export interface AddTestPointOptions {
+    /** Pad key `footprint-id:pad-number` or via id. */
+    readonly target: string;
+}
+
 /** Back-drill geometry of one through via, in board units. */
 export interface BackDrill {
     /** Barrel depth removed from the secondary side; greater than zero. */
@@ -657,6 +667,8 @@ export interface Board {
     addNetClass(options: AddNetClassOptions): Promise<BoardEditResult>;
     deleteNetClass(id: ObjectId): Promise<BoardEditResult>;
     assignNetClass(options: AssignNetClassOptions): Promise<BoardEditResult>;
+    addTestPoint(options: AddTestPointOptions): Promise<BoardEditResult>;
+    deleteTestPoint(id: ObjectId): Promise<BoardEditResult>;
     setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult>;
     addNet(options: AddNetOptions): Promise<BoardEditResult>;
     addTeardrops(options?: AddTeardropsOptions): Promise<BoardEditResult>;

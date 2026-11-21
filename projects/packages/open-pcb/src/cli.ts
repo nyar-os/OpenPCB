@@ -116,8 +116,21 @@ async function withBoard<T>(file: string, apply: (board: Board) => Promise<T>): 
 }
 
 /** Export targets the CLI accepts, mirroring the declared capability matrix. */
-const exportTargets: readonly ExportTarget[] =
-    ['kicad_pcb', 'gbr', 'drl', 'drill_map', 'pos', 'placement', 'bom', 'step', 'ipc2581', 'pdf', 'svg', 'png'];
+const exportTargets: readonly ExportTarget[] = [
+    'kicad_pcb',
+    'gbr',
+    'drl',
+    'drill_map',
+    'pos',
+    'placement',
+    'bom',
+    'testpoints',
+    'step',
+    'ipc2581',
+    'pdf',
+    'svg',
+    'png',
+];
 
 /** Layer kinds the model accepts. */
 const layerKinds: readonly LayerKind[] = ['copper', 'silkscreen', 'soldermask', 'assembly', 'mechanical'];
@@ -764,6 +777,53 @@ netclass
         await withBoard(file, async (board) => {
             const result = await board.assignNetClass({ net, class: netClass });
             ctx.emitResult(result, `assigned ${net} to ${netClass}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const testpoint = cli.command('testpoint', 'cli.cmd.testpoint');
+testpoint
+    .command('add', 'cli.cmd.testpoint-add')
+    .option('--target <target>', 'cli.opt.target')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const target = text(options, 'target');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (target === undefined || target.length === 0) {
+            ctx.fail('open-pcb.cli.target-required', {
+                message: '`--target <footprint-id:pad-number|via-id>` is required',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addTestPoint({ target });
+            ctx.emitResult(result, `declared ${result.object?.id ?? 'test point'} on ${target}`);
+            return 0;
+        });
+        return 0;
+    });
+
+testpoint
+    .command('delete', 'cli.cmd.testpoint-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteTestPoint(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
             return 0;
         });
         return 0;

@@ -20,7 +20,7 @@ use crate::{ServiceError, board::Board};
 
 /// Formats this build can write.
 pub(crate) const SUPPORTED_EXPORTS: &[&str] =
-    &["gbr", "drl", "drill_map", "bom", "pos", "placement", "svg", "pdf", "kicad_pcb", "ipc2581", "png"];
+    &["gbr", "drl", "drill_map", "bom", "pos", "placement", "testpoints", "svg", "pdf", "kicad_pcb", "ipc2581", "png"];
 
 /// Points per millimetre used by the vector PDF writer.
 const PT_PER_MM: f64 = 2.834646;
@@ -47,6 +47,7 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
         "drill_map" => drill_map(board).into_bytes(),
         "bom" => bom(board).into_bytes(),
         "pos" => position(board).into_bytes(),
+        "testpoints" => testpoints(board).into_bytes(),
         "placement" => placement(board)?.into_bytes(),
         "svg" => svg(board)?.into_bytes(),
         "pdf" => pdf(board)?,
@@ -457,6 +458,31 @@ fn placement(board: &Board) -> Result<String, ServiceError> {
     });
     serde_json::to_string_pretty(&document)
         .map_err(|error| crate::invalid(format!("cannot serialize the placement export: {error}")))
+}
+
+/// Probe report with one CSV row per declared test point.
+///
+/// Pad test points carry the reference designator and pad number; via test
+/// points keep the designator and pad cells empty and report the via span in
+/// the layer cell. Coordinates are millimetres, like the other assembly files.
+fn testpoints(board: &Board) -> String {
+    let scale = board.millimetres();
+    let mut out = String::from("Target,Designator,Pad,Kind,Net,Layer,X,Y\n");
+    for point in board.resolved_test_points() {
+        let _ = writeln!(
+            out,
+            "{},{},{},{},{},{},{:.3},{:.3}",
+            csv(&point.target),
+            csv(&point.designator),
+            csv(&point.pad),
+            point.kind,
+            csv(point.net.as_deref().unwrap_or("")),
+            csv(&point.layer),
+            point.at[0] * scale,
+            point.at[1] * scale
+        );
+    }
+    out
 }
 
 /// Rounds a coordinate to three decimals without a negative zero.

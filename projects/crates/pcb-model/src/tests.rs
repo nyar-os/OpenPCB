@@ -13,14 +13,16 @@ use serde_json::Value;
 
 use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest, AddPadRequest,
-    AddTeardropsRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest,
-    CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
-    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, add_differential_pair, add_footprint, add_layer,
-    add_net, add_net_class, add_pad, add_teardrops, add_track, add_via, add_waiver, add_zone, assign_net_class,
+    AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
+    AssignNetClassRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
+    SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, add_differential_pair,
+    add_footprint, add_layer, add_net, add_net_class, add_pad, add_teardrops, add_test_point, add_track, add_via, add_waiver,
+    add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
-    capabilities, close, create, delete_differential_pair, delete_footprint, delete_net_class, delete_severity, delete_track,
-    delete_via, delete_waiver, delete_zone, export, import, inspect, move_footprint, open, redo, route, save, set_outline,
-    set_rules, set_severity, set_via_back_drill, store, summary, undo, update_footprint, update_layer,
+    capabilities, close, create, delete_differential_pair, delete_footprint, delete_net_class, delete_severity,
+    delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import, inspect, move_footprint, open,
+    redo, route, save, set_outline, set_rules, set_severity, set_via_back_drill, store, summary, undo, update_footprint,
+    update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -112,7 +114,9 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["project"]["edit"], "partial");
     assert_eq!(matrix["project"]["export"], "partial");
 
-    for format in ["gbr", "drl", "drill_map", "bom", "pos", "placement", "svg", "pdf", "kicad_pcb", "ipc2581", "png"] {
+    for format in
+        ["gbr", "drl", "drill_map", "bom", "pos", "placement", "testpoints", "svg", "pdf", "kicad_pcb", "ipc2581", "png"]
+    {
         assert_eq!(matrix["formats"][format]["export"], "supported", "{format} export");
         assert_eq!(matrix["formats"][format]["edit"], "unsupported", "{format} edit");
     }
@@ -160,13 +164,16 @@ fn capability_matrix_matches_the_implemented_pack() {
         "silkscreen-over-pad",
         "diffpair",
         "dangling-copper",
+        "netclass",
     ] {
         assert_eq!(matrix["checks"][check], "supported", "{check} check");
     }
     assert_eq!(matrix["renderers"]["svg"], "supported");
     assert_eq!(matrix["renderers"]["png"], "unsupported");
     assert_eq!(matrix["renderers"]["pdf"], "unsupported");
-    for target in ["gbr", "drl", "drill_map", "bom", "pos", "placement", "svg", "pdf", "kicad_pcb", "ipc2581", "png"] {
+    for target in
+        ["gbr", "drl", "drill_map", "bom", "pos", "placement", "testpoints", "svg", "pdf", "kicad_pcb", "ipc2581", "png"]
+    {
         assert_eq!(matrix["exportTargets"][target], "supported", "{target} target");
     }
     assert_eq!(matrix["exportTargets"]["step"], "unsupported");
@@ -183,6 +190,9 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["solderMask"], "supported");
     assert_eq!(matrix["drcPolicy"], "supported");
     assert_eq!(matrix["routing"], "supported");
+    assert_eq!(matrix["zones"], "supported");
+    assert_eq!(matrix["netClasses"], "supported");
+    assert_eq!(matrix["testPoints"], "supported");
 }
 
 #[test]
@@ -393,6 +403,69 @@ fn net_classes_apply_clearance_and_width_targets() {
     assert_eq!(listed["netClasses"][0]["nets"], serde_json::json!(["VCC", "GND"]));
     delete_net_class(reopened, "netclass-1").expect("the class is deleted");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["netClasses"], 0);
+    close(reopened).expect("the board closes");
+}
+
+#[test]
+fn test_points_report_pad_and_via_probes() {
+    let directory = TempDir::new();
+    let path = directory.join("testpoints.opcb");
+    let handle = created();
+    add_full_board(handle);
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 1.0,
+            y: 1.0,
+            w: 0.8,
+            h: 0.8,
+            net: Some("VCC".to_string()),
+        },
+    )
+    .expect("the pad is added");
+
+    let pad =
+        add_test_point(handle, AddTestPointRequest { target: "fp-1:1".to_string() }).expect("the pad becomes a test point");
+    assert_eq!(pad["object"]["kind"], "pad");
+    assert_eq!(pad["object"]["designator"], "U1");
+    assert_eq!(pad["object"]["pad"], "1");
+    assert_eq!(pad["object"]["net"], "VCC");
+    assert_eq!(pad["object"]["at"], serde_json::json!([31.0, 21.0]));
+    let via =
+        add_test_point(handle, AddTestPointRequest { target: "via-1".to_string() }).expect("the via becomes a test point");
+    assert_eq!(via["object"]["kind"], "via");
+    assert_eq!(via["object"]["layer"], "F.Cu..B.Cu");
+    assert_eq!(via["object"]["at"], serde_json::json!([20.0, 20.0]));
+
+    let duplicate =
+        add_test_point(handle, AddTestPointRequest { target: "via-1".to_string() }).expect_err("a target is declared once");
+    assert_eq!(duplicate.code, "session/argument-invalid");
+    let missing =
+        add_test_point(handle, AddTestPointRequest { target: "fp-9:1".to_string() }).expect_err("the target must exist");
+    assert_eq!(missing.code, "object/not-found");
+
+    let csv_path = directory.join("testpoints.csv");
+    export(handle, "testpoints", &csv_path).expect("the report writes");
+    let report = fs::read_to_string(&csv_path).expect("the report is readable");
+    assert!(report.starts_with("Target,Designator,Pad,Kind,Net,Layer,X,Y\n"), "the header is stable: {report}");
+    assert!(report.contains("fp-1:1,U1,1,pad,VCC,F.Cu,31.000,21.000"), "the pad row uses millimetres: {report}");
+    assert!(report.contains("via-1,,,via,VCC,F.Cu..B.Cu,20.000,20.000"), "the via row reports its span: {report}");
+
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["testPoints"], 2);
+
+    delete_via(reopened, "via-1").expect("the via is deleted");
+    assert_eq!(
+        summary(reopened).expect("the board is listed")["counts"]["testPoints"],
+        1,
+        "deleting the via drops its test point"
+    );
+    delete_test_point(reopened, "testpoint-1").expect("the pad test point is deleted");
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["testPoints"], 0);
     close(reopened).expect("the board closes");
 }
 

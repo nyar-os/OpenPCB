@@ -17,6 +17,7 @@ import type {
     AddDifferentialPairOptions,
     AddFootprintOptions,
     AddTeardropsOptions,
+    AddTestPointOptions,
     AddLayerOptions,
     AddNetClassOptions,
     AddNetOptions,
@@ -442,6 +443,14 @@ function attach(
         async assignNetClass(options: AssignNetClassOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.assignNetClass(current, options));
+        },
+        async addTestPoint(options: AddTestPointOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addTestPoint(current, options));
+        },
+        async deleteTestPoint(id: string): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deleteTestPoint(current, id));
         },
         async setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult> {
             ensure();

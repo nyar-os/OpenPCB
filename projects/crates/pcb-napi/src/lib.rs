@@ -213,6 +213,26 @@ fn board_assign_net_class(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Declares one test point on an existing pad or via.
+#[function]
+fn board_add_test_point(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::AddTestPointRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::add_test_point(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Deletes one declared test point from an open board.
+#[function]
+fn board_delete_test_point(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let value = open_pcb_model::delete_test_point(handle, &id).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds one copper pour region to an open board.
 #[function]
 fn board_add_zone(ctx: CallContext) -> Result<JsValue> {
@@ -663,6 +683,17 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
                 serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
             open_pcb_model::assign_net_class(handle, request)
         }
+        "board.addTestPoint" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::AddTestPointRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::add_test_point(handle, request)
+        }
+        "board.deleteTestPoint" => {
+            let handle = rpc_handle(value)?;
+            let id = rpc_text(value, "id")?;
+            open_pcb_model::delete_test_point(handle, id)
+        }
         "board.addNet" => {
             let handle = rpc_handle(value)?;
             let request: open_pcb_model::AddNetRequest = serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
@@ -1079,6 +1110,8 @@ register_module![
     board_add_net_class,
     board_delete_net_class,
     board_assign_net_class,
+    board_add_test_point,
+    board_delete_test_point,
     board_route,
     board_add_net,
     board_undo,

@@ -333,6 +333,39 @@ impl NetClass {
     }
 }
 
+/// One declared test point.
+///
+/// The target is either `footprint-id:pad-number` for a pad or a via id. The
+/// marker stores no geometry, so moving or rotating a footprint or via moves
+/// the reported probe position with it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct TestPoint {
+    /// Stable test point id.
+    pub(crate) id: String,
+    /// Pad key or via id the probe touches.
+    pub(crate) target: String,
+}
+
+/// One test point resolved to a probe position.
+pub(crate) struct ResolvedTestPoint {
+    /// Stable test point id.
+    pub(crate) id: String,
+    /// Pad key or via id.
+    pub(crate) target: String,
+    /// Reference designator for a pad; empty for a via.
+    pub(crate) designator: String,
+    /// Pad number for a pad; empty for a via.
+    pub(crate) pad: String,
+    /// `pad` or `via`.
+    pub(crate) kind: &'static str,
+    /// Declared net name, when assigned.
+    pub(crate) net: Option<String>,
+    /// Layer for a pad, or the via span label.
+    pub(crate) layer: String,
+    /// Probe position in board units.
+    pub(crate) at: [f64; 2],
+}
+
 /// One copper pour region on a copper layer.
 ///
 /// A zone is a closed polygon with at least three vertices. It carries no fill
@@ -440,6 +473,9 @@ pub(crate) struct Board {
     /// Declared net classes; absent on documents written before classes existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) net_classes: Vec<NetClass>,
+    /// Declared test points; absent on documents written before them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) test_points: Vec<TestPoint>,
     /// Declared differential pairs; absent on documents written before pairs existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) differential_pairs: Vec<DifferentialPair>,
@@ -467,6 +503,9 @@ pub(crate) struct Board {
     /// Next net class sequence number.
     #[serde(default = "one")]
     pub(crate) next_net_class: u64,
+    /// Next test point sequence number.
+    #[serde(default = "one")]
+    pub(crate) next_test_point: u64,
     /// Next net sequence number.
     pub(crate) next_net: u64,
 }
@@ -520,6 +559,7 @@ impl Board {
             vias: Vec::new(),
             zones: Vec::new(),
             net_classes: Vec::new(),
+            test_points: Vec::new(),
             differential_pairs: Vec::new(),
             severity_overrides: BTreeMap::new(),
             waivers: Vec::new(),
@@ -530,6 +570,7 @@ impl Board {
             next_via: 1,
             next_zone: 1,
             next_net_class: 1,
+            next_test_point: 1,
             next_net: 1,
         })
     }
@@ -705,6 +746,8 @@ impl Board {
             .ok_or_else(|| ServiceError::new("object/not-found", format!("no footprint with id `{id}`")))?;
         self.editable_layer(&self.footprints[index].layer)?;
         let removed = self.footprints.remove(index);
+        let prefix = format!("{}:", removed.id);
+        self.test_points.retain(|point| !point.target.starts_with(&prefix));
         self.revision += 1;
         Ok(removed.id)
     }
@@ -843,6 +886,8 @@ impl Board {
                 )
             })?;
         let removed = self.footprints[footprint_index].pads.remove(pad_index);
+        let target = format!("{}:{}", self.footprints[footprint_index].id, removed.number);
+        self.test_points.retain(|point| point.target != target);
         self.revision += 1;
         Ok(removed.number)
     }
@@ -1063,6 +1108,7 @@ impl Board {
         let via = self.vias[index].clone();
         self.editable_via(&via)?;
         let removed = self.vias.remove(index);
+        self.test_points.retain(|point| point.target != removed.id);
         self.revision += 1;
         Ok(removed.id)
     }
@@ -1324,6 +1370,99 @@ impl Board {
     /// Returns the class one net belongs to, when it is assigned.
     pub(crate) fn class_of_net(&self, net: &str) -> Option<&NetClass> {
         self.net_classes.iter().find(|class| class.nets.iter().any(|name| name == net))
+    }
+
+    /// Declares one test point on an existing pad or via.
+    ///
+    /// The target is a pad key `footprint-id:pad-number` or a via id. A target
+    /// can be declared only once, and the object must already exist.
+    pub(crate) fn add_test_point(&mut self, request: AddTestPointRequest) -> Result<Value, ServiceError> {
+        let target = request.target.trim();
+        if target.is_empty() {
+            return Err(crate::argument("a test point needs a non-empty `target`"));
+        }
+        if self.test_points.iter().any(|point| point.target == target) {
+            return Err(crate::argument(format!("test point `{target}` is already declared")));
+        }
+        let resolved = self.resolve_test_point(target).ok_or_else(|| {
+            ServiceError::new(
+                "object/not-found",
+                format!("no pad key `footprint-id:pad-number` or via id `{target}` exists on this board"),
+            )
+        })?;
+        let id = format!("testpoint-{}", self.next_test_point);
+        self.next_test_point += 1;
+        let object = json!({
+            "id": id,
+            "target": resolved.target,
+            "kind": resolved.kind,
+            "designator": resolved.designator,
+            "pad": resolved.pad,
+            "net": resolved.net,
+            "layer": resolved.layer,
+            "at": resolved.at,
+        });
+        self.test_points.push(TestPoint { id, target: target.to_string() });
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Removes one declared test point by id and returns the removed id.
+    pub(crate) fn delete_test_point(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .test_points
+            .iter()
+            .position(|point| point.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no test point with id `{id}`")))?;
+        let removed = self.test_points.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
+    /// Resolves every declared test point to its current probe position.
+    pub(crate) fn resolved_test_points(&self) -> Vec<ResolvedTestPoint> {
+        self.test_points
+            .iter()
+            .filter_map(|point| {
+                self.resolve_test_point(&point.target).map(|mut resolved| {
+                    resolved.id = point.id.clone();
+                    resolved
+                })
+            })
+            .collect()
+    }
+
+    /// Resolves one target to its current probe position.
+    pub(crate) fn resolve_test_point(&self, target: &str) -> Option<ResolvedTestPoint> {
+        if let Some((footprint_id, pad_number)) = target.split_once(':') {
+            let footprint = self.footprints.iter().find(|footprint| footprint.id == footprint_id)?;
+            let pad = footprint.pads.iter().find(|pad| pad.number == pad_number)?;
+            let placed = self.placed_pads().into_iter().find(|pad| pad.key == target)?;
+            return Some(ResolvedTestPoint {
+                id: String::new(),
+                target: target.to_string(),
+                designator: footprint.ref_.clone(),
+                pad: pad.number.clone(),
+                kind: "pad",
+                net: pad.net.clone(),
+                layer: footprint.layer.clone(),
+                at: placed.at,
+            });
+        }
+        let via = self.vias.iter().find(|via| via.id == target)?;
+        Some(ResolvedTestPoint {
+            id: String::new(),
+            target: target.to_string(),
+            designator: String::new(),
+            pad: String::new(),
+            kind: "via",
+            net: via.net.clone(),
+            layer: match (&via.from_layer, &via.to_layer) {
+                (Some(from), Some(to)) => format!("{from}..{to}"),
+                _ => "F.Cu..B.Cu".to_string(),
+            },
+            at: via.at,
+        })
     }
 
     /// Replaces one or more design-rule values.
@@ -1891,6 +2030,26 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         }
     }
 
+    let mut test_point_ids = HashSet::new();
+    let mut test_targets = HashSet::new();
+    for point in &board.test_points {
+        if point.id.trim().is_empty() {
+            return Err(crate::invalid("a test point has an empty id"));
+        }
+        if !test_point_ids.insert(point.id.as_str()) {
+            return Err(crate::invalid(format!("test point id `{}` is duplicated", point.id)));
+        }
+        if point.target.trim().is_empty() {
+            return Err(crate::invalid(format!("test point `{}` has an empty target", point.id)));
+        }
+        if !test_targets.insert(point.target.as_str()) {
+            return Err(crate::invalid(format!("test point target `{}` is declared twice", point.target)));
+        }
+        if board.resolve_test_point(&point.target).is_none() {
+            return Err(crate::invalid(format!("test point `{}` references missing target `{}`", point.id, point.target)));
+        }
+    }
+
     let mut zone_ids = HashSet::new();
     for zone in &board.zones {
         if zone.id.trim().is_empty() {
@@ -2025,6 +2184,7 @@ pub(crate) fn summary(board: &Board) -> Value {
             "vias": board.vias.len(),
             "zones": board.zones.len(),
             "netClasses": board.net_classes.len(),
+            "testPoints": board.test_points.len(),
             "differentialPairs": board.differential_pairs.len(),
             "waivers": board.waivers.len(),
         },
@@ -2140,6 +2300,14 @@ pub struct AssignNetClassRequest {
     pub net: String,
     /// Net class id or name.
     pub class: String,
+}
+
+/// Request of [`crate::add_test_point`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTestPointRequest {
+    /// Pad key `footprint-id:pad-number` or via id.
+    pub target: String,
 }
 
 /// Request of [`crate::add_zone`].

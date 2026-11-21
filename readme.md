@@ -46,14 +46,16 @@ SDK and studio shell share one native model:
 - Declare net classes with optional target width, clearance, via diameter and via
   drill; assign nets to a class and let `clearance` use the strictest class value
   and `netclass` enforce the width and via targets.
+- Mark existing pads and vias as test points and export a CSV probe report with
+  the pad key or via id, designator, net, layer and millimetre coordinates.
 - Import a KiCad PCB or IPC-2581 document into the native document: copper
   layers, nets, footprints and pads, tracks, through, blind and buried vias and a
   rectangular profile, with a stable loss ledger for everything the document
   cannot hold. Micro vias imported from KiCad stay in that ledger instead of
   being approximated.
 - Write Gerber RS-274X, Excellon drill, drill map SVG, BOM, pick-and-place,
-  placement JSON, SVG, vector PDF, 8-bit RGB PNG, KiCad PCB and IPC-2581 files
-  atomically. Gerber writes one file per copper layer plus `F_SilkS`, `B_SilkS`,
+  placement JSON, test point CSV, SVG, vector PDF, 8-bit RGB PNG, KiCad PCB and
+  IPC-2581 files atomically. Gerber writes one file per copper layer plus `F_SilkS`, `B_SilkS`,
   `F_Mask`, `B_Mask` and `Edge_Cuts`; the two silkscreen files carry the legend
   tracks the document holds, and the mask files open every outer-layer pad by the
   document's solder-mask expansion while vias stay tented. Copper pour regions
@@ -68,10 +70,10 @@ STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
 through, blind and buried vias, back drilling, linear teardrops, editable design
-rules, solder-mask Gerber layers, copper pour regions, net classes and
-waiver/severity policy as supported, micro vias as unsupported, and both
-`kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities` prints
-exactly that matrix.
+rules, solder-mask Gerber layers, copper pour regions, net classes, test point
+reports and waiver/severity policy as supported, micro vias as unsupported, and
+both `kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities`
+prints exactly that matrix.
 
 ## Usage
 
@@ -127,6 +129,10 @@ open-pcb zone delete blinker.opcb --id zone-1
 open-pcb netclass add blinker.opcb --name Power --width 0.5 --clearance 0.6 --via-diameter 0.8 --via-drill 0.4
 open-pcb netclass assign blinker.opcb --net VCC --class Power
 
+# Mark a pad and a via as test points, then write the probe report
+open-pcb testpoint add blinker.opcb --target fp-1:1
+open-pcb testpoint add blinker.opcb --target via-1
+
 # Set a rectangular outline, then undo or redo the last saved revision
 open-pcb outline set blinker.opcb --from 0,0 --to 100,80
 open-pcb rules show blinker.opcb
@@ -148,6 +154,7 @@ open-pcb export blinker.opcb --format drill_map --out blinker.drill-map.svg
 open-pcb export blinker.opcb --format bom --out blinker.bom.csv
 open-pcb export blinker.opcb --format pos --out blinker.pos.csv
 open-pcb export blinker.opcb --format placement --out blinker.placement.json
+open-pcb export blinker.opcb --format testpoints --out blinker.testpoints.csv
 open-pcb export blinker.opcb --format svg --out blinker.svg
 open-pcb export blinker.opcb --format pdf --out blinker.pdf
 open-pcb export blinker.opcb --format kicad_pcb --out blinker.kicad_pcb
@@ -186,6 +193,7 @@ await board.setOutline({ from: [0, 0], to: [100, 80] });
 await board.addZone({ layer: 'F.Cu', net: 'VCC', points: [[5, 5], [40, 5], [40, 30], [5, 30]] });
 await board.addNetClass({ name: 'Power', width: 0.5, clearance: 0.6, viaDiameter: 0.8, viaDrill: 0.4 });
 await board.assignNetClass({ net: 'VCC', class: 'Power' });
+await board.addTestPoint({ target: 'fp-1:1' });
 await board.route(); // { routed, unrouted, tracks, vias }
 await board.addTeardrops({ shape: 'linear', length: 0.6 });
 
@@ -273,6 +281,8 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
 - `placement` writes millimetre coordinates as JSON; the `pos` CSV keeps its
   existing columns and appends the footprint layer. Neither writer invents pad
   geometry or rotations the document does not hold.
+- The test point report lists only explicitly declared pads and vias. It does not
+  infer probes from nets or create panel or fixture geometry.
 - It does not render an interactive board viewport; SVG export is a writer, not
   a viewport.
 - It does not store silkscreen text or shapes. The `silkscreen` check therefore

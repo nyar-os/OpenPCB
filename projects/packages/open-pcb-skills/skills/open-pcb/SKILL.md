@@ -27,6 +27,9 @@ Implemented:
 - Declare net classes (`netclass add`), move nets into them (`netclass assign`)
   and let their optional width, clearance, via diameter and via drill targets
   drive the `netclass` check; `clearance` also uses the strictest class value.
+- Mark existing pads and vias as test points (`testpoint add` with
+  `footprint-id:pad-number` or a via id) and export `testpoints` as a CSV probe
+  report with designator, net, layer and millimetre coordinates.
 - Waive a finding by code (`waiver add`) or override a code's severity
   (`severity set`). A waived error no longer blocks `passed`, but the issue stays
   in the report with `waived: true`, its waiver id and reason.
@@ -44,8 +47,8 @@ Implemented:
   `silkscreen-over-pad`, `diffpair`, `dangling-copper`, `netclass`.
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `drill_map`
   (hole map SVG with tool legend and back-drill marks), `bom`, `pos`,
-  `placement` (millimetre JSON), `svg`, `pdf`, `png` (1024x768 RGB raster),
-  `kicad_pcb` and `ipc2581`. The Gerber directory holds one file per copper
+  `placement` (millimetre JSON), `testpoints` (CSV probe report), `svg`, `pdf`,
+  `png` (1024x768 RGB raster), `kicad_pcb` and `ipc2581`. The Gerber directory holds one file per copper
   layer plus `F_SilkS`, `B_SilkS`, `F_Mask`, `B_Mask` and `Edge_Cuts`.
 - Import a KiCad PCB or IPC-2581 document with a loss ledger for unrepresentable
   constructs; the CLI and SDK detect the format from the content.
@@ -59,7 +62,8 @@ Excellon file and as dashed rings in the drill map; KiCad PCB exchange does not
 carry back drill. The outline is rectangular, so closure and self-intersection
 are guaranteed by construction and `edge-clearance` only measures component and
 drill spacing to the four edges. Teardrops are only generated as linear copper
-tracks; arc teardrops stay unimplemented. Solder-mask openings are rectangular
+tracks; arc teardrops stay unimplemented. The test point report lists only
+explicitly declared pads and vias, never inferred probes. Solder-mask openings are rectangular
 and cover outer-layer pads only; vias stay tented, inner-layer pads open no mask,
 and paste layers are not written. All unimplemented targets stay
 `unsupported` in the capability matrix and reject with
@@ -103,6 +107,8 @@ a format, check or target.
 | `open-pcb netclass add <file.opcb> --name <name> [--width <mm>] [--clearance <mm>] [--via-diameter <mm>] [--via-drill <mm>]` | Declare a net class with optional routing targets. |
 | `open-pcb netclass assign <file.opcb> --net <name> --class <name-or-id>` | Move one declared net into a class; a net belongs to one class at a time. |
 | `open-pcb netclass delete <file.opcb> --id <id>` | Delete a net class by id. |
+| `open-pcb testpoint add <file.opcb> --target <pad-key-or-via-id>` | Mark an existing pad (`footprint-id:pad-number`) or via as a test point. |
+| `open-pcb testpoint delete <file.opcb> --id <id>` | Delete a test point by id. |
 | `open-pcb rules show <file.opcb>` | Print the design rules the checks and writers use. |
 | `open-pcb rules set <file.opcb> --hole-clearance <mm> --copper-to-edge <mm> --component-to-edge <mm> --hole-to-edge <mm> --solder-mask-expansion <mm>` | Replace one or more design rules in place; at least one value is required and none may be negative. |
 | `open-pcb waiver add <file.opcb> --code <code> --object <id> --reason <text>` | Waive a finding code, optionally narrowed to one object. `--object` and `--reason` are optional. |
@@ -170,8 +176,10 @@ mutating command also records the previous document for CLI undo/redo.
    edge cuts and the outline checks need `open-pcb outline set` first.
 2. Export `gbr` to an explicit directory; the writer produces `F_Cu.gbr`,
    `B_Cu.gbr`, `F_SilkS.gbr`, `B_SilkS.gbr`, `F_Mask.gbr`, `B_Mask.gbr` and
-   `Edge_Cuts.gbr`. Export `drl`, `drill_map`, `pos`, `placement`, `bom`, `svg`,
-   `pdf`, `png`, `kicad_pcb` and `ipc2581` to explicit paths.
+   `Edge_Cuts.gbr`. Export `drl`, `drill_map`, `pos`, `placement`, `testpoints`,
+   `bom`, `svg`, `pdf`, `png`, `kicad_pcb` and `ipc2581` to explicit paths.
+   `testpoints` writes a probe CSV with a `Target,Designator,Pad,Kind,Net,Layer,X,Y`
+   header; only explicitly declared test points appear.
 3. State exactly which targets were written and which reject, then inspect the
    files for the expected markers (`%FSLAX46Y46*%` and `M02*` in every Gerber
    file, `M48` and `M30` in drill, a `Designator` header in position, a

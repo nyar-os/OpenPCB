@@ -38,9 +38,9 @@ use std::{fs, path::Path};
 
 pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest, AddPadRequest,
-    AddTeardropsRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest,
-    DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
-    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
+    AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
+    AssignNetClassRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
+    SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 use serde_json::{Map, Value, json};
@@ -50,14 +50,14 @@ use serde_json::{Map, Value, json};
 /// Covers the editable board, fabrication and assembly outputs, exchange
 /// containers and preview images.
 pub const BOARD_FORMATS: &[&str] =
-    &["kicad_pcb", "gbr", "drl", "drill_map", "pos", "placement", "bom", "step", "ipc2581", "svg", "pdf", "png"];
+    &["kicad_pcb", "gbr", "drl", "drill_map", "pos", "placement", "bom", "testpoints", "step", "ipc2581", "svg", "pdf", "png"];
 
 /// Render targets declared for preview surfaces.
 const RENDER_FORMATS: &[&str] = &["svg", "png", "pdf"];
 
 /// Export targets declared by the command line.
 const EXPORT_TARGETS: &[&str] =
-    &["kicad_pcb", "gbr", "drl", "drill_map", "pos", "placement", "bom", "step", "pdf", "ipc2581", "svg", "png"];
+    &["kicad_pcb", "gbr", "drl", "drill_map", "pos", "placement", "bom", "testpoints", "step", "pdf", "ipc2581", "svg", "png"];
 
 /// Formats this build can read into the native document.
 const SUPPORTED_IMPORTS: &[&str] = &["kicad_pcb", "ipc2581"];
@@ -169,6 +169,7 @@ pub fn capabilities() -> Value {
         "routing": "supported",
         "zones": "supported",
         "netClasses": "supported",
+        "testPoints": "supported",
     })
 }
 
@@ -452,6 +453,26 @@ pub fn assign_net_class(handle: u64, request: AssignNetClassRequest) -> Result<V
         Ok(())
     })?;
     edit_result(handle, Some(object), None)
+}
+
+/// Declares one test point on an existing pad or via.
+pub fn add_test_point(handle: u64, request: AddTestPointRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.add_test_point(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Deletes one declared test point from an open board.
+pub fn delete_test_point(handle: u64, id: &str) -> Result<Value, ServiceError> {
+    let mut deleted = String::new();
+    store::mutate(handle, |board| {
+        deleted = board.delete_test_point(id)?;
+        Ok(())
+    })?;
+    edit_result(handle, None, Some(deleted))
 }
 
 /// Adds one copper pour region to an open board.
