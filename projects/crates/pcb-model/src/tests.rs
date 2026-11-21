@@ -13,13 +13,13 @@ use serde_json::Value;
 
 use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTeardropsRequest,
-    AddTrackRequest, AddViaRequest, AddWaiverRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest,
-    SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    add_differential_pair, add_footprint, add_layer, add_net, add_pad, add_teardrops, add_track, add_via, add_waiver,
+    AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, CreateRequest, MoveFootprintRequest, RouteOptions,
+    SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
+    add_differential_pair, add_footprint, add_layer, add_net, add_pad, add_teardrops, add_track, add_via, add_waiver, add_zone,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, create, delete_differential_pair, delete_footprint, delete_severity, delete_track, delete_via,
-    delete_waiver, export, import, inspect, move_footprint, open, redo, route, save, set_outline, set_rules, set_severity,
-    set_via_back_drill, store, summary, undo, update_footprint, update_layer,
+    delete_waiver, delete_zone, export, import, inspect, move_footprint, open, redo, route, save, set_outline, set_rules,
+    set_severity, set_via_back_drill, store, summary, undo, update_footprint, update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -260,6 +260,64 @@ fn round_trip_preserves_objects_and_revision() {
 
     close(reopened_handle).expect("the reopened board closes");
     assert_eq!(summary(reopened_handle).expect_err("the handle is released").code, "board/not-found");
+}
+
+#[test]
+fn copper_zones_persist_and_write_gerber_regions() {
+    let directory = TempDir::new();
+    let path = directory.join("zones.opcb");
+    let handle = created();
+    add_full_board(handle);
+    let added = add_zone(
+        handle,
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: Some("VCC".to_string()),
+            points: vec![[10.0, 10.0], [20.0, 10.0], [20.0, 20.0], [10.0, 20.0]],
+        },
+    )
+    .expect("the copper pour is added");
+    assert_eq!(added["object"]["id"], "zone-1");
+    assert_eq!(added["object"]["layer"], "F.Cu");
+    assert_eq!(added["board"]["counts"]["zones"], 1);
+
+    let silk = add_zone(
+        handle,
+        AddZoneRequest { layer: "F.SilkS".to_string(), net: None, points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]] },
+    )
+    .expect_err("a zone needs a copper layer");
+    assert_eq!(silk.code, "session/argument-invalid");
+
+    let flat = add_zone(
+        handle,
+        AddZoneRequest { layer: "F.Cu".to_string(), net: None, points: vec![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]] },
+    )
+    .expect_err("a zone must enclose an area");
+    assert_eq!(flat.code, "session/argument-invalid");
+
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["zones"], 1);
+
+    let gbr = directory.join("gerber");
+    export(reopened, "gbr", &gbr).expect("Gerber export writes");
+    let copper = fs::read_to_string(gbr.join("F_Cu.gbr")).expect("the copper layer is readable");
+    assert!(copper.contains("G36*"), "the zone opens a Gerber region");
+    assert!(copper.contains("G37*"), "the zone closes the Gerber region");
+    assert!(copper.contains("X10000000Y10000000D02*"), "the region starts at the first vertex");
+    let bottom = fs::read_to_string(gbr.join("B_Cu.gbr")).expect("the bottom copper layer is readable");
+    assert!(!bottom.contains("G36*"), "a zone only appears on its own layer");
+
+    let svg = directory.join("zones.svg");
+    export(reopened, "svg", &svg).expect("SVG export writes");
+    let text = fs::read_to_string(&svg).expect("the SVG is readable");
+    assert!(text.contains("<path"), "the preview draws the zone polygon");
+
+    let removed = delete_zone(reopened, "zone-1").expect("the zone is deleted");
+    assert_eq!(removed["deleted"], "zone-1");
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["zones"], 0);
+    close(reopened).expect("the board closes");
 }
 
 #[test]

@@ -38,8 +38,9 @@ use std::{fs, path::Path};
 
 pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTeardropsRequest,
-    AddTrackRequest, AddViaRequest, AddWaiverRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest,
-    SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
+    AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions,
+    SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
+    UpdatePadRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 use serde_json::{Map, Value, json};
@@ -166,6 +167,7 @@ pub fn capabilities() -> Value {
         "solderMask": "supported",
         "drcPolicy": "supported",
         "routing": "supported",
+        "zones": "supported",
     })
 }
 
@@ -419,6 +421,26 @@ pub fn add_via(handle: u64, request: AddViaRequest) -> Result<Value, ServiceErro
         Ok(())
     })?;
     edit_result(handle, Some(object), None)
+}
+
+/// Adds one copper pour region to an open board.
+pub fn add_zone(handle: u64, request: AddZoneRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.add_zone(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Deletes one copper pour region from an open board.
+pub fn delete_zone(handle: u64, id: &str) -> Result<Value, ServiceError> {
+    let mut deleted = String::new();
+    store::mutate(handle, |board| {
+        deleted = board.delete_zone(id)?;
+        Ok(())
+    })?;
+    edit_result(handle, None, Some(deleted))
 }
 
 /// Adds linear teardrop copper at every pad-track junction.

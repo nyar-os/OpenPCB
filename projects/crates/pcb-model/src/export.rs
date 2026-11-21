@@ -141,6 +141,27 @@ impl Gerber {
         let _ = writeln!(self.body, "D{code}*\nX{}Y{}D03*", gerber_number(at[0]), gerber_number(at[1]));
     }
 
+    /// Writes one closed polygon as a `G36`/`G37` region.
+    ///
+    /// The contour starts with a `D02` move and continues with `D01` draws; the
+    /// first vertex is repeated to close the polygon. A small circular aperture
+    /// is selected first so readers that expect a current aperture still parse
+    /// the region.
+    fn region(&mut self, points: &[[f64; 2]], scale: f64) {
+        if points.len() < 3 {
+            return;
+        }
+        let code = self.aperture("C,0.100000".to_string());
+        let scaled: Vec<[f64; 2]> = points.iter().map(|point| [point[0] * scale, point[1] * scale]).collect();
+        let _ = writeln!(self.body, "D{code}*\nG36*");
+        for (index, point) in scaled.iter().enumerate() {
+            let operation = if index == 0 { "D02" } else { "D01" };
+            let _ = writeln!(self.body, "X{}Y{}{operation}*", gerber_number(point[0]), gerber_number(point[1]));
+        }
+        let first = scaled[0];
+        let _ = writeln!(self.body, "X{}Y{}D01*\nG37*", gerber_number(first[0]), gerber_number(first[1]));
+    }
+
     fn render(&self) -> String {
         let mut out = String::new();
         out.push_str("%FSLAX46Y46*%\n%MOMM*%\n%LPD*%\nG01*\n");
@@ -179,6 +200,9 @@ fn copper(board: &Board, layer: &str) -> String {
     }
     for via in board.vias.iter().filter(|via| board.via_covers(via, layer)) {
         gerber.flash(format!("C,{:.6}", via.diameter * scale), [via.at[0] * scale, via.at[1] * scale]);
+    }
+    for zone in board.zones.iter().filter(|zone| zone.layer == layer) {
+        gerber.region(&zone.points, scale);
     }
     gerber.render()
 }
@@ -510,6 +534,12 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>) -> D
             Style::stroke(layer_color_value(board, "Edge.Cuts"), 0.15 * layout.scale),
         ));
     }
+    for zone in &board.zones {
+        let points = zone.points.iter().map(|point| layout.point(point[0] * scale, point[1] * scale)).collect();
+        let mut style = Style::fill(layer_color_value(board, &zone.layer));
+        style.opacity = 0.35;
+        drawing.push(Element::new(Shape::Polygon { points }, style));
+    }
     for track in &board.tracks {
         drawing.push(Element::new(
             Shape::Line {
@@ -598,6 +628,11 @@ fn drawing_bounds(board: &Board) -> ([f64; 2], [f64; 2]) {
         include(&mut min, &mut max, (via.at[0] - radius) * scale, (via.at[1] - radius) * scale);
         include(&mut min, &mut max, (via.at[0] + radius) * scale, (via.at[1] + radius) * scale);
     }
+    for zone in &board.zones {
+        for point in &zone.points {
+            include(&mut min, &mut max, point[0] * scale, point[1] * scale);
+        }
+    }
     if !min[0].is_finite() || !min[1].is_finite() || !max[0].is_finite() || !max[1].is_finite() {
         return ([0.0, 0.0], [100.0, 60.0]);
     }
@@ -628,6 +663,11 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
     }
     for via in &board.vias {
         include(&mut min, &mut max, via.at[0] * scale, via.at[1] * scale);
+    }
+    for zone in &board.zones {
+        for point in &zone.points {
+            include(&mut min, &mut max, point[0] * scale, point[1] * scale);
+        }
     }
     if !min[0].is_finite() || !min[1].is_finite() || !max[0].is_finite() || !max[1].is_finite() {
         min = [0.0, 0.0];

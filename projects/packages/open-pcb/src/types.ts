@@ -161,6 +161,8 @@ export interface BoardCapabilities {
     readonly drcPolicy: SupportLevel;
     /** Whether `board.route()` ships in this engine. */
     readonly routing: SupportLevel;
+    /** Whether copper pour regions can be declared, previewed and written as Gerber regions. */
+    readonly zones: SupportLevel;
 }
 
 /** Options of `OpenPCB.create()`. */
@@ -196,6 +198,7 @@ export interface BoardSummaryCounts {
     readonly footprints: number;
     readonly tracks: number;
     readonly vias: number;
+    readonly zones: number;
     readonly differentialPairs: number;
     readonly waivers: number;
 }
@@ -409,6 +412,16 @@ export interface AddViaOptions {
     readonly toLayer?: string;
 }
 
+/** Options of `board.addZone()`. */
+export interface AddZoneOptions {
+    /** Copper layer id that receives the pour. */
+    readonly layer: string;
+    /** Declared net the pour belongs to, when assigned. */
+    readonly net?: string;
+    /** Closed polygon in board units, in drawing order; at least three points. */
+    readonly points: readonly (readonly [number, number])[];
+}
+
 /** Back-drill geometry of one through via, in board units. */
 export interface BackDrill {
     /** Barrel depth removed from the secondary side; greater than zero. */
@@ -600,6 +613,8 @@ export interface Board {
     deleteTrack(id: ObjectId): Promise<BoardEditResult>;
     addVia(options: AddViaOptions): Promise<BoardEditResult>;
     deleteVia(id: ObjectId): Promise<BoardEditResult>;
+    addZone(options: AddZoneOptions): Promise<BoardEditResult>;
+    deleteZone(id: ObjectId): Promise<BoardEditResult>;
     setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult>;
     addNet(options: AddNetOptions): Promise<BoardEditResult>;
     addTeardrops(options?: AddTeardropsOptions): Promise<BoardEditResult>;

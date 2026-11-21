@@ -10,7 +10,8 @@ The TypeScript surface is wired to the shared native model. `new
 OpenPCB(options?)` creates a session; `create` and `open` return an editable
 `Board` with `inspect`, `save`, `export`, `close`, `undo`, `redo`,
 `addFootprint`, `moveFootprint`, `updateFootprint`, `deleteFootprint`,
-`addTrack`, `deleteTrack`, `addVia`, `deleteVia`, `addNet`, `route`, `addLayer`,
+`addTrack`, `deleteTrack`, `addVia`, `deleteVia`, `addZone`, `deleteZone`,
+`addNet`, `route`, `addLayer`,
 `updateLayer`, `setOutline`, `setRules`, `addWaiver`, `deleteWaiver`,
 `setSeverity`, `deleteSeverity` and `list`. `importBoard` reads a KiCad PCB or
 IPC-2581 file, and `importKicadPcb` stays as the KiCad-only spelling of the same
@@ -40,6 +41,7 @@ await board.addFootprint({ reference: 'U1', value: 'MCU', footprint: 'QFN32', x:
 await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], to: [30, 10] });
 await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
 await board.setOutline({ from: [0, 0], to: [100, 80] });
+await board.addZone({ layer: 'F.Cu', net: 'VCC', points: [[5, 5], [40, 5], [40, 30], [5, 30]] });
 await board.setRules({ holeClearance: 0.3, solderMaskExpansion: 0.1 });
 await board.route({ width: 0.25, clearance: 0.2, net: 'VCC' });
 await board.addLayer({ name: 'Inner1', kind: 'copper' });
@@ -80,7 +82,10 @@ await pcb.dispose();
   silkscreen files carry the legend tracks the document holds; they are valid
   empty layers when the board has no silkscreen geometry. The mask files open
   every pad on their copper side by `solderMaskExpansion` per side (0.05 mm
-  default); vias stay tented and inner-layer pads open no mask.
+  default); vias stay tented and inner-layer pads open no mask. Copper pour
+  regions are written as `G36`/`G37` regions in the Gerber file of their layer;
+  the SVG and PDF previews draw them, while KiCad PCB and IPC-2581 exchange do
+  not carry them and the PNG raster omits the pour fill.
 - The design rules are readable from every `BoardSummary` (`rules`) and editable
   with `board.setRules()`; values are millimetres, a partial update keeps the
   other rules, and a negative value is rejected.

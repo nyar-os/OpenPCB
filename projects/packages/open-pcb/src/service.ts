@@ -17,6 +17,7 @@ import type {
     AddTrackOptions,
     AddViaOptions,
     AddWaiverOptions,
+    AddZoneOptions,
     BoardCapabilities,
     BoardCreateOptions,
     BoardEditResult,
@@ -163,6 +164,16 @@ export function setViaBackDrill(handle: number, options: SetViaBackDrillOptions)
     return decode<BoardEditResult>(() =>
         binding('board.setViaBackDrill').board_set_via_back_drill(handle, JSON.stringify(options)),
     );
+}
+
+/** Adds one copper pour region to an open board. */
+export function addZone(handle: number, options: AddZoneOptions): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.addZone').board_add_zone(handle, JSON.stringify(options)));
+}
+
+/** Deletes one copper pour region from an open board. */
+export function deleteZone(handle: number, id: string): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deleteZone').board_delete_zone(handle, id));
 }
 
 /** Moves one footprint on an open board. */

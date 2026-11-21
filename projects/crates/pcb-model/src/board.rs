@@ -284,6 +284,24 @@ pub(crate) struct Outline {
     pub(crate) to: [f64; 2],
 }
 
+/// One copper pour region on a copper layer.
+///
+/// A zone is a closed polygon with at least three vertices. It carries no fill
+/// pattern: the Gerber writer emits the polygon as one `G36`/`G37` region, so
+/// fabrication sees solid copper on the declared layer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Zone {
+    /// Stable zone id.
+    pub(crate) id: String,
+    /// Copper layer the pour lives on.
+    pub(crate) layer: String,
+    /// Declared net the pour belongs to, when assigned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) net: Option<String>,
+    /// Polygon vertices in board units, in drawing order.
+    pub(crate) points: Vec<[f64; 2]>,
+}
+
 /// Default minimum gap between two drill holes of different nets, in mm.
 const DEFAULT_HOLE_CLEARANCE_MM: f64 = 0.25;
 
@@ -367,6 +385,9 @@ pub(crate) struct Board {
     pub(crate) tracks: Vec<Track>,
     /// Placed vias.
     pub(crate) vias: Vec<Via>,
+    /// Copper pour regions; absent on documents written before zones existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) zones: Vec<Zone>,
     /// Declared differential pairs; absent on documents written before pairs existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) differential_pairs: Vec<DifferentialPair>,
@@ -388,6 +409,9 @@ pub(crate) struct Board {
     pub(crate) next_track: u64,
     /// Next via sequence number.
     pub(crate) next_via: u64,
+    /// Next zone sequence number.
+    #[serde(default = "one")]
+    pub(crate) next_zone: u64,
     /// Next net sequence number.
     pub(crate) next_net: u64,
 }
@@ -439,6 +463,7 @@ impl Board {
             footprints: Vec::new(),
             tracks: Vec::new(),
             vias: Vec::new(),
+            zones: Vec::new(),
             differential_pairs: Vec::new(),
             severity_overrides: BTreeMap::new(),
             waivers: Vec::new(),
@@ -447,6 +472,7 @@ impl Board {
             next_footprint: 1,
             next_track: 1,
             next_via: 1,
+            next_zone: 1,
             next_net: 1,
         })
     }
@@ -1130,6 +1156,49 @@ impl Board {
         Ok(json!(outline))
     }
 
+    /// Adds one copper pour region and returns its public object shape.
+    ///
+    /// A zone needs a copper layer, at least three vertices and a non-zero
+    /// enclosed area. The writer emits it as one solid Gerber region.
+    pub(crate) fn add_zone(&mut self, request: AddZoneRequest) -> Result<Value, ServiceError> {
+        let layer = request.layer.trim();
+        if layer.is_empty() {
+            return Err(crate::argument("a zone needs a non-empty `layer`"));
+        }
+        self.editable_layer(layer)?;
+        if self.layer(layer).is_none_or(|layer| layer.kind != LayerKind::Copper) {
+            return Err(crate::argument(format!("`{layer}` is not a copper layer; zones need copper")));
+        }
+        let net = self.declared_net(request.net.as_deref())?;
+        if request.points.len() < 3 {
+            return Err(crate::argument("a zone needs at least three points"));
+        }
+        let points = request.points.into_iter().map(|point| finite_pair(point, "points")).collect::<Result<Vec<_>, _>>()?;
+        if polygon_area(&points) <= 1e-9 {
+            return Err(crate::argument("a zone polygon must enclose a non-zero area"));
+        }
+        let id = format!("zone-{}", self.next_zone);
+        self.next_zone += 1;
+        let zone = Zone { id, layer: layer.to_string(), net, points };
+        let object = json!(zone);
+        self.zones.push(zone);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Removes one copper pour region by id and returns the removed id.
+    pub(crate) fn delete_zone(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .zones
+            .iter()
+            .position(|zone| zone.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no zone with id `{id}`")))?;
+        self.editable_layer(&self.zones[index].layer)?;
+        let removed = self.zones.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
     /// Replaces one or more design-rule values.
     ///
     /// Every value is in millimetres. The request must name at least one rule;
@@ -1436,6 +1505,16 @@ fn default_color(kind: LayerKind) -> &'static str {
     }
 }
 
+/// Signed area of a polygon in board units, using the shoelace formula.
+fn polygon_area(points: &[[f64; 2]]) -> f64 {
+    let mut sum = 0.0;
+    for (index, point) in points.iter().enumerate() {
+        let next = points[(index + 1) % points.len()];
+        sum += point[0] * next[1] - next[0] * point[1];
+    }
+    (sum / 2.0).abs()
+}
+
 /// Distance from a point to an axis-aligned box; zero inside the box.
 fn point_box_distance(point: [f64; 2], centre: [f64; 2], half: [f64; 2]) -> f64 {
     let dx = ((point[0] - centre[0]).abs() - half[0]).max(0.0);
@@ -1646,6 +1725,38 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         }
     }
 
+    let mut zone_ids = HashSet::new();
+    for zone in &board.zones {
+        if zone.id.trim().is_empty() {
+            return Err(crate::invalid("a zone has an empty id"));
+        }
+        if !zone_ids.insert(zone.id.as_str()) {
+            return Err(crate::invalid(format!("zone id `{}` is duplicated", zone.id)));
+        }
+        let Some(layer) = board.layer(&zone.layer)
+        else {
+            return Err(crate::invalid(format!("zone `{}` references missing layer `{}`", zone.id, zone.layer)));
+        };
+        if layer.kind != LayerKind::Copper {
+            return Err(crate::invalid(format!("zone `{}` sits on `{}`, which is not a copper layer", zone.id, zone.layer)));
+        }
+        if zone.points.len() < 3 {
+            return Err(crate::invalid(format!("zone `{}` has fewer than three points", zone.id)));
+        }
+        for (index, point) in zone.points.iter().enumerate() {
+            checks(point[0], &format!("zone `{}` point {index} x", zone.id))?;
+            checks(point[1], &format!("zone `{}` point {index} y", zone.id))?;
+        }
+        if polygon_area(&zone.points) <= 1e-9 {
+            return Err(crate::invalid(format!("zone `{}` encloses no area", zone.id)));
+        }
+        if let Some(net) = zone.net.as_deref()
+            && !net_names.contains(net)
+        {
+            return Err(crate::invalid(format!("zone `{}` references undeclared net `{net}`", zone.id)));
+        }
+    }
+
     let mut pair_ids = HashSet::new();
     for pair in &board.differential_pairs {
         if pair.id.trim().is_empty() {
@@ -1745,6 +1856,7 @@ pub(crate) fn summary(board: &Board) -> Value {
             "footprints": board.footprints.len(),
             "tracks": board.tracks.len(),
             "vias": board.vias.len(),
+            "zones": board.zones.len(),
             "differentialPairs": board.differential_pairs.len(),
             "waivers": board.waivers.len(),
         },
@@ -1754,6 +1866,7 @@ pub(crate) fn summary(board: &Board) -> Value {
 fn objects_on(board: &Board, layer: &Layer) -> usize {
     let mut count = board.footprints.iter().filter(|footprint| footprint.layer == layer.id).count();
     count += board.tracks.iter().filter(|track| track.layer == layer.id).count();
+    count += board.zones.iter().filter(|zone| zone.layer == layer.id).count();
     if layer.kind == LayerKind::Copper {
         count += board.vias.iter().filter(|via| board.via_covers(via, &layer.id)).count();
     }
@@ -1829,6 +1942,19 @@ pub struct DeletePadRequest {
     pub footprint: String,
     /// Pad number or name to delete.
     pub number: String,
+}
+
+/// Request of [`crate::add_zone`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddZoneRequest {
+    /// Copper layer id that receives the pour.
+    pub layer: String,
+    /// Declared net the pour belongs to, when assigned.
+    #[serde(default)]
+    pub net: Option<String>,
+    /// Polygon vertices in board units, in drawing order.
+    pub points: Vec<[f64; 2]>,
 }
 
 /// Request of [`crate::add_track`].

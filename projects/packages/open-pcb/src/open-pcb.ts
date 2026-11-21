@@ -22,6 +22,7 @@ import type {
     AddTrackOptions,
     AddViaOptions,
     AddWaiverOptions,
+    AddZoneOptions,
     Board,
     BoardCapabilities,
     BoardCreateOptions,
@@ -419,6 +420,14 @@ function attach(
         async deleteVia(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteVia(current, id));
+        },
+        async addZone(options: AddZoneOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addZone(current, options));
+        },
+        async deleteZone(id: string): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deleteZone(current, id));
         },
         async setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult> {
             ensure();

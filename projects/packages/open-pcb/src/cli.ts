@@ -85,6 +85,26 @@ function pair(raw: string | undefined): [number, number] | undefined {
     return Number.isFinite(first) && Number.isFinite(second) ? [first, second] : undefined;
 }
 
+/** Parses `x,y x,y ...` into a polygon with at least three vertices. */
+function polygon(raw: string | undefined): [number, number][] | undefined {
+    if (raw === undefined) {
+        return undefined;
+    }
+    const parts = raw.split(/[;\s]+/).filter((part) => part.length > 0);
+    if (parts.length < 3) {
+        return undefined;
+    }
+    const points: [number, number][] = [];
+    for (const part of parts) {
+        const point = pair(part);
+        if (point === undefined) {
+            return undefined;
+        }
+        points.push(point);
+    }
+    return points;
+}
+
 /** Opens one document for the duration of one command. */
 async function withBoard<T>(file: string, apply: (board: Board) => Promise<T>): Promise<T> {
     const board = await app.open({ path: file });
@@ -133,7 +153,7 @@ function describeBoard(board: BoardSummary): string {
     const lines = [
         `board ${board.id} "${title}" revision=${board.revision} units=${board.units} layers=${board.layers.length}`
             + ` nets=${counts.nets} footprints=${counts.footprints} tracks=${counts.tracks} vias=${counts.vias}`
-            + ` diffpairs=${counts.differentialPairs}`,
+            + ` zones=${counts.zones} diffpairs=${counts.differentialPairs}`,
     ];
     for (const layer of board.layers) {
         lines.push(`  [${layer.index}] ${layer.id} ${layer.title} (${layer.kind}, ${layer.objects} objects)`);
@@ -607,6 +627,60 @@ via
         await withBoard(file, async (board) => {
             const result = await board.setViaBackDrill({ id, depth, stub });
             ctx.emitResult(result, `back drill ${id} depth=${depth ?? '-'} stub=${stub ?? '-'}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const zone = cli.command('zone', 'cli.cmd.zone');
+zone
+    .command('add', 'cli.cmd.zone-add')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .option('--net <name>', 'cli.opt.net')
+    .option('--points <list>', 'cli.opt.points')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const layer = text(options, 'layer');
+        const points = polygon(text(options, 'points'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (layer === undefined || layer.length === 0) {
+            ctx.fail('open-pcb.cli.layer-required', { message: '`--layer <layer>` is required' });
+            return 2;
+        }
+        if (points === undefined) {
+            ctx.fail('open-pcb.cli.point-required', {
+                message: '`--points` needs at least three `x,y` points separated by spaces or semicolons',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addZone({ layer, net: text(options, 'net'), points });
+            ctx.emitResult(result, `added ${result.object?.id ?? 'zone'} on ${layer}`);
+            return 0;
+        });
+        return 0;
+    });
+
+zone
+    .command('delete', 'cli.cmd.zone-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteZone(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
             return 0;
         });
         return 0;

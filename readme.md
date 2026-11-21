@@ -25,6 +25,9 @@ SDK and studio shell share one native model:
 - Add, rename, hide and lock layers; set a rectangular board outline; read and
   edit the design rules the checks and writers use, including the solder-mask
   expansion.
+- Declare copper pour regions on copper layers as closed polygons; the Gerber
+  writer emits each one as a `G36`/`G37` region and the SVG and PDF previews
+  draw the pour.
 - Undo and redo up to 32 snapshots per handle, optionally persisted in
   `<file>.history.json` with `history: 'sidecar'`, with `canUndo`/`canRedo` on
   every summary and edit result.
@@ -50,7 +53,9 @@ SDK and studio shell share one native model:
   atomically. Gerber writes one file per copper layer plus `F_SilkS`, `B_SilkS`,
   `F_Mask`, `B_Mask` and `Edge_Cuts`; the two silkscreen files carry the legend
   tracks the document holds, and the mask files open every outer-layer pad by the
-  document's solder-mask expansion while vias stay tented. One Excellon file lists every drilled hole, including blind and buried
+  document's solder-mask expansion while vias stay tented. Copper pour regions
+  are written as `G36`/`G37` regions in the Gerber file of their layer. One
+  Excellon file lists every drilled hole, including blind and buried
   vias; back-drilled vias repeat their hit under a `;Back drill` comment carrying
   the depth and stub. The drill map draws every plated hole with a tool legend and
   marks back-drilled hits. IPC-2581 holes carry `backDrillDepth` and
@@ -60,9 +65,9 @@ STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
 through, blind and buried vias, back drilling, linear teardrops, editable design
-rules, solder-mask Gerber layers and waiver/severity policy as supported, micro
-vias as unsupported, and both `kicad_pcb` and `ipc2581` import as supported.
-`open-pcb capabilities` prints exactly that matrix.
+rules, solder-mask Gerber layers, copper pour regions and waiver/severity policy
+as supported, micro vias as unsupported, and both `kicad_pcb` and `ipc2581`
+import as supported. `open-pcb capabilities` prints exactly that matrix.
 
 ## Usage
 
@@ -109,6 +114,10 @@ open-pcb layer add blinker.opcb --name Inner1 --kind copper
 open-pcb layer rename blinker.opcb --id Inner1 --name Inner2
 open-pcb layer visible blinker.opcb --id Inner2 --visible false
 open-pcb layer lock blinker.opcb --id Inner2 --locked true
+
+# Add a copper pour region and delete it by id
+open-pcb zone add blinker.opcb --layer F.Cu --net VCC --points "5,5 40,5 40,30 5,30"
+open-pcb zone delete blinker.opcb --id zone-1
 
 # Set a rectangular outline, then undo or redo the last saved revision
 open-pcb outline set blinker.opcb --from 0,0 --to 100,80
@@ -166,6 +175,7 @@ await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], t
 await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
 await board.setViaBackDrill({ id: 'via-1', depth: 0.8, stub: 0.2 });
 await board.setOutline({ from: [0, 0], to: [100, 80] });
+await board.addZone({ layer: 'F.Cu', net: 'VCC', points: [[5, 5], [40, 5], [40, 30], [5, 30]] });
 await board.route(); // { routed, unrouted, tracks, vias }
 await board.addTeardrops({ shape: 'linear', length: 0.6 });
 
@@ -268,8 +278,11 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   hides the finding from the report. Overrides apply before waivers, so
   `passed` is false only while a non-waived error remains. Waivers and overrides
   live in `.opcb`; there is no waiver expiry or reviewer approval workflow.
-- It does not edit zones, use templates other than `blank`, persist undo
-  history inside `.opcb`, or resolve concurrent edits against an older revision.
+- It does not use templates other than `blank`, persist undo history inside
+  `.opcb`, or resolve concurrent edits against an older revision.
+  Copper pour regions are stored as closed polygons and written to Gerber and
+  the SVG/PDF previews; KiCad PCB and IPC-2581 exchange do not carry them and the
+  PNG raster omits the pour fill.
 - It does not claim a format is supported because an extension is known.
 
 Classification is not a support claim. A format may be listed in the registry

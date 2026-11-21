@@ -18,6 +18,9 @@ Implemented:
   remaining stub on a through via; move, update and delete footprints; delete
   tracks and vias.
 - Add, rename, hide and lock layers; set a rectangular outline.
+- Declare copper pour regions on copper layers as closed polygons (`zone add`);
+  each one is written as a `G36`/`G37` region in its layer's Gerber file and
+  drawn by the SVG and PDF previews.
 - Read and edit the design rules (`rules show`, `rules set`): drill-hole
   clearance, copper-, component- and hole-to-edge gaps and the solder-mask
   expansion. Values are millimetres; a partial update keeps the other rules.
@@ -92,6 +95,8 @@ a format, check or target.
 | `open-pcb layer visible <file.opcb> --id <id> --visible <true\|false>` | Set layer visibility. |
 | `open-pcb layer lock <file.opcb> --id <id> --locked <true\|false>` | Lock or unlock a layer. Edits on a locked layer fail with `board/layer-locked`. |
 | `open-pcb outline set <file.opcb> --from <x,y> --to <x,y>` | Set the rectangular board outline; width and height must be positive. |
+| `open-pcb zone add <file.opcb> --layer <layer> --net <name> --points <list>` | Add a copper pour region as a closed polygon of at least three `x,y` points separated by spaces or semicolons. The layer must be copper. |
+| `open-pcb zone delete <file.opcb> --id <id>` | Delete a copper pour region by id. |
 | `open-pcb rules show <file.opcb>` | Print the design rules the checks and writers use. |
 | `open-pcb rules set <file.opcb> --hole-clearance <mm> --copper-to-edge <mm> --component-to-edge <mm> --hole-to-edge <mm> --solder-mask-expansion <mm>` | Replace one or more design rules in place; at least one value is required and none may be negative. |
 | `open-pcb waiver add <file.opcb> --code <code> --object <id> --reason <text>` | Waive a finding code, optionally narrowed to one object. `--object` and `--reason` are optional. |
@@ -168,7 +173,9 @@ mutating command also records the previous document for CLI undo/redo.
    `<svg` in the SVG). Back-drilled vias appear again under `;Back drill`
    comments with their depth and stub and gain a dashed ring in the drill map.
    Each mask file flashes a rectangular opening per pad on its side, expanded by
-   `solderMaskExpansion` per side; vias never open a mask.
+   `solderMaskExpansion` per side; vias never open a mask. Copper pour regions
+   appear as `G36`/`G37` regions in the Gerber file of their layer. KiCad PCB and
+   IPC-2581 exchange do not carry zones, and the PNG raster omits the pour fill.
 
 ## Hard rules
 

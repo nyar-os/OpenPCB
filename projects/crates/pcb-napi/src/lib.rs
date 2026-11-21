@@ -182,6 +182,26 @@ fn board_add_via(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Adds one copper pour region to an open board.
+#[function]
+fn board_add_zone(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::AddZoneRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::add_zone(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Deletes one copper pour region from an open board.
+#[function]
+fn board_delete_zone(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let value = open_pcb_model::delete_zone(handle, &id).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds linear teardrop copper at every pad-track junction.
 #[function]
 fn board_add_teardrops(ctx: CallContext) -> Result<JsValue> {
@@ -584,6 +604,16 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
             let handle = rpc_handle(value)?;
             let request: open_pcb_model::AddViaRequest = serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
             open_pcb_model::add_via(handle, request)
+        }
+        "board.addZone" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::AddZoneRequest = serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::add_zone(handle, request)
+        }
+        "board.deleteZone" => {
+            let handle = rpc_handle(value)?;
+            let id = rpc_text(value, "id")?;
+            open_pcb_model::delete_zone(handle, id)
         }
         "board.addNet" => {
             let handle = rpc_handle(value)?;
@@ -996,6 +1026,8 @@ register_module![
     board_add_via,
     board_add_teardrops,
     board_set_via_back_drill,
+    board_add_zone,
+    board_delete_zone,
     board_route,
     board_add_net,
     board_undo,
