@@ -19,7 +19,7 @@ export type BoardIntent = 'edit' | 'inspect' | 'exchange';
 export type FormatFamily = 'board' | 'fabrication' | 'assembly' | 'exchange' | 'image';
 
 /** Container encoding behind an extension. `unknown` means the tool is not fixed. */
-export type FormatMarkup = 'sexpr' | 'text' | 'xml' | 'fixed' | 'raster' | 'step' | 'unknown';
+export type FormatMarkup = 'sexpr' | 'text' | 'xml' | 'json' | 'fixed' | 'raster' | 'step' | 'unknown';
 
 /** What an extension can be consumed as. `none` means it never becomes a board. */
 export type FormatOpenKind = 'board' | 'exchange' | 'none';
@@ -29,7 +29,9 @@ export const boardFormats = [
     'kicad_pcb',
     'gbr',
     'drl',
+    'drill_map',
     'pos',
+    'placement',
     'bom',
     'step',
     'ipc2581',
@@ -60,7 +62,9 @@ export const formatRegistry: Readonly<Record<BoardFormat, FormatRegistryEntry>> 
     kicad_pcb: { family: 'board', markup: 'sexpr', macroEnabled: false, opensAs: 'board', defaultIntent: 'edit' },
     gbr: { family: 'fabrication', markup: 'text', macroEnabled: false, opensAs: 'exchange', defaultIntent: null },
     drl: { family: 'fabrication', markup: 'text', macroEnabled: false, opensAs: 'exchange', defaultIntent: null },
+    drill_map: { family: 'fabrication', markup: 'xml', macroEnabled: false, opensAs: 'none', defaultIntent: null },
     pos: { family: 'assembly', markup: 'text', macroEnabled: false, opensAs: 'exchange', defaultIntent: null },
+    placement: { family: 'assembly', markup: 'json', macroEnabled: false, opensAs: 'exchange', defaultIntent: null },
     bom: { family: 'assembly', markup: 'text', macroEnabled: false, opensAs: 'exchange', defaultIntent: null },
     step: { family: 'exchange', markup: 'step', macroEnabled: false, opensAs: 'exchange', defaultIntent: null },
     ipc2581: { family: 'exchange', markup: 'xml', macroEnabled: false, opensAs: 'exchange', defaultIntent: null },

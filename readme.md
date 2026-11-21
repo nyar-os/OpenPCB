@@ -33,21 +33,23 @@ SDK and studio shell share one native model:
 - Generate linear teardrops at every pad-track junction as ordinary copper
   tracks; repeated runs skip segments that already exist.
 - Run DRC, connectivity, clearance, annular ring, stackup, outline, silkscreen,
-  courtyard, netlist, `annular-ring`, `track-width`, `unrouted`, `diffpair` and
-  `dangling-copper` checks.
+  courtyard, netlist, `annular-ring`, `track-width`, `unrouted`, `diffpair`,
+  `dangling-copper`, `hole-to-hole`, `copper-to-edge`, `edge-clearance` and
+  `silkscreen-over-pad` checks.
 - Import a KiCad PCB or IPC-2581 document into the native document: copper
   layers, nets, footprints and pads, tracks, through, blind and buried vias and a
   rectangular profile, with a stable loss ledger for everything the document
   cannot hold. Micro vias imported from KiCad stay in that ledger instead of
   being approximated.
-- Write Gerber RS-274X, Excellon drill, BOM, pick-and-place, SVG, vector PDF,
-  8-bit RGB PNG, KiCad PCB and IPC-2581 files atomically. Gerber writes one
-  file per copper layer plus `F_SilkS`, `B_SilkS` and `Edge_Cuts`; the two
-  silkscreen files carry the legend tracks the document holds. One Excellon file
-  lists every drilled hole, including blind and buried vias; back-drilled vias
-  repeat their hit under a `;Back drill` comment carrying the depth and stub.
-  IPC-2581 holes carry `backDrillDepth` and `backDrillStub`, so a written and
-  re-read document keeps the back drill.
+- Write Gerber RS-274X, Excellon drill, drill map SVG, BOM, pick-and-place,
+  placement JSON, SVG, vector PDF, 8-bit RGB PNG, KiCad PCB and IPC-2581 files
+  atomically. Gerber writes one file per copper layer plus `F_SilkS`, `B_SilkS`
+  and `Edge_Cuts`; the two silkscreen files carry the legend tracks the document
+  holds. One Excellon file lists every drilled hole, including blind and buried
+  vias; back-drilled vias repeat their hit under a `;Back drill` comment carrying
+  the depth and stub. The drill map draws every plated hole with a tool legend and
+  marks back-drilled hits. IPC-2581 holes carry `backDrillDepth` and
+  `backDrillStub`, so a written and re-read document keeps the back drill.
 
 STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
@@ -110,13 +112,15 @@ open-pcb redo blinker.opcb
 
 # Read the board and run the implemented checks
 open-pcb list blinker.opcb
-open-pcb inspect blinker.opcb --checks drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline
+open-pcb inspect blinker.opcb --checks drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,edge-clearance
 
 # Export the implemented targets; Gerber writes one file per copper layer plus silk and edge cuts
 open-pcb export blinker.opcb --format gbr --out gerber
 open-pcb export blinker.opcb --format drl --out blinker.drl
+open-pcb export blinker.opcb --format drill_map --out blinker.drill-map.svg
 open-pcb export blinker.opcb --format bom --out blinker.bom.csv
 open-pcb export blinker.opcb --format pos --out blinker.pos.csv
+open-pcb export blinker.opcb --format placement --out blinker.placement.json
 open-pcb export blinker.opcb --format svg --out blinker.svg
 open-pcb export blinker.opcb --format pdf --out blinker.pdf
 open-pcb export blinker.opcb --format kicad_pcb --out blinker.kicad_pcb
@@ -197,7 +201,7 @@ flowchart LR
     Model --> Checks["DRC and connectivity"]
     Model --> Route["deterministic two-layer router"]
     Model --> Readers["kicad_pcb / ipc2581 readers"]
-    Model --> Writers["gbr / drl / bom / pos / svg / pdf / png / kicad_pcb / ipc2581 writers"]
+    Model --> Writers["gbr / drl / drill_map / bom / pos / placement / svg / pdf / png / kicad_pcb / ipc2581 writers"]
 ```
 
 The TypeScript layer owns argument parsing, help text and exit codes. The native
@@ -228,7 +232,15 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   approximating a path. It does not rip up, use diagonal tracks or route
   multi-layer inner copper.
 - Pad annulus is not checked because the document model stores no pad drill;
-  `annular-ring` evaluates vias only.
+  `annular-ring` evaluates vias only. The drill map and the Excellon file
+  therefore list via drills only.
+- The board outline is rectangular: closure and self-intersection are guaranteed
+  by construction, so `edge-clearance` only measures the gap from a component's
+  pad bounding box (or placement point) and from a via drill to the four edges.
+  It does not validate a polygon outline.
+- `placement` writes millimetre coordinates as JSON; the `pos` CSV keeps its
+  existing columns and appends the footprint layer. Neither writer invents pad
+  geometry or rotations the document does not hold.
 - It does not render an interactive board viewport; SVG export is a writer, not
   a viewport.
 - It does not store silkscreen text or shapes. The `silkscreen` check therefore

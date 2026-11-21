@@ -70,6 +70,10 @@ export type InspectCheck =
     | 'silkscreen'
     | 'courtyard'
     | 'netlist'
+    | 'hole-to-hole'
+    | 'copper-to-edge'
+    | 'edge-clearance'
+    | 'silkscreen-over-pad'
     | 'diffpair'
     | 'dangling-copper';
 
@@ -89,7 +93,19 @@ export type BoardUnits = 'mm' | 'mil';
 export type RenderFormat = 'svg' | 'png' | 'pdf';
 
 /** Fabrication, assembly and exchange targets `board.export()` declares. */
-export type ExportTarget = 'kicad_pcb' | 'gbr' | 'drl' | 'pos' | 'bom' | 'step' | 'ipc2581' | 'pdf' | 'svg' | 'png';
+export type ExportTarget =
+    | 'kicad_pcb'
+    | 'gbr'
+    | 'drl'
+    | 'drill_map'
+    | 'pos'
+    | 'placement'
+    | 'bom'
+    | 'step'
+    | 'ipc2581'
+    | 'pdf'
+    | 'svg'
+    | 'png';
 
 /** What the installed engine can do, per format. */
 export interface FormatCapability {

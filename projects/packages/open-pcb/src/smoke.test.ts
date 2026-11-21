@@ -93,7 +93,7 @@ test('open rejects ambiguous input before reaching the engine', async () => {
 });
 
 test('format registry classifies the board format family', () => {
-    const expected = ['kicad_pcb', 'gbr', 'drl', 'pos', 'bom', 'step', 'ipc2581', 'svg', 'pdf', 'png'];
+    const expected = ['kicad_pcb', 'gbr', 'drl', 'drill_map', 'pos', 'placement', 'bom', 'step', 'ipc2581', 'svg', 'pdf', 'png'];
     assert.deepEqual([...boardFormats].sort(), [...expected].sort());
 
     assert.equal(formatInfo('kicad_pcb').family, 'board');
@@ -103,7 +103,11 @@ test('format registry classifies the board format family', () => {
     assert.equal(formatInfo('gbr').opensAs, 'exchange');
     assert.equal(formatInfo('gbr').defaultIntent, null);
     assert.equal(formatInfo('drl').family, 'fabrication');
+    assert.equal(formatInfo('drill_map').family, 'fabrication');
+    assert.equal(formatInfo('drill_map').opensAs, 'none');
     assert.equal(formatInfo('pos').family, 'assembly');
+    assert.equal(formatInfo('placement').family, 'assembly');
+    assert.equal(formatInfo('placement').markup, 'json');
     assert.equal(formatInfo('bom').family, 'assembly');
     assert.equal(formatInfo('step').markup, 'step');
     assert.equal(formatInfo('ipc2581').markup, 'xml');
@@ -125,10 +129,10 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.project.import, 'partial');
     assert.equal(matrix.project.edit, 'partial');
     assert.equal(matrix.project.export, 'partial');
-    for (const format of ['gbr', 'drl', 'bom', 'pos', 'svg', 'pdf', 'kicad_pcb', 'ipc2581', 'png'] as const) {
+    for (const format of ['gbr', 'drl', 'drill_map', 'bom', 'pos', 'placement', 'svg', 'pdf', 'kicad_pcb', 'ipc2581', 'png'] as const) {
         assert.equal(matrix.formats[format].export, 'supported');
     }
-    for (const format of ['gbr', 'drl', 'bom', 'pos', 'svg', 'pdf', 'png'] as const) {
+    for (const format of ['gbr', 'drl', 'drill_map', 'bom', 'pos', 'placement', 'svg', 'pdf', 'png'] as const) {
         assert.equal(matrix.formats[format].import, 'unsupported');
     }
     assert.equal(matrix.formats.kicad_pcb.import, 'supported');
@@ -205,7 +209,7 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         assert.ok(fs.existsSync(file));
         assert.equal(fs.existsSync(`${file}.history.json`), false, 'the default memory session writes no sidecar');
 
-        for (const format of ['drl', 'bom', 'pos', 'svg'] as const) {
+        for (const format of ['drl', 'drill_map', 'bom', 'pos', 'placement', 'svg'] as const) {
             const target = path.join(directory, `blinker.${format}`);
             const exported = await board.export({ format, target });
             assert.equal(exported.format, format);
@@ -213,7 +217,9 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
             assert.ok(fs.existsSync(target));
         }
         assert.match(fs.readFileSync(path.join(directory, 'blinker.drl'), 'utf8'), /M48/);
+        assert.match(fs.readFileSync(path.join(directory, 'blinker.drill_map'), 'utf8'), /OpenPCB drill map/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.pos'), 'utf8'), /Designator/);
+        assert.match(fs.readFileSync(path.join(directory, 'blinker.placement'), 'utf8'), /"placements"/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.svg'), 'utf8'), /<svg/);
 
         const gerber = path.join(directory, 'gerber');
@@ -483,12 +489,14 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         );
         assert.match(inspected, /passed=true/);
 
-        for (const format of ['drl', 'bom', 'pos', 'svg'] as const) {
+        for (const format of ['drl', 'drill_map', 'bom', 'pos', 'placement', 'svg'] as const) {
             run('export', document, '--format', format, '--out', path.join(directory, `blinker.${format}`));
         }
         assert.match(fs.readFileSync(path.join(directory, 'blinker.drl'), 'utf8'), /M48/);
+        assert.match(fs.readFileSync(path.join(directory, 'blinker.drill_map'), 'utf8'), /OpenPCB drill map/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.bom'), 'utf8'), /^Quantity,/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.pos'), 'utf8'), /^Designator,/);
+        assert.match(fs.readFileSync(path.join(directory, 'blinker.placement'), 'utf8'), /"placements"/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.svg'), 'utf8'), /<svg/);
 
         const gerber = path.join(directory, 'gerber');

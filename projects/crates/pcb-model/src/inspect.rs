@@ -54,6 +54,7 @@ pub(crate) const CHECKS: &[&str] = &[
     "netlist",
     "hole-to-hole",
     "copper-to-edge",
+    "edge-clearance",
     "silkscreen-over-pad",
     "diffpair",
     "dangling-copper",
@@ -75,6 +76,7 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "netlist",
     "hole-to-hole",
     "copper-to-edge",
+    "edge-clearance",
     "silkscreen-over-pad",
     "diffpair",
     "dangling-copper",
@@ -109,6 +111,7 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "netlist" => netlist(board, &mut report),
             "hole-to-hole" => hole_to_hole(board, &mut report),
             "copper-to-edge" => copper_to_edge(board, &mut report),
+            "edge-clearance" => edge_clearance(board, &mut report),
             "silkscreen-over-pad" => silkscreen_over_pad(board, &mut report),
             "diffpair" => diffpair(board, &mut report),
             "dangling-copper" => dangling_copper(board, &mut report),
@@ -933,6 +936,63 @@ fn copper_to_edge(board: &Board, issues: &mut CheckReport) {
                 None,
                 Some(&via.id),
                 format!("via `{}` is {gap} mm from the board edge; the rule requires {rule} mm", via.id),
+            ));
+        }
+    }
+}
+
+/// Checks component bodies and drill holes against the board edge.
+///
+/// The model stores a rectangular outline, so closure and self-intersection are
+/// guaranteed by construction; this check adds the two spacing rules the
+/// rectangular model can measure. A component is represented by its rotated pad
+/// bounding box (or its placement point when it has no pads). A drill hole is
+/// represented by the finished drill of a via. Boards without a usable outline
+/// report nothing here because `outline` and `stackup` already report it.
+fn edge_clearance(board: &Board, issues: &mut CheckReport) {
+    let Some(outline) = board.outline
+    else {
+        return;
+    };
+    if outline.to[0] <= outline.from[0] || outline.to[1] <= outline.from[1] {
+        return;
+    }
+    let scale = board.millimetres();
+    let border = Rect::from_points(geo(outline.from), geo(outline.to));
+    let component_rule = board.rules.component_to_edge;
+    for footprint in &board.footprints {
+        let gap = match pad_bounds(footprint) {
+            Some([left, bottom, right, top]) => {
+                rect_border_distance(Rect::from_points(geo([left, bottom]), geo([right, top])), border) * scale
+            }
+            None => point_to_rect_border([footprint.x, footprint.y], border) * scale,
+        };
+        if gap < component_rule {
+            issues.push(finding(
+                "drc/component-to-edge",
+                Severity::Error,
+                board,
+                Some(&footprint.layer),
+                Some(&footprint.id),
+                format!(
+                    "footprint `{}` is {gap:.3} mm from the board edge; the rule requires {component_rule} mm",
+                    footprint.ref_
+                ),
+            ));
+        }
+    }
+
+    let hole_rule = board.rules.hole_to_edge;
+    for via in &board.vias {
+        let gap = point_to_rect_border(via.at, border) * scale - via.drill * scale / 2.0;
+        if gap < hole_rule {
+            issues.push(finding(
+                "drc/hole-to-edge",
+                Severity::Error,
+                board,
+                None,
+                Some(&via.id),
+                format!("via `{}` drill is {gap:.3} mm from the board edge; the rule requires {hole_rule} mm", via.id),
             ));
         }
     }

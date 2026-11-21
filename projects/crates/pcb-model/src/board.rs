@@ -257,6 +257,12 @@ const DEFAULT_HOLE_CLEARANCE_MM: f64 = 0.25;
 /// Default minimum copper-to-board-edge gap, in mm.
 const DEFAULT_COPPER_TO_EDGE_MM: f64 = 0.3;
 
+/// Default minimum component (pad bounding box) to board-edge gap, in mm.
+const DEFAULT_COMPONENT_TO_EDGE_MM: f64 = 0.25;
+
+/// Default minimum drill-hole to board-edge gap, in mm.
+const DEFAULT_HOLE_TO_EDGE_MM: f64 = 0.3;
+
 /// Design-rule values the inspection checks read.
 ///
 /// Every field carries a serde default, so documents written before the rules
@@ -268,11 +274,20 @@ pub(crate) struct DesignRules {
     pub(crate) hole_clearance: f64,
     /// Minimum copper-to-board-edge gap, in millimetres.
     pub(crate) copper_to_edge: f64,
+    /// Minimum component-to-board-edge gap, in millimetres.
+    pub(crate) component_to_edge: f64,
+    /// Minimum drill-hole-to-board-edge gap, in millimetres.
+    pub(crate) hole_to_edge: f64,
 }
 
 impl Default for DesignRules {
     fn default() -> Self {
-        Self { hole_clearance: DEFAULT_HOLE_CLEARANCE_MM, copper_to_edge: DEFAULT_COPPER_TO_EDGE_MM }
+        Self {
+            hole_clearance: DEFAULT_HOLE_CLEARANCE_MM,
+            copper_to_edge: DEFAULT_COPPER_TO_EDGE_MM,
+            component_to_edge: DEFAULT_COMPONENT_TO_EDGE_MM,
+            hole_to_edge: DEFAULT_HOLE_TO_EDGE_MM,
+        }
     }
 }
 
@@ -1302,6 +1317,17 @@ fn positive(value: f64, field: &str) -> Result<f64, ServiceError> {
 pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
     if board.id.trim().is_empty() {
         return Err(crate::invalid("the board id is empty"));
+    }
+    for (value, field) in [
+        (board.rules.hole_clearance, "holeClearance"),
+        (board.rules.copper_to_edge, "copperToEdge"),
+        (board.rules.component_to_edge, "componentToEdge"),
+        (board.rules.hole_to_edge, "holeToEdge"),
+    ] {
+        checks(value, &format!("design rule `{field}`"))?;
+        if value < 0.0 {
+            return Err(crate::invalid(format!("design rule `{field}` must not be negative")));
+        }
     }
     if let Some(outline) = &board.outline {
         checks(outline.from[0], "outline from.x")?;

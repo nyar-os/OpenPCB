@@ -28,21 +28,28 @@ Implemented:
   unsupported.
 - Checks: `drc`, `connectivity`, `clearance`, `annular_rings`, `annular-ring`,
   `track-width`, `unrouted`, `stackup`, `outline`, `silkscreen`, `courtyard`,
-  `netlist`, `diffpair`, `dangling-copper`.
-- Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `bom`, `pos`,
-  `svg`, `pdf`, `png` (1024x768 RGB raster), `kicad_pcb` and `ipc2581`.
+  `netlist`, `hole-to-hole`, `copper-to-edge`, `edge-clearance`,
+  `silkscreen-over-pad`, `diffpair`, `dangling-copper`.
+- Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `drill_map`
+  (hole map SVG with tool legend and back-drill marks), `bom`, `pos`,
+  `placement` (millimetre JSON), `svg`, `pdf`, `png` (1024x768 RGB raster),
+  `kicad_pcb` and `ipc2581`.
 - Import a KiCad PCB or IPC-2581 document with a loss ledger for unrepresentable
   constructs; the CLI and SDK detect the format from the content.
 
 Not implemented: STEP export, the interactive viewport renderer, silkscreen
-text/shapes, pad drills (so `annular-ring` covers vias only), diagonal or rip-up
-routing, and templates other than `blank`. Rectangular pad apertures are not
-rotated in Gerber output. Back-drill depth and stub live in `.opcb` and
-IPC-2581 and appear as `;Back drill` comments in the Excellon file; KiCad PCB
-exchange does not carry back drill. Teardrops are only generated as linear
-copper tracks; arc teardrops stay unimplemented. All unimplemented targets stay `unsupported` in the
-capability matrix and reject with `capability/not-implemented`. Do not fill the
-gap with local parsers, routers, geometry code or fabricated reports.
+text/shapes, pad drills (so `annular-ring`, the drill map and the Excellon file
+cover vias only), diagonal or rip-up routing, and templates other than `blank`.
+Rectangular pad apertures are not rotated in Gerber output. Back-drill depth and
+stub live in `.opcb` and IPC-2581 and appear as `;Back drill` comments in the
+Excellon file and as dashed rings in the drill map; KiCad PCB exchange does not
+carry back drill. The outline is rectangular, so closure and self-intersection
+are guaranteed by construction and `edge-clearance` only measures component and
+drill spacing to the four edges. Teardrops are only generated as linear copper
+tracks; arc teardrops stay unimplemented. All unimplemented targets stay
+`unsupported` in the capability matrix and reject with
+`capability/not-implemented`. Do not fill the gap with local parsers, routers,
+geometry code or fabricated reports.
 
 Always confirm the installed matrix with `open-pcb capabilities` before promising
 a format, check or target.
@@ -77,7 +84,7 @@ a format, check or target.
 | `open-pcb layer lock <file.opcb> --id <id> --locked <true\|false>` | Lock or unlock a layer. Edits on a locked layer fail with `board/layer-locked`. |
 | `open-pcb outline set <file.opcb> --from <x,y> --to <x,y>` | Set the rectangular board outline; width and height must be positive. |
 | `open-pcb inspect <file.opcb> --checks <list>` | Run the implemented checks. |
-| `open-pcb export <file.opcb> --format <format> --out <file-or-directory>` | Write one implemented projection: `gbr` (directory), `drl`, `bom`, `pos`, `svg`, `pdf`, `png`, `kicad_pcb` or `ipc2581`. |
+| `open-pcb export <file.opcb> --format <format> --out <file-or-directory>` | Write one implemented projection: `gbr` (directory), `drl`, `drill_map`, `bom`, `pos`, `placement`, `svg`, `pdf`, `png`, `kicad_pcb` or `ipc2581`. |
 | `open-pcb gui` | Open the OpenPCB Studio window. |
 
 The editing commands open the document, validate one mutation, increment the
@@ -113,12 +120,14 @@ mutating command also records the previous document for CLI undo/redo.
 
 1. `open-pcb list <file>` and record the revision under review.
 2. Run `open-pcb inspect <file> --checks <list>` with
-   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,diffpair,dangling-copper`.
+   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper`.
 3. Report each finding with its code, layer and object. `passed` is false when
    any error-severity issue remains. `annular-ring` evaluates vias because the
    model has no pad drill; `track-width` errors below 0.1mm and warns below
    0.15mm; `unrouted` warns with the number of disconnected pad groups;
    `diffpair` compares routed length and spacing against the declared targets;
+   `edge-clearance` measures component bodies and via drills against the
+   rectangular outline using `componentToEdge` and `holeToEdge`;
    `dangling-copper` warns about track ends that reach no pad, via or same-net
    track.
 4. There is no interactive layer view. `svg` export is the only vector visual
@@ -130,13 +139,14 @@ mutating command also records the previous document for CLI undo/redo.
    edge cuts and the outline checks need `open-pcb outline set` first.
 2. Export `gbr` to an explicit directory; the writer produces `F_Cu.gbr`,
    `B_Cu.gbr`, `F_SilkS.gbr`, `B_SilkS.gbr` and `Edge_Cuts.gbr`. Export `drl`,
-   `pos`, `bom`, `svg`, `pdf`, `png`, `kicad_pcb` and `ipc2581` to explicit
-   paths.
+   `drill_map`, `pos`, `placement`, `bom`, `svg`, `pdf`, `png`, `kicad_pcb` and
+   `ipc2581` to explicit paths.
 3. State exactly which targets were written and which reject, then inspect the
    files for the expected markers (`%FSLAX46Y46*%` and `M02*` in every Gerber
-   file, `M48` and `M30` in drill, a `Designator` header in position, `<svg` in
-   the SVG). Back-drilled vias appear again under `;Back drill` comments with
-   their depth and stub.
+   file, `M48` and `M30` in drill, a `Designator` header in position, a
+   `placements` array in placement, `OpenPCB drill map` in the drill map,
+   `<svg` in the SVG). Back-drilled vias appear again under `;Back drill`
+   comments with their depth and stub and gain a dashed ring in the drill map.
 
 ## Hard rules
 

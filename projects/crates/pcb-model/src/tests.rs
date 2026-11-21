@@ -111,11 +111,11 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["project"]["edit"], "partial");
     assert_eq!(matrix["project"]["export"], "partial");
 
-    for format in ["gbr", "drl", "bom", "pos", "svg", "pdf", "kicad_pcb", "ipc2581", "png"] {
+    for format in ["gbr", "drl", "drill_map", "bom", "pos", "placement", "svg", "pdf", "kicad_pcb", "ipc2581", "png"] {
         assert_eq!(matrix["formats"][format]["export"], "supported", "{format} export");
         assert_eq!(matrix["formats"][format]["edit"], "unsupported", "{format} edit");
     }
-    for format in ["gbr", "drl", "bom", "pos", "svg", "pdf", "png"] {
+    for format in ["gbr", "drl", "drill_map", "bom", "pos", "placement", "svg", "pdf", "png"] {
         assert_eq!(matrix["formats"][format]["import"], "unsupported", "{format} import");
     }
     assert_eq!(matrix["formats"]["kicad_pcb"]["import"], "supported", "KiCad import is implemented");
@@ -155,6 +155,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         "netlist",
         "hole-to-hole",
         "copper-to-edge",
+        "edge-clearance",
         "silkscreen-over-pad",
         "diffpair",
         "dangling-copper",
@@ -164,7 +165,7 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["renderers"]["svg"], "supported");
     assert_eq!(matrix["renderers"]["png"], "unsupported");
     assert_eq!(matrix["renderers"]["pdf"], "unsupported");
-    for target in ["gbr", "drl", "bom", "pos", "svg", "pdf", "kicad_pcb", "ipc2581", "png"] {
+    for target in ["gbr", "drl", "drill_map", "bom", "pos", "placement", "svg", "pdf", "kicad_pcb", "ipc2581", "png"] {
         assert_eq!(matrix["exportTargets"][target], "supported", "{target} target");
     }
     assert_eq!(matrix["exportTargets"]["step"], "unsupported");
@@ -288,6 +289,8 @@ fn documents_without_design_rules_open_with_defaults() {
     let rules = store::read(handle, |board| board.rules).expect("the board is readable");
     assert_eq!(rules.hole_clearance, 0.25);
     assert_eq!(rules.copper_to_edge, 0.3);
+    assert_eq!(rules.component_to_edge, 0.25);
+    assert_eq!(rules.hole_to_edge, 0.3);
     close(handle).expect("the board closes");
 }
 
@@ -584,9 +587,28 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
     let pos = directory.join("blinker.pos.csv");
     export(handle, "pos", &pos).expect("position export writes");
     let text = fs::read_to_string(&pos).expect("the position file is readable");
-    assert!(text.starts_with("Designator,Val,Package,Mid X,Mid Y,Rotation,Side\n"));
-    assert!(text.contains("U1,MCU,QFN32,30.000,20.000,0.000,Top"));
-    assert!(text.contains("R1,10k,0402,10.000,5.000,90.000,Bottom"));
+    assert!(text.starts_with("Designator,Val,Package,Mid X,Mid Y,Rotation,Side,Layer\n"));
+    assert!(text.contains("U1,MCU,QFN32,30.000,20.000,0.000,Top,F.Cu"));
+    assert!(text.contains("R1,10k,0402,10.000,5.000,90.000,Bottom,B.Cu"));
+
+    let placement = directory.join("blinker.placement.json");
+    let report = export(handle, "placement", &placement).expect("placement export writes");
+    assert_eq!(report["format"], "placement");
+    let document: Value = serde_json::from_str(&fs::read_to_string(&placement).expect("the placement file is readable"))
+        .expect("the placement file is JSON");
+    assert_eq!(document["units"], "mm");
+    let records = document["placements"].as_array().expect("placements is an array");
+    assert_eq!(records.len(), 2, "one record per footprint");
+    assert_eq!(records[0]["ref"], "R1", "records are sorted by reference");
+    assert_eq!(records[0]["value"], "10k");
+    assert_eq!(records[0]["footprint"], "0402");
+    assert_eq!(records[0]["x"], 10.0);
+    assert_eq!(records[0]["y"], 5.0);
+    assert_eq!(records[0]["rotation"], 90.0);
+    assert_eq!(records[0]["layer"], "B.Cu");
+    assert_eq!(records[0]["side"], "Bottom");
+    assert_eq!(records[1]["ref"], "U1");
+    assert_eq!(records[1]["pads"], 1, "the pad count comes from the document");
 
     let svg = directory.join("blinker.svg");
     export(handle, "svg", &svg).expect("SVG export writes");
@@ -685,6 +707,38 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
     assert_eq!(refused.code, "capability/not-implemented");
     assert!(!step.exists());
 
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn drill_map_writes_holes_tool_legend_and_back_drill_marks() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    set_via_back_drill(handle, SetViaBackDrillRequest { id: "via-1".to_string(), depth: Some(0.8), stub: Some(0.2) })
+        .expect("the via is back drilled");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [30.0, 30.0], diameter: 0.9, drill: 0.5, ..Default::default() },
+    )
+    .expect("the larger via is placed");
+
+    let target = directory.join("blinker.drill-map.svg");
+    let report = export(handle, "drill_map", &target).expect("the drill map writes");
+    assert_eq!(report["format"], "drill_map");
+    let text = fs::read_to_string(&target).expect("the drill map is readable");
+    for marker in [
+        "<?xml",
+        "<svg",
+        "OpenPCB drill map",
+        "T1 dia 0.300 mm plated x1",
+        "T2 dia 0.500 mm plated x1",
+        "back drill x1",
+        "stroke-dasharray",
+    ] {
+        assert!(text.contains(marker), "drill map contains {marker}");
+    }
+    assert_eq!(text.matches("<circle").count(), 3, "two holes and one back-drill ring");
     close(handle).expect("the board closes");
 }
 
@@ -1605,6 +1659,55 @@ fn hole_to_hole_flags_close_drills_of_different_nets_only() {
     let report = inspect(same_net, Some(vec!["hole-to-hole".to_string()])).expect("the check runs");
     assert_eq!(codes(&report), Vec::<&str>::new(), "holes on the same net are not a hole-to-hole violation");
     close(same_net).expect("the board closes");
+}
+
+#[test]
+fn edge_clearance_flags_components_and_drills_near_the_border() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "A".to_string() }).expect("the net is declared");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("U1".to_string()),
+            value: Some("MCU".to_string()),
+            footprint: Some("QFN32".to_string()),
+            x: Some(0.2),
+            y: Some(10.0),
+            rotation: Some(0.0),
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the near footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), x: 0.0, y: 0.0, w: 1.0, h: 1.0, net: None },
+    )
+    .expect("the pad is added");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [0.4, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the near via is placed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [20.0, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the far via is placed");
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+
+    let report = inspect(handle, Some(vec!["edge-clearance".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/component-to-edge", "drc/hole-to-edge"]);
+    assert_eq!(report["passed"], false);
+    assert_eq!(report["issues"][0]["objectId"], "fp-1");
+    assert_eq!(report["issues"][1]["objectId"], "via-1");
+    close(handle).expect("the board closes");
+
+    let no_outline = created();
+    add_via(no_outline, AddViaRequest { net: None, at: [0.4, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the via is placed");
+    let report = inspect(no_outline, Some(vec!["edge-clearance".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "a missing outline is not measured against invented geometry");
+    close(no_outline).expect("the board closes");
 }
 
 #[test]

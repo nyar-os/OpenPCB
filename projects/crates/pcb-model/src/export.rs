@@ -19,7 +19,8 @@ use serde_json::{Value, json};
 use crate::{ServiceError, board::Board};
 
 /// Formats this build can write.
-pub(crate) const SUPPORTED_EXPORTS: &[&str] = &["gbr", "drl", "bom", "pos", "svg", "pdf", "kicad_pcb", "ipc2581", "png"];
+pub(crate) const SUPPORTED_EXPORTS: &[&str] =
+    &["gbr", "drl", "drill_map", "bom", "pos", "placement", "svg", "pdf", "kicad_pcb", "ipc2581", "png"];
 
 /// Points per millimetre used by the vector PDF writer.
 const PT_PER_MM: f64 = 2.834646;
@@ -43,8 +44,10 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
     }
     let content = match format {
         "drl" => drill(board).into_bytes(),
+        "drill_map" => drill_map(board).into_bytes(),
         "bom" => bom(board).into_bytes(),
         "pos" => position(board).into_bytes(),
+        "placement" => placement(board)?.into_bytes(),
         "svg" => svg(board)?.into_bytes(),
         "pdf" => pdf(board)?,
         "kicad_pcb" => crate::kicad_pcb::write(board).into_bytes(),
@@ -247,6 +250,98 @@ fn drill(board: &Board) -> String {
     out
 }
 
+/// Drill map with one circle per drilled hole, a tool legend and back-drill marks.
+///
+/// The map is a standalone SVG in millimetres. Every via contributes one plated
+/// hole; the document stores no pad drills, so pads cannot contribute a hole.
+/// Back-drilled vias keep their hole and gain a dashed outer ring plus a legend
+/// line, so a reader can tell which hits are back drilled without re-reading the
+/// Excellon file.
+fn drill_map(board: &Board) -> String {
+    let scale = board.millimetres();
+    let (min, max) = match board.outline {
+        Some(outline) => ([outline.from[0] * scale, outline.from[1] * scale], [outline.to[0] * scale, outline.to[1] * scale]),
+        None => drawing_bounds(board),
+    };
+    let span_x = (max[0] - min[0]).max(1.0);
+    let span_y = (max[1] - min[1]).max(1.0);
+    let margin = 6.0;
+    let width = span_x + margin * 2.0;
+    let height = span_y + margin * 2.0;
+    let map_x = |x: f64| x - min[0] + margin;
+    let map_y = |y: f64| max[1] - y + margin;
+
+    let mut vias: Vec<&crate::board::Via> = board.vias.iter().collect();
+    vias.sort_by(|left, right| left.drill.total_cmp(&right.drill).then_with(|| left.id.cmp(&right.id)));
+
+    let mut tools: BTreeMap<String, (f64, usize)> = BTreeMap::new();
+    let mut back_drilled = 0usize;
+    let mut out = String::new();
+    let _ = writeln!(out, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+    let _ = writeln!(
+        out,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width:.3}mm\" height=\"{height:.3}mm\" viewBox=\"0 0 {width:.3} {height:.3}\">"
+    );
+    let _ = writeln!(out, "<rect x=\"0\" y=\"0\" width=\"{width:.3}\" height=\"{height:.3}\" fill=\"#ffffff\"/>");
+    let _ = writeln!(
+        out,
+        "<text x=\"4\" y=\"5\" font-family=\"monospace\" font-size=\"2.4\" fill=\"#111111\">OpenPCB drill map</text>"
+    );
+    if let Some(outline) = board.outline {
+        let _ = writeln!(
+            out,
+            "<rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"#8a6d1f\" stroke-width=\"0.15\"/>",
+            map_x(outline.from[0] * scale),
+            map_y(outline.to[1] * scale),
+            span_x,
+            span_y
+        );
+    }
+    for via in &vias {
+        let diameter = via.drill * scale;
+        let radius = (diameter / 2.0).max(0.05);
+        let _ = writeln!(
+            out,
+            "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{radius:.3}\" fill=\"#111111\" stroke=\"#000000\" stroke-width=\"0.05\"/>",
+            map_x(via.at[0] * scale),
+            map_y(via.at[1] * scale)
+        );
+        if via.back_drill.is_some() {
+            back_drilled += 1;
+            let _ = writeln!(
+                out,
+                "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"#b03a2e\" stroke-width=\"0.08\" stroke-dasharray=\"0.4 0.3\"/>",
+                map_x(via.at[0] * scale),
+                map_y(via.at[1] * scale),
+                radius + 0.5
+            );
+        }
+        tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0)).1 += 1;
+    }
+
+    let mut line = 0usize;
+    for (index, (_, (diameter, count))) in tools.iter().enumerate() {
+        let _ = writeln!(
+            out,
+            "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#111111\">T{} dia {:.3} mm plated x{}</text>",
+            8.0 + line as f64 * 3.0,
+            index + 1,
+            diameter,
+            count
+        );
+        line += 1;
+    }
+    if back_drilled > 0 {
+        let _ = writeln!(
+            out,
+            "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#b03a2e\">back drill x{back_drilled} (dashed ring)</text>",
+            8.0 + line as f64 * 3.0
+        );
+    }
+    let _ = writeln!(out, "</svg>");
+    out
+}
+
 /// Bill of materials grouped by value and package.
 fn bom(board: &Board) -> String {
     let mut groups: BTreeMap<(String, String), Vec<&str>> = BTreeMap::new();
@@ -266,22 +361,67 @@ fn position(board: &Board) -> String {
     let scale = board.millimetres();
     let mut footprints: Vec<_> = board.footprints.iter().collect();
     footprints.sort_by(|left, right| left.ref_.cmp(&right.ref_));
-    let mut out = String::from("Designator,Val,Package,Mid X,Mid Y,Rotation,Side\n");
+    let mut out = String::from("Designator,Val,Package,Mid X,Mid Y,Rotation,Side,Layer\n");
     for footprint in footprints {
         let side = if footprint.layer.starts_with("B.") { "Bottom" } else { "Top" };
         let _ = writeln!(
             out,
-            "{},{},{},{},{},{:.3},{}",
+            "{},{},{},{},{},{:.3},{},{}",
             csv(&footprint.ref_),
             csv(&footprint.value),
             csv(&footprint.footprint),
             number(footprint.x * scale),
             number(footprint.y * scale),
             footprint.rotation,
-            side
+            side,
+            csv(&footprint.layer)
         );
     }
     out
+}
+
+/// Placement projection with one record per footprint and millimetre coordinates.
+///
+/// The JSON keeps the reference, value, package, position, rotation, side and
+/// layer of every footprint. Coordinates are always in millimetres, so an
+/// assembly cell does not have to convert the document unit. Pads count the
+/// pads the document holds; no package geometry is invented.
+fn placement(board: &Board) -> Result<String, ServiceError> {
+    let scale = board.millimetres();
+    let mut footprints: Vec<_> = board.footprints.iter().collect();
+    footprints.sort_by(|left, right| left.ref_.cmp(&right.ref_));
+    let placements: Vec<Value> = footprints
+        .iter()
+        .map(|footprint| {
+            json!({
+                "ref": footprint.ref_,
+                "value": footprint.value,
+                "footprint": footprint.footprint,
+                "x": round3(footprint.x * scale),
+                "y": round3(footprint.y * scale),
+                "rotation": round3(footprint.rotation),
+                "side": if footprint.layer.starts_with("B.") { "Bottom" } else { "Top" },
+                "layer": footprint.layer,
+                "pads": footprint.pads.len(),
+            })
+        })
+        .collect();
+    let document = json!({
+        "revision": board.revision,
+        "units": "mm",
+        "placements": placements,
+    });
+    serde_json::to_string_pretty(&document)
+        .map_err(|error| crate::invalid(format!("cannot serialize the placement export: {error}")))
+}
+
+/// Rounds a coordinate to three decimals without a negative zero.
+fn round3(value: f64) -> f64 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    let value = (value * 1000.0).round() / 1000.0;
+    if value == 0.0 { 0.0 } else { value }
 }
 
 /// Top and bottom composite of tracks, pads and vias.

@@ -95,7 +95,7 @@ async function withBoard<T>(file: string, apply: (board: Board) => Promise<T>): 
 
 /** Export targets the CLI accepts, mirroring the declared capability matrix. */
 const exportTargets: readonly ExportTarget[] =
-    ['kicad_pcb', 'gbr', 'drl', 'pos', 'bom', 'step', 'ipc2581', 'pdf', 'svg', 'png'];
+    ['kicad_pcb', 'gbr', 'drl', 'drill_map', 'pos', 'placement', 'bom', 'step', 'ipc2581', 'pdf', 'svg', 'png'];
 
 /** Layer kinds the model accepts. */
 const layerKinds: readonly LayerKind[] = ['copper', 'silkscreen', 'soldermask', 'assembly', 'mechanical'];
@@ -904,7 +904,7 @@ cli
         const format = asExportTarget(text(options, 'format'));
         if (format === undefined) {
             ctx.fail('open-pcb.cli.format-required', {
-                message: '`--format` must be one of kicad_pcb, gbr, drl, pos, bom, step, ipc2581, pdf, svg',
+                message: '`--format` must be one of kicad_pcb, gbr, drl, drill_map, pos, placement, bom, step, ipc2581, pdf, svg',
             });
             return 2;
         }
