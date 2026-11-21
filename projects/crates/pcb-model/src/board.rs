@@ -185,6 +185,22 @@ pub(crate) struct Via {
     /// Copper layer the span ends on, for a blind or buried via.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) to_layer: Option<String>,
+    /// Back-drill information, when the via barrel is back drilled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) back_drill: Option<BackDrill>,
+}
+
+/// Back-drill depth and remaining stub on one through via.
+///
+/// Back drilling removes unused barrel copper from the secondary side. The
+/// document stores the removed depth and the remaining stub so fabrication data
+/// can be derived without re-reading the design intent.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub(crate) struct BackDrill {
+    /// Depth removed from the secondary side, in board units.
+    pub(crate) depth: f64,
+    /// Remaining stub length after back drilling, in board units.
+    pub(crate) stub: f64,
 }
 
 /// One declared differential pair.
@@ -485,6 +501,11 @@ impl Board {
             object.insert("fromLayer".to_string(), Value::String(from));
             object.insert("toLayer".to_string(), Value::String(to));
         }
+        if let Some(back) = &via.back_drill
+            && let Some(object) = value.as_object_mut()
+        {
+            object.insert("backDrill".to_string(), json!({ "depth": back.depth, "stub": back.stub }));
+        }
         value
     }
 
@@ -767,7 +788,7 @@ impl Board {
         let drill = positive(request.drill, "drill")?;
         let id = format!("via-{}", self.next_via);
         self.next_via += 1;
-        let via = Via { id, net, at, diameter, drill, from_layer, to_layer };
+        let via = Via { id, net, at, diameter, drill, from_layer, to_layer, back_drill: None };
         let object = self.via_value(&via);
         self.vias.push(via);
         self.revision += 1;
@@ -786,6 +807,41 @@ impl Board {
         let removed = self.vias.remove(index);
         self.revision += 1;
         Ok(removed.id)
+    }
+
+    /// Sets or updates the back-drill depth and remaining stub of one through via.
+    pub(crate) fn set_via_back_drill(&mut self, request: SetViaBackDrillRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .vias
+            .iter()
+            .position(|via| via.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no via with id `{}`", request.id)))?;
+        let via = self.vias[index].clone();
+        self.editable_via(&via)?;
+        if request.depth.is_none() && request.stub.is_none() {
+            return Err(crate::argument("a back drill needs `depth` or `stub`"));
+        }
+        if self.via_kind(&via) != "through" {
+            return Err(crate::argument("back drilling is only defined on a through via"));
+        }
+        let (current_depth, current_stub) = via.back_drill.map(|back| (back.depth, back.stub)).unwrap_or((0.0, 0.0));
+        let depth = match request.depth {
+            Some(value) => finite(value, "depth")?,
+            None => current_depth,
+        };
+        let stub = match request.stub {
+            Some(value) => finite(value, "stub")?,
+            None => current_stub,
+        };
+        if depth <= 0.0 {
+            return Err(crate::argument("`depth` must be greater than zero"));
+        }
+        if stub < 0.0 {
+            return Err(crate::argument("`stub` must not be negative"));
+        }
+        self.vias[index].back_drill = Some(BackDrill { depth, stub });
+        self.revision += 1;
+        Ok(self.via_value(&self.vias[index]))
     }
 
     /// Adds one stackup layer and returns its public object shape.
@@ -1266,6 +1322,19 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         checks(via.at[1], &format!("via `{}` at.y", via.id))?;
         sizes(via.diameter, &format!("via `{}` diameter", via.id))?;
         sizes(via.drill, &format!("via `{}` drill", via.id))?;
+        if let Some(back) = &via.back_drill {
+            checks(back.depth, &format!("via `{}` back-drill depth", via.id))?;
+            checks(back.stub, &format!("via `{}` back-drill stub", via.id))?;
+            if back.depth <= 0.0 {
+                return Err(crate::invalid(format!("via `{}` has a non-positive back-drill depth", via.id)));
+            }
+            if back.stub < 0.0 {
+                return Err(crate::invalid(format!("via `{}` has a negative back-drill stub", via.id)));
+            }
+            if board.via_kind(via) != "through" {
+                return Err(crate::invalid(format!("via `{}` is not a through via and cannot carry a back drill", via.id)));
+            }
+        }
         if let Some(net) = via.net.as_deref()
             && !net_names.contains(net)
         {
@@ -1462,6 +1531,20 @@ pub struct AddViaRequest {
     /// Copper layer the span ends on; omit both span fields for a through via.
     #[serde(default)]
     pub to_layer: Option<String>,
+}
+
+/// Request of [`crate::set_via_back_drill`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetViaBackDrillRequest {
+    /// Via id, required.
+    pub id: String,
+    /// Removed barrel depth, in board units; greater than zero.
+    #[serde(default)]
+    pub depth: Option<f64>,
+    /// Remaining stub length, in board units; not negative.
+    #[serde(default)]
+    pub stub: Option<f64>,
 }
 
 /// Request of [`crate::add_net`].

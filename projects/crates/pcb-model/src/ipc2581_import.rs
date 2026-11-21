@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     ServiceError,
-    board::{Board, Footprint, Layer, LayerKind, Net, Outline, Pad, Track, Via},
+    board::{BackDrill, Board, Footprint, Layer, LayerKind, Net, Outline, Pad, Track, Via},
     kicad_import::Loss,
 };
 
@@ -39,6 +39,7 @@ pub(crate) const LOSS_CODES: &[&str] = &[
     "ipc2581/track-without-width",
     "ipc2581/hole-invalid",
     "ipc2581/hole-not-plated",
+    "ipc2581/back-drill-invalid",
     "ipc2581/units-unknown",
 ];
 
@@ -540,9 +541,26 @@ fn import_holes(features: &[(String, &Element)], board: &mut Board, scale: f64, 
                 }
                 _ => (None, None),
             };
+            let back_drill = match hole.number(&["backDrillDepth"]) {
+                Some(depth) if depth > 0.0 => {
+                    let stub = hole.number(&["backDrillStub"]).unwrap_or(0.0) * scale;
+                    if stub < 0.0 {
+                        loss(losses, "ipc2581/back-drill-invalid", "a hole has a negative back-drill stub".to_string());
+                        None
+                    }
+                    else {
+                        Some(BackDrill { depth: depth * scale, stub })
+                    }
+                }
+                Some(_) => {
+                    loss(losses, "ipc2581/back-drill-invalid", "a hole has a non-positive back-drill depth".to_string());
+                    None
+                }
+                None => None,
+            };
             let id = format!("via-{}", board.next_via);
             board.next_via += 1;
-            vias.push(Via { id, net, at, diameter, drill, from_layer, to_layer });
+            vias.push(Via { id, net, at, diameter, drill, from_layer, to_layer, back_drill });
         }
     }
     board.vias.extend(vias);

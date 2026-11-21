@@ -14,8 +14,9 @@ the model crate create, open, save, edit, inspect and export one revisioned
 Implemented:
 
 - Create, open, save, list, inspect, export, undo, redo and close a board.
-- Add nets, footprints, pads, tracks and vias; move, update and delete
-  footprints; delete tracks and vias.
+- Add nets, footprints, pads, tracks and vias; record a back-drill depth and
+  remaining stub on a through via; move, update and delete footprints; delete
+  tracks and vias.
 - Add, rename, hide and lock layers; set a rectangular outline.
 - Route every net with at least two pads through a deterministic two-layer
   autorouter; it reports unroutable edges instead of approximating them.
@@ -33,7 +34,9 @@ Implemented:
 Not implemented: STEP export, the interactive viewport renderer, silkscreen
 text/shapes, pad drills (so `annular-ring` covers vias only), diagonal or rip-up
 routing, and templates other than `blank`. Rectangular pad apertures are not
-rotated in Gerber output. All unimplemented targets stay `unsupported` in the
+rotated in Gerber output. Back-drill depth and stub live in `.opcb` and
+IPC-2581 and appear as `;Back drill` comments in the Excellon file; KiCad PCB
+exchange does not carry back drill. All unimplemented targets stay `unsupported` in the
 capability matrix and reject with `capability/not-implemented`. Do not fill the
 gap with local parsers, routers, geometry code or fabricated reports.
 
@@ -60,6 +63,7 @@ a format, check or target.
 | `open-pcb track add <file.opcb> --net <name> --layer <layer> --from <x,y> --to <x,y> --width <mm>` | Route one track segment in place. |
 | `open-pcb track delete <file.opcb> --id <id>` | Delete a track by id. |
 | `open-pcb via add <file.opcb> --net <name> --at <x,y> --diameter <mm> --drill <mm>` | Place a via in place. |
+| `open-pcb via backdrill <file.opcb> --id <id> --depth <mm> --stub <mm>` | Record back-drill depth and remaining stub on a through via. Blind and buried vias are rejected. |
 | `open-pcb via delete <file.opcb> --id <id>` | Delete a via by id. |
 | `open-pcb route <file.opcb> --width <mm> --clearance <mm> --via <mm> --net <name>` | Route every two-pad net, or only `--net`. Defaults: width 0.25, clearance 0.2, via diameter 0.6. Prints `{routed, unrouted, tracks, vias}`. |
 | `open-pcb layer add <file.opcb> --name <name> --kind <kind> --color <css>` | Add a layer. `--kind` defaults to `copper`; `--color` defaults to the kind colour. |
@@ -126,7 +130,8 @@ mutating command also records the previous document for CLI undo/redo.
 3. State exactly which targets were written and which reject, then inspect the
    files for the expected markers (`%FSLAX46Y46*%` and `M02*` in every Gerber
    file, `M48` and `M30` in drill, a `Designator` header in position, `<svg` in
-   the SVG).
+   the SVG). Back-drilled vias appear again under `;Back drill` comments with
+   their depth and stub.
 
 ## Hard rules
 

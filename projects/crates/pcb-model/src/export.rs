@@ -232,6 +232,17 @@ fn drill(board: &Board) -> String {
             let _ = writeln!(out, "X{}Y{}", number(via.at[0] * scale), number(via.at[1] * scale));
         }
     }
+    for via in board.vias.iter().filter(|via| via.back_drill.is_some()) {
+        let Some(back) = via.back_drill
+        else {
+            continue;
+        };
+        let size = number(via.drill * scale);
+        let tool = tools.keys().position(|key| *key == size).map_or(1, |index| index + 1);
+        let _ = writeln!(out, ";Back drill depth={} stub={}", number(back.depth * scale), number(back.stub * scale));
+        let _ = writeln!(out, "T{tool}");
+        let _ = writeln!(out, "X{}Y{}", number(via.at[0] * scale), number(via.at[1] * scale));
+    }
     out.push_str("M30\n");
     out
 }

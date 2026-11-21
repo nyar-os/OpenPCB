@@ -29,6 +29,7 @@ import type {
     RouteReport,
     SaveReport,
     SetOutlineOptions,
+    SetViaBackDrillOptions,
     UpdateFootprintOptions,
     UpdateLayerOptions,
 } from './types.js';
@@ -151,6 +152,13 @@ export function addTrack(handle: number, options: AddTrackOptions): BoardEditRes
 /** Adds one via to an open board. */
 export function addVia(handle: number, options: AddViaOptions): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.addVia').board_add_via(handle, JSON.stringify(options)));
+}
+
+/** Sets the back-drill depth and remaining stub of one through via. */
+export function setViaBackDrill(handle: number, options: SetViaBackDrillOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.setViaBackDrill').board_set_via_back_drill(handle, JSON.stringify(options)),
+    );
 }
 
 /** Moves one footprint on an open board. */

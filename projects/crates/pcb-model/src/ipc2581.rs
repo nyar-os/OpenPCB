@@ -155,9 +155,17 @@ fn layer_feature(out: &mut String, board: &Board, layer: &str, kind: LayerKind, 
                 }
                 _ => String::new(),
             };
+            let back = match &via.back_drill {
+                Some(back) => format!(
+                    " backDrillDepth=\"{}\" backDrillStub=\"{}\"",
+                    number(back.depth * scale),
+                    number(back.stub * scale)
+                ),
+                None => String::new(),
+            };
             let _ = writeln!(
                 out,
-                "          <Hole x=\"{}\" y=\"{}\" diameter=\"{}\" padDiameter=\"{}\" plating=\"plated\"{net}{span}/>",
+                "          <Hole x=\"{}\" y=\"{}\" diameter=\"{}\" padDiameter=\"{}\" plating=\"plated\"{net}{span}{back}/>",
                 number(via.at[0] * scale),
                 number(via.at[1] * scale),
                 number(via.drill * scale),

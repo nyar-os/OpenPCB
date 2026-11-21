@@ -41,6 +41,7 @@ import type {
     SaveOptions,
     SaveReport,
     SetOutlineOptions,
+    SetViaBackDrillOptions,
     UpdateFootprintOptions,
     UpdateLayerOptions,
 } from './types.js';
@@ -414,6 +415,10 @@ function attach(
         async deleteVia(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteVia(current, id));
+        },
+        async setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.setViaBackDrill(current, options));
         },
         async addNet(options: AddNetOptions): Promise<BoardEditResult> {
             ensure();

@@ -116,6 +116,8 @@ export interface BoardCapabilities {
     readonly vias: Readonly<Record<ViaKind, SupportLevel>>;
     /** Whether differential pairs can be declared and checked. */
     readonly differentialPairs: SupportLevel;
+    /** Whether back-drill information can be stored and exported. */
+    readonly backDrill: SupportLevel;
     /** Whether `board.route()` ships in this engine. */
     readonly routing: SupportLevel;
 }
@@ -337,6 +339,24 @@ export interface AddViaOptions {
     readonly toLayer?: string;
 }
 
+/** Back-drill geometry of one through via, in board units. */
+export interface BackDrill {
+    /** Barrel depth removed from the secondary side; greater than zero. */
+    readonly depth: number;
+    /** Remaining stub length after back drilling; not negative. */
+    readonly stub: number;
+}
+
+/** Options of `board.setViaBackDrill()`. */
+export interface SetViaBackDrillOptions {
+    /** Via id; it must be a through via. */
+    readonly id: ObjectId;
+    /** Removed barrel depth, in board units; greater than zero. */
+    readonly depth?: number;
+    /** Remaining stub length, in board units; not negative. */
+    readonly stub?: number;
+}
+
 /** Options of `board.addNet()`. */
 export interface AddNetOptions {
     readonly name: string;
@@ -471,6 +491,7 @@ export interface Board {
     deleteTrack(id: ObjectId): Promise<BoardEditResult>;
     addVia(options: AddViaOptions): Promise<BoardEditResult>;
     deleteVia(id: ObjectId): Promise<BoardEditResult>;
+    setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult>;
     addNet(options: AddNetOptions): Promise<BoardEditResult>;
     addDifferentialPair(options: AddDifferentialPairOptions): Promise<BoardEditResult>;
     deleteDifferentialPair(id: ObjectId): Promise<BoardEditResult>;

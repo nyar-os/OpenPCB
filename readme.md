@@ -19,8 +19,9 @@ This repository ships a tested MVP of the board document. The command line,
 SDK and studio shell share one native model:
 
 - Create, open, save, inspect, export and close a revisioned `.opcb` document.
-- Add nets, footprints, tracks and through, blind or buried vias; move and
-  update footprints; delete footprints, tracks and vias.
+- Add nets, footprints, tracks and through, blind or buried vias; record a
+  back-drill depth and remaining stub on a through via; move and update
+  footprints; delete footprints, tracks and vias.
 - Add, rename, hide and lock layers; set a rectangular board outline.
 - Undo and redo up to 32 snapshots per handle, optionally persisted in
   `<file>.history.json` with `history: 'sidecar'`, with `canUndo`/`canRedo` on
@@ -41,14 +42,17 @@ SDK and studio shell share one native model:
   8-bit RGB PNG, KiCad PCB and IPC-2581 files atomically. Gerber writes one
   file per copper layer plus `F_SilkS`, `B_SilkS` and `Edge_Cuts`; the two
   silkscreen files carry the legend tracks the document holds. One Excellon file
-  lists every drilled hole, including blind and buried vias.
+  lists every drilled hole, including blind and buried vias; back-drilled vias
+  repeat their hit under a `;Back drill` comment carrying the depth and stub.
+  IPC-2581 holes carry `backDrillDepth` and `backDrillStub`, so a written and
+  re-read document keeps the back drill.
 
 STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
-through, blind and buried vias as supported, micro vias as unsupported, and
-both `kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities`
-prints exactly that matrix.
+through, blind and buried vias and back drilling as supported, micro vias as
+unsupported, and both `kicad_pcb` and `ipc2581` import as supported.
+`open-pcb capabilities` prints exactly that matrix.
 
 ## Usage
 
@@ -74,6 +78,7 @@ open-pcb footprint add blinker.opcb --ref U1 --value MCU --footprint QFN32 --x 3
 open-pcb track add blinker.opcb --net VCC --layer F.Cu --from 10,10 --to 30,10 --width 0.25
 open-pcb via add blinker.opcb --net VCC --at 20,20 --diameter 0.6 --drill 0.3
 open-pcb via add blinker.opcb --net VCC --at 25,20 --diameter 0.6 --drill 0.3 --from-layer F.Cu --to-layer In1
+open-pcb via backdrill blinker.opcb --id via-1 --depth 0.8 --stub 0.2
 
 # Route all two-pad nets, then route only VCC at a wider width
 open-pcb route blinker.opcb
@@ -139,6 +144,7 @@ await board.addDifferentialPair({ positive: 'USB_D+', negative: 'USB_D-', width:
 await board.addFootprint({ reference: 'U1', value: 'MCU', footprint: 'QFN32', x: 30, y: 20, layer: 'F.Cu' });
 await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], to: [30, 10] });
 await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
+await board.setViaBackDrill({ id: 'via-1', depth: 0.8, stub: 0.2 });
 await board.setOutline({ from: [0, 0], to: [100, 80] });
 await board.route(); // { routed, unrouted, tracks, vias }
 
@@ -204,6 +210,9 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   holes and undeclared nets are reported in its own loss ledger.
 - It does not export STEP. PNG export is a fixed 1024x768 top-down raster; it
   does not render silkscreen text, zones or a live viewport.
+- Back-drill depth and stub live in `.opcb` and IPC-2581 and are reported in
+  the Excellon drill file. KiCad PCB import and export do not carry back drill,
+  so that exchange path keeps the via without the back-drill information.
 - The router is a deterministic orthogonal MST router: it tries four
   L-shaped candidates per edge and reports an edge as unrouted rather than
   approximating a path. It does not rip up, use diagonal tracks or route

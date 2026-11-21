@@ -263,6 +263,28 @@ fn drc(board: &Board, issues: &mut CheckReport) {
                 format!("via `{}` has a non-positive drill", via.id),
             ));
         }
+        if let Some(back) = via.back_drill {
+            if back.depth <= 0.0 || back.stub < 0.0 {
+                issues.push(finding(
+                    "drc/back-drill-invalid",
+                    Severity::Error,
+                    board,
+                    None,
+                    Some(&via.id),
+                    format!("via `{}` has an invalid back drill (depth {}, stub {})", via.id, back.depth, back.stub),
+                ));
+            }
+            if board.via_kind(via) != "through" {
+                issues.push(finding(
+                    "drc/back-drill-invalid",
+                    Severity::Error,
+                    board,
+                    None,
+                    Some(&via.id),
+                    format!("via `{}` is not a through via; back drilling is only defined on a through via", via.id),
+                ));
+            }
+        }
     }
 }
 

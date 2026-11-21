@@ -13,11 +13,13 @@ use serde_json::Value;
 
 use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTrackRequest,
-    AddViaRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, UpdateFootprintRequest,
-    UpdateLayerRequest, add_differential_pair, add_footprint, add_layer, add_net, add_pad, add_track, add_via,
+    AddViaRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetViaBackDrillRequest,
+    UpdateFootprintRequest, UpdateLayerRequest, add_differential_pair, add_footprint, add_layer, add_net, add_pad, add_track,
+    add_via,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, create, delete_differential_pair, delete_footprint, delete_track, delete_via, export, import, inspect,
-    move_footprint, open, redo, route, save, set_outline, store, summary, undo, update_footprint, update_layer,
+    move_footprint, open, redo, route, save, set_outline, set_via_back_drill, store, summary, undo, update_footprint,
+    update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -171,6 +173,8 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["vias"]["blind"], "supported");
     assert_eq!(matrix["vias"]["buried"], "supported");
     assert_eq!(matrix["vias"]["micro"], "unsupported");
+    assert_eq!(matrix["differentialPairs"], "supported");
+    assert_eq!(matrix["backDrill"], "supported");
     assert_eq!(matrix["routing"], "supported");
 }
 
@@ -438,6 +442,7 @@ fn drc_flags_via_rules_and_netlist() {
         drill: 0.0,
         from_layer: None,
         to_layer: None,
+        back_drill: None,
     });
     board.vias.push(Via {
         id: "via-ring".to_string(),
@@ -447,6 +452,7 @@ fn drc_flags_via_rules_and_netlist() {
         drill: 0.3,
         from_layer: None,
         to_layer: None,
+        back_drill: None,
     });
     board.footprints.push(Footprint {
         id: "fp-1".to_string(),
@@ -1904,6 +1910,7 @@ fn via_spans_reject_invalid_arguments_and_locked_layers() {
         drill: 0.3,
         from_layer: Some("F.Cu".to_string()),
         to_layer: None,
+        back_drill: None,
     });
     let directory = TempDir::new();
     let path = directory.join("half-span.opcb");
@@ -1920,6 +1927,7 @@ fn via_spans_reject_invalid_arguments_and_locked_layers() {
         drill: 0.3,
         from_layer: Some("B.Cu".to_string()),
         to_layer: Some("F.Cu".to_string()),
+        back_drill: None,
     });
     let reversed_path = directory.join("reversed-span.opcb");
     fs::write(&reversed_path, serde_json::to_string(&Document::new(reversed)).expect("the document serializes"))
@@ -2635,4 +2643,75 @@ fn dangling_copper_reports_loose_track_ends_only() {
     assert_eq!(codes(&report), ["drc/dangling-copper"]);
     assert_eq!(report["issues"][0]["objectId"], loose["object"]["id"]);
     close(handle).expect("the board closes");
+}
+
+#[test]
+fn back_drill_is_validated_exported_and_round_tripped() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("GND".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the through via is placed");
+    add_layer(handle, AddLayerRequest { name: "In1.Cu".to_string(), kind: Some("copper".to_string()), color: None })
+        .expect("the inner layer is declared");
+    add_via(
+        handle,
+        AddViaRequest {
+            net: Some("GND".to_string()),
+            at: [20.0, 10.0],
+            diameter: 0.6,
+            drill: 0.3,
+            from_layer: Some("F.Cu".to_string()),
+            to_layer: Some("In1.Cu".to_string()),
+        },
+    )
+    .expect("the blind via is placed");
+
+    let zero =
+        set_via_back_drill(handle, SetViaBackDrillRequest { id: "via-1".to_string(), depth: Some(0.0), stub: Some(0.1) })
+            .expect_err("a zero depth is rejected");
+    assert_eq!(zero.code, "session/argument-invalid");
+
+    let set = set_via_back_drill(handle, SetViaBackDrillRequest { id: "via-1".to_string(), depth: Some(0.8), stub: Some(0.2) })
+        .expect("the through via is back drilled");
+    assert_eq!(set["object"]["backDrill"]["depth"], 0.8);
+    assert_eq!(set["object"]["backDrill"]["stub"], 0.2);
+
+    let blind =
+        set_via_back_drill(handle, SetViaBackDrillRequest { id: "via-2".to_string(), depth: Some(0.5), stub: Some(0.1) })
+            .expect_err("a blind via cannot be back drilled");
+    assert_eq!(blind.code, "session/argument-invalid");
+
+    let drill = directory.join("back.drl");
+    export(handle, "drl", &drill).expect("the drill file writes");
+    let text = fs::read_to_string(&drill).expect("the drill file is readable");
+    assert!(text.contains(";Back drill depth=0.800 stub=0.200"), "{text}");
+
+    let ipc = directory.join("back.ipc2581");
+    export(handle, "ipc2581", &ipc).expect("IPC-2581 writes");
+    let xml = fs::read_to_string(&ipc).expect("the IPC-2581 document is readable");
+    assert!(xml.contains("backDrillDepth=\"0.8\""), "{xml}");
+    assert!(xml.contains("backDrillStub=\"0.2\""), "{xml}");
+
+    let reopened = handle_of(&import(&ipc).expect("the IPC-2581 document imports"));
+    let back = store::read(reopened, |board| {
+        board.vias.iter().find(|via| via.id == "via-1").and_then(|via| via.back_drill).map(|back| (back.depth, back.stub))
+    })
+    .expect("the board is readable");
+    assert_eq!(back, Some((0.8, 0.2)));
+    close(reopened).expect("the reopened board closes");
+
+    let path = directory.join("back.opcb");
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let native = handle_of(&open(&path).expect("the native document reopens"));
+    let back = store::read(native, |board| {
+        board.vias.iter().find(|via| via.id == "via-1").and_then(|via| via.back_drill).map(|back| (back.depth, back.stub))
+    })
+    .expect("the reopened board is readable");
+    assert_eq!(back, Some((0.8, 0.2)));
+    close(native).expect("the native board closes");
 }

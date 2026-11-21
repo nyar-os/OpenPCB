@@ -37,8 +37,8 @@ use std::{fs, path::Path};
 
 pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTrackRequest,
-    AddViaRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, UpdateFootprintRequest,
-    UpdateLayerRequest, UpdatePadRequest,
+    AddViaRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetViaBackDrillRequest,
+    UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 use serde_json::{Map, Value, json};
@@ -154,6 +154,7 @@ pub fn capabilities() -> Value {
             "micro": "unsupported",
         },
         "differentialPairs": "supported",
+        "backDrill": "supported",
         "routing": "supported",
     })
 }
@@ -405,6 +406,16 @@ pub fn add_via(handle: u64, request: AddViaRequest) -> Result<Value, ServiceErro
     let mut object = Value::Null;
     store::mutate(handle, |board| {
         object = board.add_via(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Sets the back-drill depth and remaining stub of one through via.
+pub fn set_via_back_drill(handle: u64, request: SetViaBackDrillRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.set_via_back_drill(request)?;
         Ok(())
     })?;
     edit_result(handle, Some(object), None)

@@ -570,7 +570,7 @@ fn via(node: &Node, copper: &[String], nets: &BTreeMap<u32, String>, losses: &mu
             }
         },
     };
-    Some(Via { id: String::new(), net, at, diameter, drill, from_layer, to_layer })
+    Some(Via { id: String::new(), net, at, diameter, drill, from_layer, to_layer, back_drill: None })
 }
 
 /// Edge.Cuts geometry collected before the outline is decided.

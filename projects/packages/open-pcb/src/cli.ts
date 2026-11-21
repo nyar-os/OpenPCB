@@ -559,6 +559,44 @@ via
         return 0;
     });
 
+via
+    .command('backdrill', 'cli.cmd.via-backdrill')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--depth <mm>', 'cli.opt.depth')
+    .option('--stub <mm>', 'cli.opt.stub')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        const depth = numberOption(text(options, 'depth'));
+        const stub = numberOption(text(options, 'stub'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        if (text(options, 'depth') !== undefined && (depth === undefined || depth <= 0)) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--depth <mm>` must be greater than zero' });
+            return 2;
+        }
+        if (text(options, 'stub') !== undefined && (stub === undefined || stub < 0)) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--stub <mm>` must not be negative' });
+            return 2;
+        }
+        if (depth === undefined && stub === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--depth <mm>` or `--stub <mm>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.setViaBackDrill({ id, depth, stub });
+            ctx.emitResult(result, `back drill ${id} depth=${depth ?? '-'} stub=${stub ?? '-'}`);
+            return 0;
+        });
+        return 0;
+    });
+
 const net = cli.command('net', 'cli.cmd.net');
 net
     .command('add', 'cli.cmd.net-add')
