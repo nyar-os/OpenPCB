@@ -13,8 +13,8 @@
 //! Implemented today: create, open, import a KiCad PCB or IPC-2581 document,
 //! save, inspect, summary, close, undo and redo, layer management, footprint
 //! moves and pad add/update/delete, track and via deletion, a rectangular
-//! outline, editable design rules, a deterministic two-layer autorouter, a
-//! read-only SVG preview, and export to drill, BOM, pick-and-place, SVG, PDF,
+//! outline, editable design rules, waivable findings with per-code severity
+//! overrides, a deterministic two-layer autorouter, a read-only SVG preview, and export to drill, BOM, pick-and-place, SVG, PDF,
 //! PNG, KiCad PCB, IPC-2581 and Gerber RS-274X (copper, silkscreen, solder mask
 //! and edge cuts). STEP remains declared but unimplemented and rejects with
 //! `capability/not-implemented`.
@@ -38,8 +38,8 @@ use std::{fs, path::Path};
 
 pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTeardropsRequest,
-    AddTrackRequest, AddViaRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
-    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
+    AddTrackRequest, AddViaRequest, AddWaiverRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest,
+    SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 use serde_json::{Map, Value, json};
@@ -164,6 +164,7 @@ pub fn capabilities() -> Value {
         },
         "designRules": "supported",
         "solderMask": "supported",
+        "drcPolicy": "supported",
         "routing": "supported",
     })
 }
@@ -546,6 +547,46 @@ pub fn delete_differential_pair(handle: u64, id: &str) -> Result<Value, ServiceE
         Ok(())
     })?;
     edit_result(handle, None, Some(deleted))
+}
+
+/// Declares one waiver for a finding code on an open board.
+pub fn add_waiver(handle: u64, request: AddWaiverRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.add_waiver(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Removes one waiver from an open board.
+pub fn delete_waiver(handle: u64, id: &str) -> Result<Value, ServiceError> {
+    let mut deleted = String::new();
+    store::mutate(handle, |board| {
+        deleted = board.delete_waiver(id)?;
+        Ok(())
+    })?;
+    edit_result(handle, None, Some(deleted))
+}
+
+/// Overrides the severity of one finding code on an open board.
+pub fn set_severity(handle: u64, request: SetSeverityRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.set_severity(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Removes one severity override from an open board.
+pub fn delete_severity(handle: u64, code: &str) -> Result<Value, ServiceError> {
+    let mut removed = Value::Null;
+    store::mutate(handle, |board| {
+        removed = board.delete_severity(code)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(removed), None)
 }
 
 /// Lists one open board as a summary.

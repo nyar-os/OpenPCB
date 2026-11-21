@@ -37,6 +37,10 @@ export interface NativeBinding {
     board_delete_via(handle: number, id: string): string;
     board_add_differential_pair(handle: number, requestJson: string): string;
     board_delete_differential_pair(handle: number, id: string): string;
+    board_add_waiver(handle: number, requestJson: string): string;
+    board_delete_waiver(handle: number, id: string): string;
+    board_set_severity(handle: number, requestJson: string): string;
+    board_delete_severity(handle: number, code: string): string;
     board_add_layer(handle: number, requestJson: string): string;
     board_update_layer(handle: number, requestJson: string): string;
     board_set_outline(handle: number, requestJson: string): string;

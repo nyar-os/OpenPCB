@@ -154,6 +154,7 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.renderers.png, 'unsupported');
     assert.equal(matrix.designRules, 'supported');
     assert.equal(matrix.solderMask, 'supported');
+    assert.equal(matrix.drcPolicy, 'supported');
     assert.equal(matrix.routing, 'supported');
     assert.equal(matrix.exportTargets.drl, 'supported');
     assert.equal(matrix.exportTargets.gbr, 'supported');
@@ -285,6 +286,43 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
     } finally {
         fs.rmSync(directory, { recursive: true, force: true });
     }
+});
+
+test('waivers and severity overrides change the inspection verdict', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+    const board = await pcb.create();
+    await board.addNet({ name: 'VCC' });
+    await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.05, from: [1, 1], to: [2, 1] });
+    const checks = ['track-width'] as const;
+
+    const before = await board.inspect({ checks });
+    assert.equal(before.passed, false);
+    assert.equal(before.active, 1);
+    assert.equal(before.waived, 0);
+    assert.equal(before.issues[0].code, 'drc/track-width-too-small');
+
+    const downgraded = await board.setSeverity({ code: 'drc/track-width-too-small', severity: 'info' });
+    assert.equal(downgraded.board.severityOverrides['drc/track-width-too-small'], 'info');
+    assert.equal((await board.inspect({ checks })).passed, true, 'an info finding does not block the board');
+    await board.deleteSeverity('drc/track-width-too-small');
+    assert.equal((await board.inspect({ checks })).passed, false);
+
+    const waiver = await board.addWaiver({ code: 'drc/track-width-too-small', object: 'track-1', reason: 'known stub' });
+    assert.equal(waiver.object?.id, 'waiver-1');
+    const report = await board.inspect({ checks });
+    assert.equal(report.passed, true, 'a waived error does not block the board');
+    assert.equal(report.active, 0);
+    assert.equal(report.waived, 1);
+    assert.equal(report.issues[0].waived, true);
+    assert.equal(report.issues[0].waiverId, 'waiver-1');
+    assert.equal(report.issues[0].waiverReason, 'known stub');
+    assert.equal(board.summary.counts.waivers, 1);
+    assert.deepEqual(board.summary.waivers[0].object, 'track-1');
+
+    await board.deleteWaiver('waiver-1');
+    assert.equal((await board.inspect({ checks })).passed, false);
+    await board.close();
+    await pcb.dispose();
 });
 
 test('editing rejects invalid input with stable codes', { skip: withAddon }, async () => {
@@ -488,6 +526,10 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         assert.match(run('rules', 'show', document), /solderMaskExpansion=0.05/);
         run('rules', 'set', document, '--hole-clearance', '0.3', '--solder-mask-expansion', '0.1');
         assert.match(run('rules', 'show', document), /holeClearance=0.3 .*solderMaskExpansion=0.1/);
+        run('severity', 'set', document, '--code', 'drc/footprint-no-pads', '--severity', 'info');
+        run('severity', 'delete', document, '--code', 'drc/footprint-no-pads');
+        run('waiver', 'add', document, '--code', 'drc/footprint-no-pads', '--object', 'fp-1', '--reason', 'mechanical');
+        run('waiver', 'delete', document, '--id', 'waiver-1');
 
         const listed = run('list', document);
         assert.match(listed, /nets=1 footprints=1 tracks=2 vias=1/);

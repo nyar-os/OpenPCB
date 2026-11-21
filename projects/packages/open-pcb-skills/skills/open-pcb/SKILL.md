@@ -21,6 +21,9 @@ Implemented:
 - Read and edit the design rules (`rules show`, `rules set`): drill-hole
   clearance, copper-, component- and hole-to-edge gaps and the solder-mask
   expansion. Values are millimetres; a partial update keeps the other rules.
+- Waive a finding by code (`waiver add`) or override a code's severity
+  (`severity set`). A waived error no longer blocks `passed`, but the issue stays
+  in the report with `waived: true`, its waiver id and reason.
 - Route every net with at least two pads through a deterministic two-layer
   autorouter; it reports unroutable edges instead of approximating them.
 - Declare differential pairs (`diffpair add`) with a target width, gap and
@@ -91,6 +94,10 @@ a format, check or target.
 | `open-pcb outline set <file.opcb> --from <x,y> --to <x,y>` | Set the rectangular board outline; width and height must be positive. |
 | `open-pcb rules show <file.opcb>` | Print the design rules the checks and writers use. |
 | `open-pcb rules set <file.opcb> --hole-clearance <mm> --copper-to-edge <mm> --component-to-edge <mm> --hole-to-edge <mm> --solder-mask-expansion <mm>` | Replace one or more design rules in place; at least one value is required and none may be negative. |
+| `open-pcb waiver add <file.opcb> --code <code> --object <id> --reason <text>` | Waive a finding code, optionally narrowed to one object. `--object` and `--reason` are optional. |
+| `open-pcb waiver delete <file.opcb> --id <id>` | Delete a waiver by id. |
+| `open-pcb severity set <file.opcb> --code <code> --severity <info\|warning\|error>` | Override the severity of one finding code. |
+| `open-pcb severity delete <file.opcb> --code <code>` | Remove the severity override of one finding code. |
 | `open-pcb inspect <file.opcb> --checks <list>` | Run the implemented checks. |
 | `open-pcb export <file.opcb> --format <format> --out <file-or-directory>` | Write one implemented projection: `gbr` (directory), `drl`, `drill_map`, `bom`, `pos`, `placement`, `svg`, `pdf`, `png`, `kicad_pcb` or `ipc2581`. |
 | `open-pcb gui` | Open the OpenPCB Studio window. |
@@ -130,15 +137,20 @@ mutating command also records the previous document for CLI undo/redo.
 2. Run `open-pcb inspect <file> --checks <list>` with
    `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper`.
 3. Report each finding with its code, layer and object. `passed` is false when
-   any error-severity issue remains. `annular-ring` evaluates vias because the
-   model has no pad drill; `track-width` errors below 0.1mm and warns below
-   0.15mm; `unrouted` warns with the number of disconnected pad groups;
-   `diffpair` compares routed length and spacing against the declared targets;
-   `edge-clearance` measures component bodies and via drills against the
+   any non-waived error-severity issue remains; `active` and `waived` count the
+   findings after policy is applied. A waived issue stays in `issues` with
+   `waived: true` and its `waiverId`, so never call it fixed. `annular-ring`
+   evaluates vias because the model has no pad drill; `track-width` errors below
+   0.1mm and warns below 0.15mm; `unrouted` warns with the number of disconnected
+   pad groups; `diffpair` compares routed length and spacing against the declared
+   targets; `edge-clearance` measures component bodies and via drills against the
    rectangular outline using `componentToEdge` and `holeToEdge`;
    `dangling-copper` warns about track ends that reach no pad, via or same-net
    track.
-4. There is no interactive layer view. `svg` export is the only vector visual
+4. Waivers and severity overrides are document state: confirm the code, the
+   optional object id and the reason before writing them, and say that a waiver
+   accepts the finding rather than repairing it.
+5. There is no interactive layer view. `svg` export is the only vector visual
    artifact and `png` is a fixed raster; review them as files, not as a viewport.
 
 ### Fabrication and assembly export
@@ -162,7 +174,8 @@ mutating command also records the previous document for CLI undo/redo.
 
 - Never claim a check ran when it did not, and never fabricate DRC,
   connectivity, clearance or annular ring results. A board without an outline
-  fails `stackup` and `outline` with `drc/outline-missing`.
+  fails `stackup` and `outline` with `drc/outline-missing`. A waivered finding is
+  accepted, not repaired; report it with its waiver id and reason.
 - Never describe a format as supported because an extension is listed; read the
   capability matrix. Gerber export needs an outline and writes seven files; it is
   not a single-file target.

@@ -53,6 +53,9 @@ export interface OpenPCBOptions {
 /** Disclosure level. `partial` always ships a loss path and diagnostic codes. */
 export type SupportLevel = 'supported' | 'partial' | 'unsupported';
 
+/** Severity of one diagnostic or inspection finding. */
+export type Severity = 'info' | 'warning' | 'error';
+
 /** Via type as classified by the copper span it covers. */
 export type ViaKind = 'through' | 'blind' | 'buried' | 'micro';
 
@@ -154,6 +157,8 @@ export interface BoardCapabilities {
     readonly designRules: SupportLevel;
     /** Whether Gerber solder-mask layers are written. */
     readonly solderMask: SupportLevel;
+    /** Whether findings can be waived and their severity overridden. */
+    readonly drcPolicy: SupportLevel;
     /** Whether `board.route()` ships in this engine. */
     readonly routing: SupportLevel;
 }
@@ -192,6 +197,18 @@ export interface BoardSummaryCounts {
     readonly tracks: number;
     readonly vias: number;
     readonly differentialPairs: number;
+    readonly waivers: number;
+}
+
+/** One waived inspection finding. */
+export interface BoardWaiver {
+    readonly id: ObjectId;
+    /** Finding code the waiver silences. */
+    readonly code: string;
+    /** Object id the waiver is narrowed to; absent means every object. */
+    readonly object?: ObjectId;
+    /** Why the finding was accepted. */
+    readonly reason?: string;
 }
 
 /** Summary of one board at its committed revision. */
@@ -203,6 +220,10 @@ export interface BoardSummary {
     readonly outline: BoardOutline | null;
     /** Design-rule values the checks and writers read. */
     readonly rules: BoardRules;
+    /** Declared waivers. */
+    readonly waivers: readonly BoardWaiver[];
+    /** Severity overrides keyed by finding code. */
+    readonly severityOverrides: Readonly<Record<string, Severity>>;
     readonly layers: readonly BoardSummaryLayer[];
     readonly counts: BoardSummaryCounts;
     /** Whether {@link Board.undo} can restore a snapshot. */
@@ -214,19 +235,30 @@ export interface BoardSummary {
 /** One finding of an inspection run. */
 export interface InspectIssue {
     readonly code: string;
-    readonly severity: 'info' | 'warning' | 'error';
+    readonly severity: Severity;
     readonly revision: number;
     readonly layerId?: LayerId;
     readonly objectId?: ObjectId;
     readonly recoverable: boolean;
     readonly message: string;
+    /** True when a declared waiver silenced this finding. */
+    readonly waived?: boolean;
+    /** Waiver that matched the finding. */
+    readonly waiverId?: ObjectId;
+    /** Reason carried by the matching waiver. */
+    readonly waiverReason?: string;
 }
 
 /** Result of `board.inspect()`. Rules only, never an aesthetic score. */
 export interface InspectReport {
     readonly revision: number;
     readonly checkerVersion: string;
+    /** True when no non-waived error remains. */
     readonly passed: boolean;
+    /** Findings that remain after waivers. */
+    readonly active: number;
+    /** Findings silenced by a matching waiver. */
+    readonly waived: number;
     readonly issues: readonly InspectIssue[];
 }
 
@@ -522,6 +554,23 @@ export interface SetRulesOptions {
     readonly solderMaskExpansion?: number;
 }
 
+/** Options of `board.addWaiver()`. */
+export interface AddWaiverOptions {
+    /** Finding code to silence, such as `drc/track-width-too-small`. */
+    readonly code: string;
+    /** Object id to narrow the waiver to; omit to cover every object. */
+    readonly object?: ObjectId;
+    /** Why the finding was accepted. */
+    readonly reason?: string;
+}
+
+/** Options of `board.setSeverity()`. */
+export interface SetSeverityOptions {
+    /** Finding code whose severity is overridden. */
+    readonly code: string;
+    readonly severity: Severity;
+}
+
 /** Result of one editing call. */
 export interface BoardEditResult {
     readonly revision: number;
@@ -561,6 +610,10 @@ export interface Board {
     updateLayer(options: UpdateLayerOptions): Promise<BoardEditResult>;
     setOutline(options: SetOutlineOptions): Promise<BoardEditResult>;
     setRules(options: SetRulesOptions): Promise<BoardEditResult>;
+    addWaiver(options: AddWaiverOptions): Promise<BoardEditResult>;
+    deleteWaiver(id: ObjectId): Promise<BoardEditResult>;
+    setSeverity(options: SetSeverityOptions): Promise<BoardEditResult>;
+    deleteSeverity(code: string): Promise<BoardEditResult>;
     list(): Promise<BoardSummary>;
     close(): Promise<void>;
 }

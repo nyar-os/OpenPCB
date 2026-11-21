@@ -246,6 +246,46 @@ fn board_delete_differential_pair(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Declares one waiver for a finding code on an open board.
+#[function]
+fn board_add_waiver(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::AddWaiverRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::add_waiver(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Removes one waiver from an open board.
+#[function]
+fn board_delete_waiver(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let value = open_pcb_model::delete_waiver(handle, &id).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Overrides the severity of one finding code on an open board.
+#[function]
+fn board_set_severity(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::SetSeverityRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::set_severity(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Removes one severity override from an open board.
+#[function]
+fn board_delete_severity(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let code = text(&ctx, 1)?;
+    let value = open_pcb_model::delete_severity(handle, &code).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Restores the previous snapshot of one open board.
 #[function]
 fn board_undo(ctx: CallContext) -> Result<JsValue> {
@@ -621,6 +661,28 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
             let id = rpc_text(value, "id")?;
             open_pcb_model::delete_differential_pair(handle, id)
         }
+        "board.addWaiver" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::AddWaiverRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::add_waiver(handle, request)
+        }
+        "board.deleteWaiver" => {
+            let handle = rpc_handle(value)?;
+            let id = rpc_text(value, "id")?;
+            open_pcb_model::delete_waiver(handle, id)
+        }
+        "board.setSeverity" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::SetSeverityRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::set_severity(handle, request)
+        }
+        "board.deleteSeverity" => {
+            let handle = rpc_handle(value)?;
+            let code = rpc_text(value, "code")?;
+            open_pcb_model::delete_severity(handle, code)
+        }
         "board.setOutline" => {
             let handle = rpc_handle(value)?;
             let request: open_pcb_model::SetOutlineRequest =
@@ -944,6 +1006,10 @@ register_module![
     board_delete_via,
     board_add_differential_pair,
     board_delete_differential_pair,
+    board_add_waiver,
+    board_delete_waiver,
+    board_set_severity,
+    board_delete_severity,
     board_add_layer,
     board_update_layer,
     board_set_outline,

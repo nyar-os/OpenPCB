@@ -13,13 +13,13 @@ use serde_json::Value;
 
 use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTeardropsRequest,
-    AddTrackRequest, AddViaRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
-    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, add_differential_pair, add_footprint, add_layer,
-    add_net, add_pad, add_teardrops, add_track, add_via,
+    AddTrackRequest, AddViaRequest, AddWaiverRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest,
+    SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
+    add_differential_pair, add_footprint, add_layer, add_net, add_pad, add_teardrops, add_track, add_via, add_waiver,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
-    capabilities, close, create, delete_differential_pair, delete_footprint, delete_track, delete_via, export, import, inspect,
-    move_footprint, open, redo, route, save, set_outline, set_rules, set_via_back_drill, store, summary, undo,
-    update_footprint, update_layer,
+    capabilities, close, create, delete_differential_pair, delete_footprint, delete_severity, delete_track, delete_via,
+    delete_waiver, export, import, inspect, move_footprint, open, redo, route, save, set_outline, set_rules, set_severity,
+    set_via_back_drill, store, summary, undo, update_footprint, update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -180,6 +180,7 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["teardrops"]["arc"], "unsupported");
     assert_eq!(matrix["designRules"], "supported");
     assert_eq!(matrix["solderMask"], "supported");
+    assert_eq!(matrix["drcPolicy"], "supported");
     assert_eq!(matrix["routing"], "supported");
 }
 
@@ -365,6 +366,95 @@ fn design_rules_are_editable_persistent_and_drive_solder_mask() {
     fs::write(&invalid_path, serde_json::to_string(&Document::new(invalid)).expect("the document serializes"))
         .expect("the invalid document is written");
     assert_eq!(open(&invalid_path).expect_err("a negative solder-mask rule is rejected").code, "format/invalid");
+}
+
+#[test]
+fn waivers_and_severity_overrides_change_the_verdict_and_persist() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("VCC".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.05,
+            from: [1.0, 1.0],
+            to: [2.0, 1.0],
+        },
+    )
+    .expect("the narrow track is placed");
+
+    let checks = Some(vec!["track-width".to_string()]);
+    let report = inspect(handle, checks.clone()).expect("the board is inspected");
+    assert_eq!(report["passed"], false);
+    assert_eq!(report["active"], 1);
+    assert_eq!(report["waived"], 0);
+    assert_eq!(report["issues"][0]["code"], "drc/track-width-too-small");
+    assert_eq!(report["issues"][0]["severity"], "error");
+
+    set_severity(handle, SetSeverityRequest { code: "drc/track-width-too-small".to_string(), severity: "info".to_string() })
+        .expect("the severity is overridden");
+    let report = inspect(handle, checks.clone()).expect("the board is inspected");
+    assert_eq!(report["passed"], true, "an info finding does not block the board");
+    assert_eq!(report["issues"][0]["severity"], "info");
+    delete_severity(handle, "drc/track-width-too-small").expect("the override is removed");
+    assert_eq!(inspect(handle, checks.clone()).expect("the board is inspected")["passed"], false);
+
+    let waiver = add_waiver(
+        handle,
+        AddWaiverRequest {
+            code: "drc/track-width-too-small".to_string(),
+            object: Some("track-1".to_string()),
+            reason: Some("known stub".to_string()),
+        },
+    )
+    .expect("the finding is waived");
+    assert_eq!(waiver["object"]["id"], "waiver-1");
+    let report = inspect(handle, checks.clone()).expect("the board is inspected");
+    assert_eq!(report["passed"], true, "a waived error does not block the board");
+    assert_eq!(report["waived"], 1);
+    assert_eq!(report["active"], 0);
+    assert_eq!(report["issues"][0]["waived"], true);
+    assert_eq!(report["issues"][0]["waiverId"], "waiver-1");
+    assert_eq!(report["issues"][0]["waiverReason"], "known stub");
+
+    let duplicate = add_waiver(
+        handle,
+        AddWaiverRequest { code: "drc/track-width-too-small".to_string(), object: Some("track-1".to_string()), reason: None },
+    )
+    .expect_err("the same code and object cannot be waived twice");
+    assert_eq!(duplicate.code, "object/duplicate");
+    let bad = set_severity(handle, SetSeverityRequest { code: "drc/x".to_string(), severity: "fatal".to_string() })
+        .expect_err("an unknown severity is rejected");
+    assert_eq!(bad.code, "session/argument-invalid");
+
+    set_severity(handle, SetSeverityRequest { code: "drc/dangling-copper".to_string(), severity: "error".to_string() })
+        .expect("a second override is stored");
+    let summary = store::summary_of(handle).expect("the board is listed");
+    assert_eq!(summary["counts"]["waivers"], 1);
+    assert_eq!(summary["waivers"][0]["code"], "drc/track-width-too-small");
+    assert_eq!(summary["severityOverrides"]["drc/dangling-copper"], "error");
+
+    let path = directory.join("policy.opcb");
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the board reopens"));
+    let summary = store::summary_of(reopened).expect("the reopened board is listed");
+    assert_eq!(summary["waivers"][0]["id"], "waiver-1");
+    assert_eq!(summary["severityOverrides"]["drc/dangling-copper"], "error");
+    assert_eq!(inspect(reopened, checks.clone()).expect("the reopened board is inspected")["passed"], true);
+
+    assert_eq!(delete_waiver(reopened, "waiver-1").expect("the waiver is removed")["deleted"], "waiver-1");
+    assert_eq!(inspect(reopened, checks).expect("the board is inspected")["passed"], false);
+    close(reopened).expect("the reopened board closes");
+
+    let mut invalid = crafted();
+    invalid.severity_overrides.insert("drc/x".to_string(), "fatal".to_string());
+    let invalid_path = directory.join("invalid-severity.opcb");
+    fs::write(&invalid_path, serde_json::to_string(&Document::new(invalid)).expect("the document serializes"))
+        .expect("the invalid document is written");
+    assert_eq!(open(&invalid_path).expect_err("an unknown persisted severity is rejected").code, "format/invalid");
 }
 
 #[test]

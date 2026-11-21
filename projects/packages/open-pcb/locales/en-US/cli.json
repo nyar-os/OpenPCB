@@ -35,6 +35,12 @@
             "rules": "Read or edit the design rules of a board document",
             "rules-show": "Print the design-rule values used by the checks and writers",
             "rules-set": "Replace one or more design-rule values in place",
+            "waiver": "Manage waived inspection findings",
+            "waiver-add": "Waive one finding code, optionally narrowed to one object",
+            "waiver-delete": "Delete a waiver by id",
+            "severity": "Manage per-code severity overrides",
+            "severity-set": "Override the severity of one finding code",
+            "severity-delete": "Remove the severity override of one finding code",
             "gui": "Open the OpenPCB Studio window on the native board"
         },
         "opt": {
@@ -73,7 +79,11 @@
             "copper-to-edge": "Minimum copper-to-board-edge gap, in mm",
             "component-to-edge": "Minimum component-to-board-edge gap, in mm",
             "hole-to-edge": "Minimum drill-hole-to-board-edge gap, in mm",
-            "solder-mask-expansion": "Solder-mask expansion around each pad, per side and in mm"
+            "solder-mask-expansion": "Solder-mask expansion around each pad, per side and in mm",
+            "code": "Stable finding code, for example drc/track-width-too-small",
+            "object": "Object id the waiver is narrowed to; omit to cover every object",
+            "reason": "Why the finding was accepted",
+            "severity": "New severity: info, warning or error"
         }
     }
 }

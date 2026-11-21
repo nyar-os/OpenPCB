@@ -4,7 +4,7 @@
 //! callers reach a board through the handle-based operations in the crate root,
 //! so the wire shape can evolve without exposing Rust structs.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -228,6 +228,39 @@ pub(crate) struct DifferentialPair {
     pub(crate) max_skew: f64,
 }
 
+/// One waived inspection finding.
+///
+/// A waiver silences one finding code, optionally narrowed to a single object
+/// id. The reason is free text the report echoes back, so a review can say why
+/// the finding was accepted without reading the document.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Waiver {
+    /// Stable waiver id.
+    pub(crate) id: String,
+    /// Finding code the waiver silences, such as `drc/track-width-too-small`.
+    pub(crate) code: String,
+    /// Object id the waiver is narrowed to; absent means every object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) object: Option<String>,
+    /// Human-readable reason the finding was accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
+}
+
+impl Waiver {
+    /// Api projection of one waiver, omitting absent fields.
+    pub(crate) fn to_value(&self) -> Value {
+        let mut value = json!({ "id": self.id, "code": self.code });
+        if let Some(object) = &self.object {
+            value["object"] = Value::String(object.clone());
+        }
+        if let Some(reason) = &self.reason {
+            value["reason"] = Value::String(reason.clone());
+        }
+        value
+    }
+}
+
 impl DifferentialPair {
     /// Api projection of one pair, with camelCase field names.
     pub(crate) fn to_value(&self) -> Value {
@@ -337,9 +370,18 @@ pub(crate) struct Board {
     /// Declared differential pairs; absent on documents written before pairs existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) differential_pairs: Vec<DifferentialPair>,
+    /// Severity overrides keyed by finding code; absent when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) severity_overrides: BTreeMap<String, String>,
+    /// Waived findings; absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) waivers: Vec<Waiver>,
     /// Next differential pair sequence number.
     #[serde(default = "one")]
     pub(crate) next_pair: u64,
+    /// Next waiver sequence number.
+    #[serde(default = "one")]
+    pub(crate) next_waiver: u64,
     /// Next footprint sequence number.
     pub(crate) next_footprint: u64,
     /// Next track sequence number.
@@ -398,7 +440,10 @@ impl Board {
             tracks: Vec::new(),
             vias: Vec::new(),
             differential_pairs: Vec::new(),
+            severity_overrides: BTreeMap::new(),
+            waivers: Vec::new(),
             next_pair: 1,
+            next_waiver: 1,
             next_footprint: 1,
             next_track: 1,
             next_via: 1,
@@ -1193,6 +1238,72 @@ impl Board {
         Ok(removed.id)
     }
 
+    /// Declares one waiver for a finding code and returns its public shape.
+    ///
+    /// A waiver with an `object` only silences findings on that object; without
+    /// one it silences every finding with the code. The `(code, object)` pair
+    /// must be unique.
+    pub(crate) fn add_waiver(&mut self, request: AddWaiverRequest) -> Result<Value, ServiceError> {
+        let code = request.code.trim();
+        if code.is_empty() {
+            return Err(crate::argument("a waiver needs a non-empty `code`"));
+        }
+        let object = match request.object.as_deref().map(str::trim) {
+            Some("") => return Err(crate::argument("a waiver `object` must not be empty")),
+            Some(object) => Some(object.to_string()),
+            None => None,
+        };
+        if self.waivers.iter().any(|waiver| waiver.code == code && waiver.object == object) {
+            let scope = object.as_deref().map_or("every object".to_string(), |object| format!("object `{object}`"));
+            return Err(ServiceError::new("object/duplicate", format!("a waiver for `{code}` on {scope} already exists")));
+        }
+        let reason = request.reason.map(|reason| reason.trim().to_string()).filter(|reason| !reason.is_empty());
+        let id = format!("waiver-{}", self.next_waiver);
+        self.next_waiver += 1;
+        let waiver = Waiver { id, code: code.to_string(), object, reason };
+        let object_value = waiver.to_value();
+        self.waivers.push(waiver);
+        self.revision += 1;
+        Ok(object_value)
+    }
+
+    /// Removes one waiver by id and returns the removed id.
+    pub(crate) fn delete_waiver(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .waivers
+            .iter()
+            .position(|waiver| waiver.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no waiver with id `{id}`")))?;
+        let removed = self.waivers.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
+    /// Overrides the severity of one finding code.
+    pub(crate) fn set_severity(&mut self, request: SetSeverityRequest) -> Result<Value, ServiceError> {
+        let code = request.code.trim();
+        if code.is_empty() {
+            return Err(crate::argument("a severity override needs a non-empty `code`"));
+        }
+        let severity = request.severity.trim().to_ascii_lowercase();
+        if !matches!(severity.as_str(), "info" | "warning" | "error") {
+            return Err(crate::argument("`severity` must be info, warning or error"));
+        }
+        self.severity_overrides.insert(code.to_string(), severity.clone());
+        self.revision += 1;
+        Ok(json!({ "code": code, "severity": severity }))
+    }
+
+    /// Removes one severity override and returns its previous value.
+    pub(crate) fn delete_severity(&mut self, code: &str) -> Result<Value, ServiceError> {
+        let removed = self
+            .severity_overrides
+            .remove(code.trim())
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no severity override for `{code}`")))?;
+        self.revision += 1;
+        Ok(json!({ "code": code.trim(), "severity": removed }))
+    }
+
     /// Resolves every pad to board coordinates.
     ///
     /// Footprint rotation is applied once here so router and inspection code
@@ -1561,6 +1672,34 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
             return Err(crate::invalid(format!("differential pair `{}` has a negative maxSkew", pair.id)));
         }
     }
+
+    let mut waiver_ids = HashSet::new();
+    for waiver in &board.waivers {
+        if waiver.id.trim().is_empty() {
+            return Err(crate::invalid("a waiver has an empty id"));
+        }
+        if !waiver_ids.insert(waiver.id.as_str()) {
+            return Err(crate::invalid(format!("waiver id `{}` is duplicated", waiver.id)));
+        }
+        if waiver.code.trim().is_empty() {
+            return Err(crate::invalid(format!("waiver `{}` has an empty code", waiver.id)));
+        }
+        if let Some(object) = waiver.object.as_deref()
+            && object.trim().is_empty()
+        {
+            return Err(crate::invalid(format!("waiver `{}` has an empty object", waiver.id)));
+        }
+    }
+    for (code, severity) in &board.severity_overrides {
+        if code.trim().is_empty() {
+            return Err(crate::invalid("a severity override has an empty code"));
+        }
+        if !matches!(severity.as_str(), "info" | "warning" | "error") {
+            return Err(crate::invalid(format!(
+                "severity override for `{code}` is `{severity}`; expected info, warning or error"
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -1598,6 +1737,8 @@ pub(crate) fn summary(board: &Board) -> Value {
         "units": board.units,
         "outline": board.outline,
         "rules": board.rules,
+        "waivers": board.waivers.iter().map(Waiver::to_value).collect::<Vec<_>>(),
+        "severityOverrides": board.severity_overrides,
         "layers": layers,
         "counts": {
             "nets": board.nets.len(),
@@ -1605,6 +1746,7 @@ pub(crate) fn summary(board: &Board) -> Value {
             "tracks": board.tracks.len(),
             "vias": board.vias.len(),
             "differentialPairs": board.differential_pairs.len(),
+            "waivers": board.waivers.len(),
         },
     })
 }
@@ -1776,6 +1918,30 @@ pub struct AddDifferentialPairRequest {
     /// Largest allowed route-length difference between the halves, in board units.
     #[serde(default)]
     pub max_skew: f64,
+}
+
+/// Request of [`crate::add_waiver`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddWaiverRequest {
+    /// Finding code the waiver silences, required.
+    pub code: String,
+    /// Object id the waiver is narrowed to; omit to cover every object.
+    #[serde(default)]
+    pub object: Option<String>,
+    /// Human-readable reason the finding was accepted.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Request of [`crate::set_severity`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSeverityRequest {
+    /// Finding code whose severity is overridden, required.
+    pub code: String,
+    /// New severity: `info`, `warning` or `error`.
+    pub severity: String,
 }
 
 /// Request of [`crate::move_footprint`].

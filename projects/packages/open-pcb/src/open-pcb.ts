@@ -21,6 +21,7 @@ import type {
     AddNetOptions,
     AddTrackOptions,
     AddViaOptions,
+    AddWaiverOptions,
     Board,
     BoardCapabilities,
     BoardCreateOptions,
@@ -43,6 +44,7 @@ import type {
     SaveReport,
     SetOutlineOptions,
     SetRulesOptions,
+    SetSeverityOptions,
     SetViaBackDrillOptions,
     UpdateFootprintOptions,
     UpdateLayerOptions,
@@ -471,6 +473,22 @@ function attach(
         async setRules(options: SetRulesOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.setRules(current, options));
+        },
+        async addWaiver(options: AddWaiverOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addWaiver(current, options));
+        },
+        async deleteWaiver(id: string): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deleteWaiver(current, id));
+        },
+        async setSeverity(options: SetSeverityOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.setSeverity(current, options));
+        },
+        async deleteSeverity(code: string): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deleteSeverity(current, code));
         },
         async list(): Promise<BoardSummary> {
             ensure();

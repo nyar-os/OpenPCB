@@ -37,7 +37,9 @@ SDK and studio shell share one native model:
 - Run DRC, connectivity, clearance, annular ring, stackup, outline, silkscreen,
   courtyard, netlist, `annular-ring`, `track-width`, `unrouted`, `diffpair`,
   `dangling-copper`, `hole-to-hole`, `copper-to-edge`, `edge-clearance` and
-  `silkscreen-over-pad` checks.
+  `silkscreen-over-pad` checks. Waive a finding by code (optionally narrowed to
+  one object) and override a code's severity; a waived error no longer blocks
+  `passed`, and every waived issue is still reported with its waiver.
 - Import a KiCad PCB or IPC-2581 document into the native document: copper
   layers, nets, footprints and pads, tracks, through, blind and buried vias and a
   rectangular profile, with a stable loss ledger for everything the document
@@ -57,9 +59,9 @@ SDK and studio shell share one native model:
 STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
-through, blind and buried vias, back drilling and linear teardrops as
-supported, micro vias as unsupported, and both `kicad_pcb` and `ipc2581` import
-as supported.
+through, blind and buried vias, back drilling, linear teardrops, editable design
+rules, solder-mask Gerber layers and waiver/severity policy as supported, micro
+vias as unsupported, and both `kicad_pcb` and `ipc2581` import as supported.
 `open-pcb capabilities` prints exactly that matrix.
 
 ## Usage
@@ -112,6 +114,9 @@ open-pcb layer lock blinker.opcb --id Inner2 --locked true
 open-pcb outline set blinker.opcb --from 0,0 --to 100,80
 open-pcb rules show blinker.opcb
 open-pcb rules set blinker.opcb --hole-clearance 0.3 --solder-mask-expansion 0.1
+open-pcb severity set blinker.opcb --code drc/track-width-too-small --severity info
+open-pcb waiver add blinker.opcb --code drc/footprint-no-pads --object fp-1 --reason mechanical
+open-pcb waiver delete blinker.opcb --id waiver-1
 open-pcb undo blinker.opcb
 open-pcb redo blinker.opcb
 
@@ -259,6 +264,10 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
 - Solder-mask openings are rectangular, follow the pad's outer copper side and
   add the document's expansion per side; vias stay tented and inner-layer pads
   open no mask. Paste layers and mask-defined pad shapes are not written.
+- A waiver silences a finding by code and, when set, by object id; it never
+  hides the finding from the report. Overrides apply before waivers, so
+  `passed` is false only while a non-waived error remains. Waivers and overrides
+  live in `.opcb`; there is no waiver expiry or reviewer approval workflow.
 - It does not edit zones, use templates other than `blank`, persist undo
   history inside `.opcb`, or resolve concurrent edits against an older revision.
 - It does not claim a format is supported because an extension is known.

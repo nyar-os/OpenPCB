@@ -139,14 +139,54 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
         ))
     });
 
-    let passed = !report.has_errors();
+    // A document-level severity override replaces the check's own level, then a
+    // matching waiver marks the finding. Overrides are applied first so a waiver
+    // silences the level the user sees.
+    for issue in &mut report.issues {
+        if let Some(severity) = board.severity_overrides.get(&issue.code).and_then(|value| severity_of(value)) {
+            issue.severity = severity;
+        }
+        let object = issue.details.get("objectId").map(String::as_str);
+        let waiver = board
+            .waivers
+            .iter()
+            .find(|waiver| waiver.code == issue.code && waiver.object.as_deref().is_none_or(|target| Some(target) == object));
+        if let Some(waiver) = waiver {
+            issue.details.insert("waived".to_string(), "true".to_string());
+            issue.details.insert("waiverId".to_string(), waiver.id.clone());
+            if let Some(reason) = &waiver.reason {
+                issue.details.insert("waiverReason".to_string(), reason.clone());
+            }
+        }
+    }
+
+    let waived = report.issues.iter().filter(|issue| is_waived(issue)).count();
+    let active = report.issues.len() - waived;
+    let passed = !report.issues.iter().any(|issue| issue.severity.is_error() && !is_waived(issue));
     let issues = report.issues.iter().map(|issue| issue_value(issue, board.revision)).collect::<Vec<_>>();
     Ok(json!({
         "revision": board.revision,
         "checkerVersion": format!("open-pcb-model {}", env!("CARGO_PKG_VERSION")),
         "passed": passed,
+        "active": active,
+        "waived": waived,
         "issues": issues,
     }))
+}
+
+/// Parses a persisted severity name.
+fn severity_of(value: &str) -> Option<Severity> {
+    match value {
+        "info" => Some(Severity::Info),
+        "warning" => Some(Severity::Warning),
+        "error" => Some(Severity::Error),
+        _ => None,
+    }
+}
+
+/// Whether one finding carries a waiver marker.
+fn is_waived(issue: &Issue) -> bool {
+    issue.details.get("waived").is_some_and(|value| value == "true")
 }
 
 fn finding(
@@ -176,7 +216,8 @@ fn issue_value(issue: &Issue, revision: u64) -> Value {
     value.insert("recoverable".to_string(), Value::Bool(!issue.severity.is_error()));
     value.insert("message".to_string(), Value::String(issue.message.clone()));
     for (key, detail) in &issue.details {
-        value.insert(key.clone(), Value::String(detail.clone()));
+        let rendered = if key == "waived" { Value::Bool(detail == "true") } else { Value::String(detail.clone()) };
+        value.insert(key.clone(), rendered);
     }
     Value::Object(value)
 }

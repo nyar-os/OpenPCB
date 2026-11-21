@@ -16,6 +16,7 @@ import type {
     AddNetOptions,
     AddTrackOptions,
     AddViaOptions,
+    AddWaiverOptions,
     BoardCapabilities,
     BoardCreateOptions,
     BoardEditResult,
@@ -31,6 +32,7 @@ import type {
     SaveReport,
     SetOutlineOptions,
     SetRulesOptions,
+    SetSeverityOptions,
     SetViaBackDrillOptions,
     UpdateFootprintOptions,
     UpdateLayerOptions,
@@ -207,6 +209,26 @@ export function addDifferentialPair(handle: number, options: AddDifferentialPair
 /** Deletes one differential pair from an open board. */
 export function deleteDifferentialPair(handle: number, id: string): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.deleteDifferentialPair').board_delete_differential_pair(handle, id));
+}
+
+/** Declares one waiver for a finding code on an open board. */
+export function addWaiver(handle: number, options: AddWaiverOptions): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.addWaiver').board_add_waiver(handle, JSON.stringify(options)));
+}
+
+/** Removes one waiver from an open board. */
+export function deleteWaiver(handle: number, id: string): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deleteWaiver').board_delete_waiver(handle, id));
+}
+
+/** Overrides the severity of one finding code on an open board. */
+export function setSeverity(handle: number, options: SetSeverityOptions): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.setSeverity').board_set_severity(handle, JSON.stringify(options)));
+}
+
+/** Removes one severity override from an open board. */
+export function deleteSeverity(handle: number, code: string): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deleteSeverity').board_delete_severity(handle, code));
 }
 
 /** Routes every net with at least two pads and reports what it could place. */

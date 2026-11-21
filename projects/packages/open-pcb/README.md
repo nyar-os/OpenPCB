@@ -11,10 +11,11 @@ OpenPCB(options?)` creates a session; `create` and `open` return an editable
 `Board` with `inspect`, `save`, `export`, `close`, `undo`, `redo`,
 `addFootprint`, `moveFootprint`, `updateFootprint`, `deleteFootprint`,
 `addTrack`, `deleteTrack`, `addVia`, `deleteVia`, `addNet`, `route`, `addLayer`,
-`updateLayer`, `setOutline`, `setRules` and `list`. `importBoard` reads a KiCad
-PCB or IPC-2581 file, and `importKicadPcb` stays as the KiCad-only spelling of
-the same operation. Each summary exposes `canUndo`, `canRedo` and the design
-rules.
+`updateLayer`, `setOutline`, `setRules`, `addWaiver`, `deleteWaiver`,
+`setSeverity`, `deleteSeverity` and `list`. `importBoard` reads a KiCad PCB or
+IPC-2581 file, and `importKicadPcb` stays as the KiCad-only spelling of the same
+operation. Each summary exposes `canUndo`, `canRedo`, the design rules, the
+waivers and the severity overrides.
 
 Implemented outputs are Gerber RS-274X, drill, drill map SVG, BOM,
 pick-and-place, placement JSON, SVG, vector PDF, 1024x768 RGB PNG, KiCad PCB and
@@ -83,6 +84,11 @@ await pcb.dispose();
 - The design rules are readable from every `BoardSummary` (`rules`) and editable
   with `board.setRules()`; values are millimetres, a partial update keeps the
   other rules, and a negative value is rejected.
+- `board.setSeverity()` overrides a finding code's level and `board.addWaiver()`
+  silences one code, optionally narrowed to one object id. Waived issues stay in
+  the report with `waived: true`, `waiverId` and `waiverReason`; `passed` ignores
+  waived errors, and the report adds `active`/`waived` counts. Waivers and
+  overrides are stored in `.opcb` and survive a save/reopen.
 - PDF export is a single-page vector document sized to A4 landscape or to the
   board. KiCad PCB and IPC-2581 exports are deterministic projections of the
   native document; no net names are invented for KiCad.

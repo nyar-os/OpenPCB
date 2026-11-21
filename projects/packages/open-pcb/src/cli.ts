@@ -25,6 +25,7 @@ import type {
     InspectCheck,
     InspectReport,
     LayerKind,
+    Severity,
 } from './types.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -141,9 +142,12 @@ function describeBoard(board: BoardSummary): string {
 }
 
 function describeReport(report: InspectReport): string {
-    const lines = [`inspect revision=${report.revision} checker=${report.checkerVersion} passed=${report.passed}`];
+    const lines = [
+        `inspect revision=${report.revision} checker=${report.checkerVersion} passed=${report.passed}`
+            + ` active=${report.active} waived=${report.waived}`,
+    ];
     for (const issue of report.issues) {
-        lines.push(`  ${issue.severity} ${issue.code} ${issue.layerId ?? '-'} ${issue.message}`);
+        lines.push(`  ${issue.severity} ${issue.code} ${issue.layerId ?? '-'} ${issue.message}${issue.waived ? ' (waived)' : ''}`);
     }
     return lines.join('\n');
 }
@@ -939,6 +943,104 @@ rules
                 solderMaskExpansion: values.get('solder-mask-expansion'),
             });
             ctx.emitResult(result, `rules revision=${result.revision} ${describeRules(result.board.rules)}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const waiver = cli.command('waiver', 'cli.cmd.waiver');
+waiver
+    .command('add', 'cli.cmd.waiver-add')
+    .option('--code <code>', 'cli.opt.code')
+    .option('--object <id>', 'cli.opt.object')
+    .option('--reason <text>', 'cli.opt.reason')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const code = text(options, 'code');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (code === undefined || code.length === 0) {
+            ctx.fail('open-pcb.cli.code-required', { message: '`--code <code>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addWaiver({ code, object: text(options, 'object'), reason: text(options, 'reason') });
+            ctx.emitResult(result, `added ${result.object?.id ?? 'waiver'} for ${code}`);
+            return 0;
+        });
+        return 0;
+    });
+
+waiver
+    .command('delete', 'cli.cmd.waiver-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteWaiver(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const severity = cli.command('severity', 'cli.cmd.severity');
+severity
+    .command('set', 'cli.cmd.severity-set')
+    .option('--code <code>', 'cli.opt.code')
+    .option('--severity <level>', 'cli.opt.severity')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const code = text(options, 'code');
+        const level = text(options, 'severity');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (code === undefined || code.length === 0) {
+            ctx.fail('open-pcb.cli.code-required', { message: '`--code <code>` is required' });
+            return 2;
+        }
+        if (level !== 'info' && level !== 'warning' && level !== 'error') {
+            ctx.fail('open-pcb.cli.severity-invalid', { message: '`--severity` must be info, warning or error' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.setSeverity({ code, severity: level as Severity });
+            ctx.emitResult(result, `${code} severity=${level}`);
+            return 0;
+        });
+        return 0;
+    });
+
+severity
+    .command('delete', 'cli.cmd.severity-delete')
+    .option('--code <code>', 'cli.opt.code')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const code = text(options, 'code');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (code === undefined || code.length === 0) {
+            ctx.fail('open-pcb.cli.code-required', { message: '`--code <code>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteSeverity(code);
+            ctx.emitResult(result, `removed severity override for ${code}`);
             return 0;
         });
         return 0;
