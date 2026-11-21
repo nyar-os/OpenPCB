@@ -2811,5 +2811,14 @@ fn linear_teardrops_materialise_without_drc_false_positives() {
     let arc = add_teardrops(handle, AddTeardropsRequest { shape: Some("arc".to_string()), length: None })
         .expect_err("the arc shape stays unimplemented");
     assert_eq!(arc.code, "capability/not-implemented");
+
+    let directory = TempDir::new();
+    let path = directory.join("teardrops.opcb");
+    save(handle, &path, false).expect("the board saves");
     close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    let third = add_teardrops(reopened, AddTeardropsRequest::default()).expect("the saved teardrops are recognised");
+    assert_eq!(third["object"]["tracks"], 0);
+    assert_eq!(third["object"]["skipped"], 4);
+    close(reopened).expect("the reopened board closes");
 }
