@@ -14,10 +14,12 @@ the model crate create, open, save, edit, inspect and export one revisioned
 Implemented:
 
 - Create, open, save, list, inspect, export, undo, redo and close a board.
-- Add nets, footprints, pads, tracks and vias; record a back-drill depth and
-  remaining stub on a through via; move, update and delete footprints; delete
-  tracks and vias.
+- Add nets, footprints, pads, tracks, vias and plated routed slots; record a
+  back-drill depth and remaining stub on a through via; move, update and delete
+  footprints; delete tracks, vias and slots.
 - Add, rename, hide and lock layers; set a rectangular outline.
+- Report copper area per copper layer (`copper balance`) from tracks, vias, pads
+  and pours, plus each layer's coverage and the imbalance across layers.
 - Declare copper pour regions on copper layers as closed polygons (`zone add`);
   each one is written as a `G36`/`G37` region in its layer's Gerber file and
   drawn by the SVG and PDF previews.
@@ -56,7 +58,9 @@ Implemented:
 - Checks: `drc`, `connectivity`, `clearance`, `annular_rings`, `annular-ring`,
   `track-width`, `unrouted`, `stackup`, `outline`, `silkscreen`, `courtyard`,
   `netlist`, `hole-to-hole`, `copper-to-edge`, `edge-clearance`,
-  `silkscreen-over-pad`, `diffpair`, `dangling-copper`, `netclass`, `keepout`.
+  `silkscreen-over-pad`, `diffpair`, `dangling-copper`, `netclass`, `keepout`,
+  `via-in-pad`. The `via-in-pad` check warns about vias whose centre lands inside
+  a pad they share copper with.
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `drill_map`
   (hole map SVG with tool legend and back-drill marks), `bom`, `pos`,
   `placement` (millimetre JSON), `testpoints` (CSV probe report), `ipc_d_356`
@@ -70,8 +74,8 @@ Implemented:
 
 Not implemented: STEP export, the interactive viewport renderer, silkscreen
 text/shapes, pad drills (so `annular-ring`, the drill map and the Excellon file
-cover vias only), diagonal or rip-up routing, and templates other than `blank`.
-Rectangular pad apertures are not rotated in Gerber output. Back-drill depth and
+cover vias and routed slots only), diagonal or rip-up routing, and templates
+other than `blank`. Rectangular pad apertures are not rotated in Gerber output. Back-drill depth and
 stub live in `.opcb` and IPC-2581 and appear as `;Back drill` comments in the
 Excellon file and as dashed rings in the drill map; KiCad PCB exchange does not
 carry back drill. The outline is rectangular, so closure and self-intersection
@@ -80,7 +84,12 @@ drill spacing to the four edges. Teardrops are only generated as linear copper
 tracks; arc teardrops stay unimplemented. The test point report lists only
 explicitly declared pads and vias, never inferred probes. Keepouts are design
 intent only: the `keepout` check reads them, but they are not written to Gerber,
-drill data, IPC-2581 or KiCad output and the router does not avoid them. Via
+drill data, IPC-2581 or KiCad output and the router does not avoid them. Plated
+routed slots live in `.opcb` and reach the Excellon file (one `G85` segment) and
+the drill map only; Gerber, IPC-2581, KiCad PCB, SVG, PDF and PNG output do not
+carry them, and DRC does not treat a slot as copper or as a hole. The copper
+balance report sums feature areas rather than a union, and coverage and imbalance
+need a rectangular outline. Via
 stitching follows the rectangular outline only, places through vias, skips
 occupied positions and does not test the new vias against existing copper. Solder-mask openings are rectangular
 and cover outer-layer pads only; vias stay tented and inner-layer pads open no
@@ -121,6 +130,9 @@ a format, check or target.
 | `open-pcb via add <file.opcb> --net <name> --at <x,y> --diameter <mm> --drill <mm>` | Place a via in place. |
 | `open-pcb via backdrill <file.opcb> --id <id> --depth <mm> --stub <mm>` | Record back-drill depth and remaining stub on a through via. Blind and buried vias are rejected. |
 | `open-pcb via delete <file.opcb> --id <id>` | Delete a via by id. |
+| `open-pcb slot add <file.opcb> [--net <name>] --from <x,y> --to <x,y> --width <mm>` | Add a plated routed slot; the width is the tool diameter and the endpoints must differ. |
+| `open-pcb slot delete <file.opcb> --id <id>` | Delete a slot by id. |
+| `open-pcb copper balance <file.opcb>` | Print per-layer copper area, coverage and the coverage imbalance. |
 | `open-pcb route <file.opcb> --width <mm> --clearance <mm> --via <mm> --net <name>` | Route every two-pad net, or only `--net`. Defaults: width 0.25, clearance 0.2, via diameter 0.6. Prints `{routed, unrouted, tracks, vias}`. |
 | `open-pcb stitch <file.opcb> --net <name> --spacing <mm> [--inset <mm>] [--diameter <mm>] [--drill <mm>]` | Generate a stitching via fence around the inset rectangular outline. |
 | `open-pcb layer add <file.opcb> --name <name> --kind <kind> --color <css>` | Add a layer. `--kind` defaults to `copper`; `--color` defaults to the kind colour. |
@@ -184,7 +196,7 @@ mutating command also records the previous document for CLI undo/redo.
 
 1. `open-pcb list <file>` and record the revision under review.
 2. Run `open-pcb inspect <file> --checks <list>` with
-   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper,netclass,keepout`.
+   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper,netclass,keepout,via-in-pad`.
 3. Report each finding with its code, layer and object. `passed` is false when
    any non-waived error-severity issue remains; `active` and `waived` count the
    findings after policy is applied. A waived issue stays in `issues` with
@@ -195,7 +207,8 @@ mutating command also records the previous document for CLI undo/redo.
    targets; `edge-clearance` measures component bodies and via drills against the
    rectangular outline using `componentToEdge` and `holeToEdge`;
    `dangling-copper` warns about track ends that reach no pad, via or same-net
-   track.
+   track; `via-in-pad` warns about vias whose centre lands inside a pad on a
+   layer the via reaches, naming both objects.
 4. Waivers and severity overrides are document state: confirm the code, the
    optional object id and the reason before writing them, and say that a waiver
    accepts the finding rather than repairing it.
@@ -220,6 +233,8 @@ mutating command also records the previous document for CLI undo/redo.
    `placements` array in placement, `OpenPCB drill map` in the drill map,
    `<svg` in the SVG). Back-drilled vias appear again under `;Back drill`
    comments with their depth and stub and gain a dashed ring in the drill map.
+   Each routed slot is a `G85` segment under a tool whose diameter is the slot
+   width and a round-capped line in the drill map.
    Each mask file flashes a rectangular opening per pad on its side, expanded by
    `solderMaskExpansion` per side; vias never open a mask. Each paste file
    flashes a rectangular stencil window exactly the pad size on its side; vias

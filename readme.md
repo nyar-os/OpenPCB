@@ -19,9 +19,9 @@ This repository ships a tested MVP of the board document. The command line,
 SDK and studio shell share one native model:
 
 - Create, open, save, inspect, export and close a revisioned `.opcb` document.
-- Add nets, footprints, tracks and through, blind or buried vias; record a
-  back-drill depth and remaining stub on a through via; move and update
-  footprints; delete footprints, tracks and vias.
+- Add nets, footprints, tracks, through, blind or buried vias and plated routed
+  slots; record a back-drill depth and remaining stub on a through via; move and
+  update footprints; delete footprints, tracks, vias and slots.
 - Add, rename, hide and lock layers; set a rectangular board outline; read and
   edit the design rules the checks and writers use, including the solder-mask
   expansion.
@@ -49,9 +49,13 @@ SDK and studio shell share one native model:
 - Run DRC, connectivity, clearance, annular ring, stackup, outline, silkscreen,
   courtyard, netlist, `annular-ring`, `track-width`, `unrouted`, `diffpair`,
   `dangling-copper`, `hole-to-hole`, `copper-to-edge`, `edge-clearance`,
-  `silkscreen-over-pad`, `netclass` and `keepout` checks. Waive a finding by code (optionally
-  narrowed to one object) and override a code's severity; a waived error no longer
-  blocks `passed`, and every waived issue is still reported with its waiver.
+  `silkscreen-over-pad`, `netclass`, `keepout` and `via-in-pad` checks. Waive a
+  finding by code (optionally narrowed to one object) and override a code's
+  severity; a waived error no longer blocks `passed`, and every waived issue is
+  still reported with its waiver.
+- Report copper area per copper layer from tracks, vias, pads and pours, the
+  rectangular board area, each layer's coverage and the coverage imbalance
+  across layers.
 - Declare net classes with optional target width, clearance, via diameter and via
   drill; assign nets to a class and let `clearance` use the strictest class value
   and `netclass` enforce the width and via targets.
@@ -78,20 +82,23 @@ SDK and studio shell share one native model:
   Copper pour regions
   are written as `G36`/`G37` regions in the Gerber file of their layer. One
   Excellon file lists every drilled hole, including blind and buried
-  vias; back-drilled vias repeat their hit under a `;Back drill` comment carrying
-  the depth and stub. The drill map draws every plated hole with a tool legend and
-  marks back-drilled hits. IPC-2581 holes carry `backDrillDepth` and
-  `backDrillStub`, so a written and re-read document keeps the back drill.
+  vias, and writes every plated slot as a `G85` routed segment under a tool
+  whose diameter is the slot width; back-drilled vias repeat their hit under a
+  `;Back drill` comment carrying the depth and stub. The drill map draws every
+  plated hole and slot with a tool legend and marks back-drilled hits. IPC-2581
+  holes carry `backDrillDepth` and `backDrillStub`, so a written and re-read
+  document keeps the back drill.
 
 STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
 through, blind and buried vias, back drilling, linear teardrops, editable design
 rules, solder-mask and solder-paste Gerber layers, Gerber X2 attributes, copper
-pour regions, copper keepouts, via stitching, net classes, test point reports,
-stackup definition, microstrip/stripline impedance, controlled-width conversion
-and waiver/severity policy as supported, micro vias as unsupported, and
-both `kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities`
+pour regions, copper keepouts, via stitching, plated routed slots, the
+`via-in-pad` check, the copper area and balance report, net classes, test point
+reports, stackup definition, microstrip/stripline impedance, controlled-width
+conversion and waiver/severity policy as supported, micro vias as unsupported,
+and both `kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities`
 prints exactly that matrix.
 
 ## Usage
@@ -122,6 +129,10 @@ open-pcb track add blinker.opcb --net VCC --layer F.Cu --from 10,10 --to 30,10 -
 open-pcb via add blinker.opcb --net VCC --at 20,20 --diameter 0.6 --drill 0.3
 open-pcb via add blinker.opcb --net VCC --at 25,20 --diameter 0.6 --drill 0.3 --from-layer F.Cu --to-layer In1
 open-pcb via backdrill blinker.opcb --id via-1 --depth 0.8 --stub 0.2
+
+# Add a plated routed slot and delete it by id
+open-pcb slot add blinker.opcb --net VCC --from 20,15 --to 30,15 --width 0.8
+open-pcb slot delete blinker.opcb --id slot-1
 
 # Generate a stitching via fence around the inset board outline
 open-pcb stitch blinker.opcb --net VCC --spacing 8 --inset 1 --diameter 0.6 --drill 0.3
@@ -174,7 +185,10 @@ open-pcb redo blinker.opcb
 
 # Read the board and run the implemented checks
 open-pcb list blinker.opcb
-open-pcb inspect blinker.opcb --checks drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,edge-clearance
+open-pcb inspect blinker.opcb --checks drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,edge-clearance,via-in-pad
+
+# Report copper area per layer and the coverage imbalance
+open-pcb copper balance blinker.opcb
 
 # Export the implemented targets; Gerber writes copper, silk, mask, paste and edge cuts
 open-pcb export blinker.opcb --format gbr --out gerber
@@ -218,6 +232,7 @@ await board.addDifferentialPair({ positive: 'USB_D+', negative: 'USB_D-', width:
 await board.addFootprint({ reference: 'U1', value: 'MCU', footprint: 'QFN32', x: 30, y: 20, layer: 'F.Cu' });
 await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], to: [30, 10] });
 await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
+await board.addSlot({ net: 'VCC', from: [20, 15], to: [30, 15], width: 0.8 });
 await board.setViaBackDrill({ id: 'via-1', depth: 0.8, stub: 0.2 });
 await board.stitchVias({ net: 'VCC', spacing: 8, inset: 1, diameter: 0.6, drill: 0.3 });
 await board.setOutline({ from: [0, 0], to: [100, 80] });
@@ -228,6 +243,7 @@ await board.assignNetClass({ net: 'VCC', class: 'Power' });
 await board.setStackup({ copperThickness: 0.035, dielectricHeight: 0.2, dielectricConstant: 4.2 });
 await board.impedance({ structure: 'microstrip', width: 0.2 });
 await board.impedanceWidth({ structure: 'stripline', impedance: 50 });
+await board.copperBalance(); // per-layer area, coverage and imbalance
 await board.addTestPoint({ target: 'fp-1:1' });
 await board.route(); // { routed, unrouted, tracks, vias }
 await board.addTeardrops({ shape: 'linear', length: 0.6 });
@@ -309,7 +325,15 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   checks what is already placed.
 - Pad annulus is not checked because the document model stores no pad drill;
   `annular-ring` evaluates vias only. The drill map and the Excellon file
-  therefore list via drills only.
+  therefore list via drills and routed slots, never pad drills.
+- Plated routed slots live in `.opcb` and reach the Excellon file and drill map
+  only. Gerber, IPC-2581, KiCad PCB, SVG, PDF and PNG output do not carry them,
+  and the router and DRC checks do not treat a slot as copper or as a hole.
+- `via-in-pad` is a warning about manufacturability, not an electrical error; a
+  waived or overridden finding follows the same policy as every other code.
+- The copper balance report sums feature areas, so overlapping copper counts once
+  per feature rather than once as a union. Coverage and imbalance need a
+  rectangular outline; without one the report still lists per-layer areas.
 - The board outline is rectangular: closure and self-intersection are guaranteed
   by construction, so `edge-clearance` only measures the gap from a component's
   pad bounding box (or placement point) and from a via drill to the four edges.

@@ -12,12 +12,13 @@
 //!
 //! Implemented today: create, open, import a KiCad PCB or IPC-2581 document,
 //! save, inspect, summary, close, undo and redo, layer management, footprint
-//! moves and pad add/update/delete, track and via deletion, a rectangular
-//! outline, editable design rules, waivable findings with per-code severity
-//! overrides, a deterministic two-layer autorouter, a read-only SVG preview, and export to drill, BOM, pick-and-place, SVG, PDF,
-//! PNG, KiCad PCB, IPC-2581 and Gerber RS-274X (copper, silkscreen, solder mask
-//! and edge cuts). STEP remains declared but unimplemented and rejects with
-//! `capability/not-implemented`.
+//! moves and pad add/update/delete, track and via deletion, plated routed slots,
+//! a rectangular outline, editable design rules, waivable findings with per-code
+//! severity overrides, a copper area and balance report, a deterministic
+//! two-layer autorouter, a read-only SVG preview, and export to drill, BOM,
+//! pick-and-place, SVG, PDF, PNG, KiCad PCB, IPC-2581 and Gerber RS-274X (copper,
+//! silkscreen, solder mask and edge cuts). STEP remains declared but
+//! unimplemented and rejects with `capability/not-implemented`.
 
 #![deny(missing_docs)]
 
