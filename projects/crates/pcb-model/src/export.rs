@@ -82,7 +82,8 @@ fn gerber(board: &Board, path: &Path) -> Result<Value, ServiceError> {
     }
 
     let mut files = board.copper_stack().into_iter().map(|id| (gerber_name(id), copper(board, id))).collect::<Vec<_>>();
-    files.push(("F_SilkS.gbr".to_string(), silkscreen()));
+    files.push(("F_SilkS.gbr".to_string(), silkscreen(board, "F.SilkS")));
+    files.push(("B_SilkS.gbr".to_string(), silkscreen(board, "B.SilkS")));
     files.push(("Edge_Cuts.gbr".to_string(), edge_cuts(outline.from, outline.to, board.millimetres())));
     let mut artifacts = Vec::new();
     let mut total = 0u64;
@@ -177,10 +178,19 @@ fn copper(board: &Board, layer: &str) -> String {
     gerber.render()
 }
 
-/// Writes the front silkscreen layer. The document has no silkscreen geometry
-/// yet, so the file carries a valid empty header instead of invented shapes.
-fn silkscreen() -> String {
-    Gerber::default().render()
+/// Writes one silkscreen layer: the document stores legend geometry as tracks
+/// on the same layer ids the copper stack uses.
+fn silkscreen(board: &Board, layer: &str) -> String {
+    let scale = board.millimetres();
+    let mut gerber = Gerber::default();
+    for track in board.tracks.iter().filter(|track| track.layer == layer) {
+        gerber.draw(
+            format!("C,{:.6}", track.width * scale),
+            [track.from[0] * scale, track.from[1] * scale],
+            [track.to[0] * scale, track.to[1] * scale],
+        );
+    }
+    gerber.render()
 }
 
 /// Writes the rectangular Edge.Cuts outline as four draws.

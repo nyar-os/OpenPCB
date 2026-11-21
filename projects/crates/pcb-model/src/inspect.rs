@@ -216,7 +216,7 @@ fn drc(board: &Board, issues: &mut CheckReport) {
                 Some(&track.id),
                 format!("track `{}` references missing layer `{}`", track.id, track.layer),
             )),
-            Some(layer) if layer.kind != LayerKind::Copper => issues.push(finding(
+            Some(layer) if layer.kind != LayerKind::Copper && layer.kind != LayerKind::Silkscreen => issues.push(finding(
                 "drc/track-layer-not-copper",
                 Severity::Error,
                 board,

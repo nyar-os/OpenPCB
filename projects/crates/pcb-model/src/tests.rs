@@ -404,11 +404,13 @@ fn drc_flags_track_rules_and_connectivity() {
 
     let report = inspect(handle, Some(vec!["drc".to_string(), "connectivity".to_string()])).expect("checks run");
     let found = codes(&report);
-    for expected in
-        ["drc/track-layer-missing", "drc/track-layer-not-copper", "drc/track-width-too-small", "drc/track-net-undeclared"]
-    {
+    for expected in ["drc/track-layer-missing", "drc/track-width-too-small", "drc/track-net-undeclared"] {
         assert!(found.contains(&expected), "{expected} is reported; got {found:?}");
     }
+    assert!(
+        !found.contains(&"drc/track-layer-not-copper"),
+        "a silkscreen legend track is not a copper rule violation; got {found:?}"
+    );
     assert_eq!(report["passed"], false);
     close(handle).expect("the board closes");
 }
@@ -572,9 +574,9 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
     assert_eq!(report["format"], "gbr");
     assert_eq!(report["path"], gbr.display().to_string());
     let artifacts = report["artifacts"].as_array().expect("artifacts is an array");
-    assert_eq!(artifacts.len(), 4);
+    assert_eq!(artifacts.len(), 5);
     let names: Vec<&str> = artifacts.iter().map(|item| item["name"].as_str().expect("a name")).collect();
-    assert_eq!(names, ["F_Cu.gbr", "B_Cu.gbr", "F_SilkS.gbr", "Edge_Cuts.gbr"]);
+    assert_eq!(names, ["F_Cu.gbr", "B_Cu.gbr", "F_SilkS.gbr", "B_SilkS.gbr", "Edge_Cuts.gbr"]);
     for name in names {
         let path = gbr.join(name);
         assert!(path.is_file(), "{name} is written");
@@ -2027,7 +2029,7 @@ fn exports_write_one_gerber_per_copper_layer_and_keep_every_hole() {
     let report = export(handle, "gbr", &gbr).expect("Gerber export writes");
     let artifacts = report["artifacts"].as_array().expect("artifacts is an array");
     let names: Vec<&str> = artifacts.iter().map(|item| item["name"].as_str().expect("a name")).collect();
-    assert_eq!(names, ["F_Cu.gbr", "In1_Cu.gbr", "In2_Cu.gbr", "B_Cu.gbr", "F_SilkS.gbr", "Edge_Cuts.gbr"]);
+    assert_eq!(names, ["F_Cu.gbr", "In1_Cu.gbr", "In2_Cu.gbr", "B_Cu.gbr", "F_SilkS.gbr", "B_SilkS.gbr", "Edge_Cuts.gbr"]);
 
     let read = |name: &str| fs::read_to_string(gbr.join(name)).expect("the layer is readable");
     let front = read("F_Cu.gbr");
@@ -2165,4 +2167,34 @@ fn kicad_import_refuses_a_non_rectangular_outline() {
         imported["lossCodes"].as_array().expect("codes are listed").iter().filter_map(Value::as_str).collect();
     assert!(codes.contains(&"kicad/outline-not-rectangular"), "got {codes:?}");
     close(handle_of(&imported)).expect("the imported board closes");
+}
+
+#[test]
+fn gerber_writes_silkscreen_tracks_on_both_sides() {
+    let directory = TempDir::new();
+    let handle = created();
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+    add_track(
+        handle,
+        AddTrackRequest { net: None, layer: "F.SilkS".to_string(), width: 0.15, from: [2.0, 2.0], to: [6.0, 2.0] },
+    )
+    .expect("the front legend is drawn");
+    add_track(
+        handle,
+        AddTrackRequest { net: None, layer: "B.SilkS".to_string(), width: 0.2, from: [3.0, 3.0], to: [7.0, 3.0] },
+    )
+    .expect("the back legend is drawn");
+
+    let target = directory.join("gerber");
+    export(handle, "gbr", &target).expect("Gerber export writes");
+    let front = fs::read_to_string(target.join("F_SilkS.gbr")).expect("the front legend is readable");
+    assert!(front.contains("%ADD10C,0.150000*%"), "the aperture follows the track width: {front}");
+    assert!(front.contains("X2000000Y2000000D02*"), "the legend starts at its first point");
+    assert_eq!(front.matches("D01*").count(), 1, "one front legend draw");
+    let back = fs::read_to_string(target.join("B_SilkS.gbr")).expect("the back legend is readable");
+    assert!(back.contains("%ADD10C,0.200000*%"), "the aperture follows the track width: {back}");
+    assert_eq!(back.matches("D01*").count(), 1, "one back legend draw");
+    let copper = fs::read_to_string(target.join("F_Cu.gbr")).expect("the copper layer is readable");
+    assert_eq!(copper.matches("D01*").count(), 0, "silkscreen geometry does not leak into copper");
+    close(handle).expect("the board closes");
 }
