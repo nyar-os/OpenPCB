@@ -12,12 +12,12 @@ use std::{
 use serde_json::Value;
 
 use crate::{
-    AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTrackRequest, AddViaRequest, CreateRequest,
-    MoveFootprintRequest, RouteOptions, SetOutlineRequest, UpdateFootprintRequest, UpdateLayerRequest, add_footprint,
-    add_layer, add_net, add_pad, add_track, add_via,
+    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTrackRequest,
+    AddViaRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, UpdateFootprintRequest,
+    UpdateLayerRequest, add_differential_pair, add_footprint, add_layer, add_net, add_pad, add_track, add_via,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
-    capabilities, close, create, delete_footprint, delete_track, delete_via, export, import, inspect, move_footprint, open,
-    redo, route, save, set_outline, store, summary, undo, update_footprint, update_layer,
+    capabilities, close, create, delete_differential_pair, delete_footprint, delete_track, delete_via, export, import, inspect,
+    move_footprint, open, redo, route, save, set_outline, store, summary, undo, update_footprint, update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -154,6 +154,8 @@ fn capability_matrix_matches_the_implemented_pack() {
         "hole-to-hole",
         "copper-to-edge",
         "silkscreen-over-pad",
+        "diffpair",
+        "dangling-copper",
     ] {
         assert_eq!(matrix["checks"][check], "supported", "{check} check");
     }
@@ -2430,5 +2432,207 @@ fn gerber_writes_silkscreen_tracks_on_both_sides() {
     assert_eq!(back.matches("D01*").count(), 1, "one back legend draw");
     let copper = fs::read_to_string(target.join("F_Cu.gbr")).expect("the copper layer is readable");
     assert_eq!(copper.matches("D01*").count(), 0, "silkscreen geometry does not leak into copper");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn differential_pairs_validate_and_persist() {
+    let directory = TempDir::new();
+    let path = directory.join("pairs.opcb");
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "D+".to_string() }).expect("the positive net is declared");
+    add_net(handle, AddNetRequest { name: "D-".to_string() }).expect("the negative net is declared");
+
+    let pair = add_differential_pair(
+        handle,
+        AddDifferentialPairRequest {
+            positive: "D+".to_string(),
+            negative: "D-".to_string(),
+            width: 0.2,
+            gap: 0.15,
+            max_skew: 0.5,
+        },
+    )
+    .expect("the pair is declared");
+    assert_eq!(pair["object"]["id"], "dp-1");
+    assert_eq!(pair["object"]["maxSkew"], 0.5);
+    assert_eq!(pair["board"]["counts"]["differentialPairs"], 1);
+
+    let duplicate = add_differential_pair(
+        handle,
+        AddDifferentialPairRequest {
+            positive: "D+".to_string(),
+            negative: "D-".to_string(),
+            width: 0.2,
+            gap: 0.15,
+            max_skew: 0.5,
+        },
+    )
+    .expect_err("a repeated pair is rejected");
+    assert_eq!(duplicate.code, "object/duplicate");
+
+    let same = add_differential_pair(
+        handle,
+        AddDifferentialPairRequest {
+            positive: "D+".to_string(),
+            negative: "D+".to_string(),
+            width: 0.2,
+            gap: 0.15,
+            max_skew: 0.5,
+        },
+    )
+    .expect_err("a pair needs two nets");
+    assert_eq!(same.code, "session/argument-invalid");
+
+    let unknown = add_differential_pair(
+        handle,
+        AddDifferentialPairRequest {
+            positive: "D+".to_string(),
+            negative: "GND".to_string(),
+            width: 0.2,
+            gap: 0.15,
+            max_skew: 0.5,
+        },
+    )
+    .expect_err("an undeclared net is rejected");
+    assert_eq!(unknown.code, "session/argument-invalid");
+
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    assert_eq!(summary(reopened).expect("the board is readable")["counts"]["differentialPairs"], 1);
+    let deleted = delete_differential_pair(reopened, "dp-1").expect("the pair is deleted");
+    assert_eq!(deleted["deleted"], "dp-1");
+    assert_eq!(deleted["board"]["counts"]["differentialPairs"], 0);
+    close(reopened).expect("the reopened board closes");
+}
+
+#[test]
+fn diffpair_check_reports_length_and_spacing_deviation() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "D+".to_string() }).expect("the positive net is declared");
+    add_net(handle, AddNetRequest { name: "D-".to_string() }).expect("the negative net is declared");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("D+".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [0.0, 0.0],
+            to: [10.0, 0.0],
+        },
+    )
+    .expect("the positive half is routed");
+    let negative = add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("D-".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [0.0, 1.0],
+            to: [10.0, 1.0],
+        },
+    )
+    .expect("the negative half is routed");
+    add_differential_pair(
+        handle,
+        AddDifferentialPairRequest {
+            positive: "D+".to_string(),
+            negative: "D-".to_string(),
+            width: 0.2,
+            gap: 0.1,
+            max_skew: 0.1,
+        },
+    )
+    .expect("the pair is declared");
+
+    let clean = inspect(handle, Some(vec!["diffpair".to_string()])).expect("the check runs");
+    assert_eq!(codes(&clean), Vec::<&str>::new(), "the matched pair passes");
+
+    let extension = add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("D+".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [10.0, 0.0],
+            to: [14.0, 0.0],
+        },
+    )
+    .expect("the positive half is extended");
+    let skewed = inspect(handle, Some(vec!["diffpair".to_string()])).expect("the check runs");
+    assert_eq!(codes(&skewed), ["drc/diffpair-length-mismatch"]);
+    let id = extension["object"]["id"].as_str().expect("the track id is a string");
+    delete_track(handle, id).expect("the extra segment is removed");
+    let negative_id = negative["object"]["id"].as_str().expect("the negative track id is a string");
+    delete_track(handle, negative_id).expect("the original negative segment is removed");
+
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("D-".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [0.0, 0.25],
+            to: [10.0, 0.25],
+        },
+    )
+    .expect("the negative half is moved closer");
+    let tight = inspect(handle, Some(vec!["diffpair".to_string()])).expect("the check runs");
+    assert_eq!(codes(&tight), ["drc/diffpair-spacing"]);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn dangling_copper_reports_loose_track_ends_only() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "SIG".to_string() }).expect("the net is declared");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("SIG".to_string()), at: [0.0, 0.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the start via is placed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("SIG".to_string()), at: [20.0, 0.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the end via is placed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("SIG".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [0.0, 0.0],
+            to: [10.0, 0.0],
+        },
+    )
+    .expect("the first segment is routed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("SIG".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [10.0, 0.0],
+            to: [20.0, 0.0],
+        },
+    )
+    .expect("the second segment is routed");
+    let loose = add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("SIG".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [5.0, 5.0],
+            to: [15.0, 5.0],
+        },
+    )
+    .expect("the isolated segment is routed");
+
+    let report = inspect(handle, Some(vec!["dangling-copper".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/dangling-copper"]);
+    assert_eq!(report["issues"][0]["objectId"], loose["object"]["id"]);
     close(handle).expect("the board closes");
 }

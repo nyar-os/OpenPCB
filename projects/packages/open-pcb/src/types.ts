@@ -69,7 +69,9 @@ export type InspectCheck =
     | 'outline'
     | 'silkscreen'
     | 'courtyard'
-    | 'netlist';
+    | 'netlist'
+    | 'diffpair'
+    | 'dangling-copper';
 
 /** Rectangular board outline in board units. */
 export interface BoardOutline {
@@ -112,6 +114,8 @@ export interface BoardCapabilities {
     readonly exportTargets: Readonly<Record<ExportTarget, SupportLevel>>;
     /** Whether each via kind can be placed and exported. */
     readonly vias: Readonly<Record<ViaKind, SupportLevel>>;
+    /** Whether differential pairs can be declared and checked. */
+    readonly differentialPairs: SupportLevel;
     /** Whether `board.route()` ships in this engine. */
     readonly routing: SupportLevel;
 }
@@ -149,6 +153,7 @@ export interface BoardSummaryCounts {
     readonly footprints: number;
     readonly tracks: number;
     readonly vias: number;
+    readonly differentialPairs: number;
 }
 
 /** Summary of one board at its committed revision. */
@@ -338,6 +343,25 @@ export interface AddNetOptions {
 }
 
 /**
+ * Options of `board.addDifferentialPair()`.
+ *
+ * Lengths are in board units. Declaring a pair routes nothing; the `diffpair`
+ * check compares the routed copper against these targets.
+ */
+export interface AddDifferentialPairOptions {
+    /** Net routed as the positive half; must be declared. */
+    readonly positive: string;
+    /** Net routed as the negative half; must be declared and differ from `positive`. */
+    readonly negative: string;
+    /** Target trace width. */
+    readonly width: number;
+    /** Target edge-to-edge gap between the halves. */
+    readonly gap: number;
+    /** Largest allowed route-length difference between the halves; defaults to 0. */
+    readonly maxSkew?: number;
+}
+
+/**
  * Options of `board.route()`.
  *
  * Lengths are in board units. The router is deterministic: the same board and
@@ -448,6 +472,8 @@ export interface Board {
     addVia(options: AddViaOptions): Promise<BoardEditResult>;
     deleteVia(id: ObjectId): Promise<BoardEditResult>;
     addNet(options: AddNetOptions): Promise<BoardEditResult>;
+    addDifferentialPair(options: AddDifferentialPairOptions): Promise<BoardEditResult>;
+    deleteDifferentialPair(id: ObjectId): Promise<BoardEditResult>;
     route(options?: RouteOptions): Promise<RouteReport>;
     addLayer(options: AddLayerOptions): Promise<BoardEditResult>;
     updateLayer(options: UpdateLayerOptions): Promise<BoardEditResult>;

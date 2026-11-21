@@ -130,7 +130,8 @@ function describeBoard(board: BoardSummary): string {
     const counts = board.counts;
     const lines = [
         `board ${board.id} "${title}" revision=${board.revision} units=${board.units} layers=${board.layers.length}`
-            + ` nets=${counts.nets} footprints=${counts.footprints} tracks=${counts.tracks} vias=${counts.vias}`,
+            + ` nets=${counts.nets} footprints=${counts.footprints} tracks=${counts.tracks} vias=${counts.vias}`
+            + ` diffpairs=${counts.differentialPairs}`,
     ];
     for (const layer of board.layers) {
         lines.push(`  [${layer.index}] ${layer.id} ${layer.title} (${layer.kind}, ${layer.objects} objects)`);
@@ -576,6 +577,71 @@ net
         await withBoard(file, async (board) => {
             const result = await board.addNet({ name });
             ctx.emitResult(result, `added ${result.object?.id ?? 'net'} ${name}`);
+            return 0;
+        });
+        return 0;
+    });
+
+const diffpair = cli.command('diffpair', 'cli.cmd.diffpair');
+diffpair
+    .command('add', 'cli.cmd.diffpair-add')
+    .option('--positive <net>', 'cli.opt.positive')
+    .option('--negative <net>', 'cli.opt.negative')
+    .option('--width <mm>', 'cli.opt.width')
+    .option('--gap <mm>', 'cli.opt.gap')
+    .option('--max-skew <mm>', 'cli.opt.max-skew')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const positive = text(options, 'positive');
+        const negative = text(options, 'negative');
+        const width = numberOption(text(options, 'width'));
+        const gap = numberOption(text(options, 'gap'));
+        const maxSkew = numberOption(text(options, 'max-skew'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (positive === undefined || positive.length === 0 || negative === undefined || negative.length === 0) {
+            ctx.fail('open-pcb.cli.name-required', { message: '`--positive <net>` and `--negative <net>` are required' });
+            return 2;
+        }
+        if (width === undefined || width <= 0) {
+            ctx.fail('open-pcb.cli.width-required', { message: '`--width <mm>` must be greater than zero' });
+            return 2;
+        }
+        if (gap === undefined || gap <= 0) {
+            ctx.fail('open-pcb.cli.gap-required', { message: '`--gap <mm>` must be greater than zero' });
+            return 2;
+        }
+        if (text(options, 'max-skew') !== undefined && (maxSkew === undefined || maxSkew < 0)) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--max-skew <mm>` must not be negative' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addDifferentialPair({ positive, negative, width, gap, maxSkew });
+            ctx.emitResult(result, `added differential pair ${positive}/${negative}`);
+            return 0;
+        });
+        return 0;
+    });
+
+diffpair
+    .command('delete', 'cli.cmd.diffpair-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteDifferentialPair(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
             return 0;
         });
         return 0;

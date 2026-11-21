@@ -14,6 +14,7 @@ import { OpenPCBError } from './errors.js';
 import type { BoardIntent } from './formats.js';
 import * as service from './service.js';
 import type {
+    AddDifferentialPairOptions,
     AddFootprintOptions,
     AddLayerOptions,
     AddNetOptions,
@@ -417,6 +418,14 @@ function attach(
         async addNet(options: AddNetOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.addNet(current, options));
+        },
+        async addDifferentialPair(options: AddDifferentialPairOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addDifferentialPair(current, options));
+        },
+        async deleteDifferentialPair(id: string): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deleteDifferentialPair(current, id));
         },
         async route(options: RouteOptions = {}): Promise<RouteReport> {
             ensure();

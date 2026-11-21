@@ -19,9 +19,12 @@ Implemented:
 - Add, rename, hide and lock layers; set a rectangular outline.
 - Route every net with at least two pads through a deterministic two-layer
   autorouter; it reports unroutable edges instead of approximating them.
+- Declare differential pairs (`diffpair add`) with a target width, gap and
+  maximum length skew; the `diffpair` check compares the routed copper against
+  those targets.
 - Checks: `drc`, `connectivity`, `clearance`, `annular_rings`, `annular-ring`,
   `track-width`, `unrouted`, `stackup`, `outline`, `silkscreen`, `courtyard`,
-  `netlist`.
+  `netlist`, `diffpair`, `dangling-copper`.
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `bom`, `pos`,
   `svg`, `pdf`, `png` (1024x768 RGB raster), `kicad_pcb` and `ipc2581`.
 - Import a KiCad PCB or IPC-2581 document with a loss ledger for unrepresentable
@@ -48,6 +51,8 @@ a format, check or target.
 | `open-pcb list <file.opcb>` | Print the revision, stackup and object counts. |
 | `open-pcb undo <file.opcb>` / `open-pcb redo <file.opcb>` | Restore the previous or next saved document. The CLI keeps up to 32 snapshots in `<file>.history.json`. |
 | `open-pcb net add <file.opcb> --name <name>` | Declare a net in place. |
+| `open-pcb diffpair add <file.opcb> --positive <net> --negative <net> --width <mm> --gap <mm> --max-skew <mm>` | Declare a differential pair and its routing targets. |
+| `open-pcb diffpair delete <file.opcb> --id <id>` | Delete a differential pair by id. |
 | `open-pcb footprint add <file.opcb> --ref <ref> --value <value> --footprint <package> --rotation <deg> --layer <layer>` | Place a footprint in place. Position comes from `--x` and `--y` (both default to 0). |
 | `open-pcb footprint move <file.opcb> --id <id> -x <mm> -y <mm> --rotation <deg> --layer <layer>` | Move, rotate or re-layer a footprint in place. `-x` and `-y` also accept the `--x` and `--y` spelling; `--layer` is optional. |
 | `open-pcb footprint update <file.opcb> --id <id> --value <value> --footprint <package>` | Update the value or package of a footprint. |
@@ -99,11 +104,14 @@ mutating command also records the previous document for CLI undo/redo.
 
 1. `open-pcb list <file>` and record the revision under review.
 2. Run `open-pcb inspect <file> --checks <list>` with
-   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist`.
+   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,diffpair,dangling-copper`.
 3. Report each finding with its code, layer and object. `passed` is false when
    any error-severity issue remains. `annular-ring` evaluates vias because the
    model has no pad drill; `track-width` errors below 0.1mm and warns below
-   0.15mm; `unrouted` warns with the number of disconnected pad groups.
+   0.15mm; `unrouted` warns with the number of disconnected pad groups;
+   `diffpair` compares routed length and spacing against the declared targets;
+   `dangling-copper` warns about track ends that reach no pad, via or same-net
+   track.
 4. There is no interactive layer view. `svg` export is the only vector visual
    artifact and `png` is a fixed raster; review them as files, not as a viewport.
 

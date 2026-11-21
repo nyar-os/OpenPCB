@@ -27,8 +27,11 @@ SDK and studio shell share one native model:
   every summary and edit result.
 - Route every net with at least two pads through a deterministic two-layer
   autorouter that reports collisions instead of inventing copper.
+- Declare differential pairs with a target width, gap and maximum length skew,
+  then compare the routed copper against those targets.
 - Run DRC, connectivity, clearance, annular ring, stackup, outline, silkscreen,
-  courtyard, netlist, `annular-ring`, `track-width` and `unrouted` checks.
+  courtyard, netlist, `annular-ring`, `track-width`, `unrouted`, `diffpair` and
+  `dangling-copper` checks.
 - Import a KiCad PCB or IPC-2581 document into the native document: copper
   layers, nets, footprints and pads, tracks, through, blind and buried vias and a
   rectangular profile, with a stable loss ledger for everything the document
@@ -60,6 +63,10 @@ open-pcb create --out blinker.opcb --title "Blinker" --template blank
 # document could not keep; the format is detected from the content
 open-pcb import legacy.kicad_pcb --out legacy.opcb
 open-pcb import panel.ipc2581 --out panel.opcb
+
+# Declare a differential pair with its routing targets
+open-pcb diffpair add blinker.opcb --positive USB_D+ --negative USB_D- --width 0.2 --gap 0.15 --max-skew 0.5
+open-pcb diffpair delete blinker.opcb --id dp-1
 
 # Declare a net, place a footprint, route a track and add a via
 open-pcb net add blinker.opcb --name VCC
@@ -128,6 +135,7 @@ const pcb = new OpenPCB(); // `history: 'memory'` is the default
 const board = await pcb.create({ title: 'Blinker' });
 
 await board.addNet({ name: 'VCC' });
+await board.addDifferentialPair({ positive: 'USB_D+', negative: 'USB_D-', width: 0.2, gap: 0.15, maxSkew: 0.5 });
 await board.addFootprint({ reference: 'U1', value: 'MCU', footprint: 'QFN32', x: 30, y: 20, layer: 'F.Cu' });
 await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], to: [30, 10] });
 await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });

@@ -36,8 +36,9 @@ mod tests;
 use std::{fs, path::Path};
 
 pub use board::{
-    AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTrackRequest, AddViaRequest, DeletePadRequest,
-    MoveFootprintRequest, RouteOptions, SetOutlineRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
+    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTrackRequest,
+    AddViaRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, UpdateFootprintRequest,
+    UpdateLayerRequest, UpdatePadRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 use serde_json::{Map, Value, json};
@@ -152,6 +153,7 @@ pub fn capabilities() -> Value {
             "buried": "supported",
             "micro": "unsupported",
         },
+        "differentialPairs": "supported",
         "routing": "supported",
     })
 }
@@ -481,6 +483,26 @@ pub fn add_net(handle: u64, request: AddNetRequest) -> Result<Value, ServiceErro
         Ok(())
     })?;
     edit_result(handle, Some(object), None)
+}
+
+/// Declares one differential pair on an open board.
+pub fn add_differential_pair(handle: u64, request: AddDifferentialPairRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.add_differential_pair(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Deletes one differential pair from an open board.
+pub fn delete_differential_pair(handle: u64, id: &str) -> Result<Value, ServiceError> {
+    let mut deleted = String::new();
+    store::mutate(handle, |board| {
+        deleted = board.delete_differential_pair(id)?;
+        Ok(())
+    })?;
+    edit_result(handle, None, Some(deleted))
 }
 
 /// Lists one open board as a summary.

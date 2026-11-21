@@ -187,6 +187,42 @@ pub(crate) struct Via {
     pub(crate) to_layer: Option<String>,
 }
 
+/// One declared differential pair.
+///
+/// The pair names two nets and the routing targets compared by the `diffpair`
+/// check: the trace width, the edge-to-edge gap and the largest allowed length
+/// difference between the two nets. Nothing is routed by declaring a pair; the
+/// check only compares the copper the document already holds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct DifferentialPair {
+    /// Stable pair id.
+    pub(crate) id: String,
+    /// Net routed as the positive half.
+    pub(crate) positive: String,
+    /// Net routed as the negative half.
+    pub(crate) negative: String,
+    /// Target trace width.
+    pub(crate) width: f64,
+    /// Target edge-to-edge gap between the two halves.
+    pub(crate) gap: f64,
+    /// Largest allowed route-length difference between the halves.
+    pub(crate) max_skew: f64,
+}
+
+impl DifferentialPair {
+    /// Api projection of one pair, with camelCase field names.
+    pub(crate) fn to_value(&self) -> Value {
+        json!({
+            "id": self.id,
+            "positive": self.positive,
+            "negative": self.negative,
+            "width": self.width,
+            "gap": self.gap,
+            "maxSkew": self.max_skew,
+        })
+    }
+}
+
 /// Rectangular board outline in board units.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct Outline {
@@ -258,6 +294,12 @@ pub(crate) struct Board {
     pub(crate) tracks: Vec<Track>,
     /// Placed vias.
     pub(crate) vias: Vec<Via>,
+    /// Declared differential pairs; absent on documents written before pairs existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) differential_pairs: Vec<DifferentialPair>,
+    /// Next differential pair sequence number.
+    #[serde(default = "one")]
+    pub(crate) next_pair: u64,
     /// Next footprint sequence number.
     pub(crate) next_footprint: u64,
     /// Next track sequence number.
@@ -315,6 +357,8 @@ impl Board {
             footprints: Vec::new(),
             tracks: Vec::new(),
             vias: Vec::new(),
+            differential_pairs: Vec::new(),
+            next_pair: 1,
             next_footprint: 1,
             next_track: 1,
             next_via: 1,
@@ -873,6 +917,62 @@ impl Board {
         Ok(object)
     }
 
+    /// Declares one differential pair and returns its public object shape.
+    pub(crate) fn add_differential_pair(&mut self, request: AddDifferentialPairRequest) -> Result<Value, ServiceError> {
+        let positive_net = request.positive.trim();
+        let negative_net = request.negative.trim();
+        if positive_net.is_empty() || negative_net.is_empty() {
+            return Err(crate::argument("a differential pair needs two non-empty net names"));
+        }
+        if positive_net == negative_net {
+            return Err(crate::argument("a differential pair needs two different nets"));
+        }
+        if self.net(positive_net).is_none() {
+            return Err(crate::argument(format!("net `{positive_net}` is not declared on this board")));
+        }
+        if self.net(negative_net).is_none() {
+            return Err(crate::argument(format!("net `{negative_net}` is not declared on this board")));
+        }
+        if self.differential_pairs.iter().any(|pair| pair.positive == positive_net && pair.negative == negative_net) {
+            return Err(ServiceError::new(
+                "object/duplicate",
+                format!("differential pair `{positive_net}`/`{negative_net}` is already declared"),
+            ));
+        }
+        let width = positive(request.width, "width")?;
+        let gap = positive(request.gap, "gap")?;
+        let max_skew = finite(request.max_skew, "maxSkew")?;
+        if max_skew < 0.0 {
+            return Err(crate::argument("`maxSkew` must not be negative"));
+        }
+        let id = format!("dp-{}", self.next_pair);
+        self.next_pair += 1;
+        let pair = DifferentialPair {
+            id,
+            positive: positive_net.to_string(),
+            negative: negative_net.to_string(),
+            width,
+            gap,
+            max_skew,
+        };
+        let object = pair.to_value();
+        self.differential_pairs.push(pair);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Removes one differential pair by id and returns the removed id.
+    pub(crate) fn delete_differential_pair(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .differential_pairs
+            .iter()
+            .position(|pair| pair.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no differential pair with id `{id}`")))?;
+        let removed = self.differential_pairs.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
     /// Resolves every pad to board coordinates.
     ///
     /// Footprint rotation is applied once here so router and inspection code
@@ -960,6 +1060,11 @@ impl Document {
     pub(crate) fn new(board: Board) -> Self {
         Self { format: DOCUMENT_FORMAT.to_string(), version: DOCUMENT_VERSION, document: board }
     }
+}
+
+/// Serde default for counters added after the first schema version.
+fn one() -> u64 {
+    1
 }
 
 fn layer(id: &str, name: &str, kind: LayerKind, color: &str) -> Layer {
@@ -1167,6 +1272,33 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
             return Err(crate::invalid(format!("via `{}` references undeclared net `{net}`", via.id)));
         }
     }
+
+    let mut pair_ids = HashSet::new();
+    for pair in &board.differential_pairs {
+        if pair.id.trim().is_empty() {
+            return Err(crate::invalid("a differential pair has an empty id"));
+        }
+        if !pair_ids.insert(pair.id.as_str()) {
+            return Err(crate::invalid(format!("differential pair id `{}` is duplicated", pair.id)));
+        }
+        if pair.positive.trim().is_empty() || pair.negative.trim().is_empty() {
+            return Err(crate::invalid(format!("differential pair `{}` has an empty net name", pair.id)));
+        }
+        if pair.positive == pair.negative {
+            return Err(crate::invalid(format!("differential pair `{}` names the same net twice", pair.id)));
+        }
+        for net in [&pair.positive, &pair.negative] {
+            if !net_names.contains(net.as_str()) {
+                return Err(crate::invalid(format!("differential pair `{}` references undeclared net `{net}`", pair.id)));
+            }
+        }
+        sizes(pair.width, &format!("differential pair `{}` width", pair.id))?;
+        sizes(pair.gap, &format!("differential pair `{}` gap", pair.id))?;
+        checks(pair.max_skew, &format!("differential pair `{}` maxSkew", pair.id))?;
+        if pair.max_skew < 0.0 {
+            return Err(crate::invalid(format!("differential pair `{}` has a negative maxSkew", pair.id)));
+        }
+    }
     Ok(())
 }
 
@@ -1209,6 +1341,7 @@ pub(crate) fn summary(board: &Board) -> Value {
             "footprints": board.footprints.len(),
             "tracks": board.tracks.len(),
             "vias": board.vias.len(),
+            "differentialPairs": board.differential_pairs.len(),
         },
     })
 }
@@ -1337,6 +1470,23 @@ pub struct AddViaRequest {
 pub struct AddNetRequest {
     /// Net name, required.
     pub name: String,
+}
+
+/// Request of [`crate::add_differential_pair`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddDifferentialPairRequest {
+    /// Net routed as the positive half; must be declared.
+    pub positive: String,
+    /// Net routed as the negative half; must be declared and differ from `positive`.
+    pub negative: String,
+    /// Target trace width in board units, greater than zero.
+    pub width: f64,
+    /// Target edge-to-edge gap between the halves, in board units and greater than zero.
+    pub gap: f64,
+    /// Largest allowed route-length difference between the halves, in board units.
+    #[serde(default)]
+    pub max_skew: f64,
 }
 
 /// Request of [`crate::move_footprint`].

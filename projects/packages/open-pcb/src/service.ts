@@ -9,6 +9,7 @@
 import { NotImplementedError, OpenPCBError, errorCodes, type OpenPCBErrorCode } from './errors.js';
 import { nativeBinding } from './native.js';
 import type {
+    AddDifferentialPairOptions,
     AddFootprintOptions,
     AddLayerOptions,
     AddNetOptions,
@@ -177,6 +178,18 @@ export function deleteVia(handle: number, id: string): BoardEditResult {
 /** Declares one net on an open board. */
 export function addNet(handle: number, options: AddNetOptions): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.addNet').board_add_net(handle, JSON.stringify(options)));
+}
+
+/** Declares one differential pair on an open board. */
+export function addDifferentialPair(handle: number, options: AddDifferentialPairOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.addDifferentialPair').board_add_differential_pair(handle, JSON.stringify(options)),
+    );
+}
+
+/** Deletes one differential pair from an open board. */
+export function deleteDifferentialPair(handle: number, id: string): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deleteDifferentialPair').board_delete_differential_pair(handle, id));
 }
 
 /** Routes every net with at least two pads and reports what it could place. */

@@ -8,7 +8,9 @@ use std::collections::{HashMap, HashSet};
 
 use boost_check::{CheckReport, Issue, Severity};
 use boost_collection::UnionFind;
-use geometry_planar::{Point as GeoPoint, Rect, segment_distance as geo_segment_distance};
+use geometry_planar::{
+    Point as GeoPoint, Rect, point_segment_distance as geo_point_segment_distance, segment_distance as geo_segment_distance,
+};
 use serde_json::{Map, Value, json};
 
 use crate::{
@@ -33,6 +35,8 @@ const TRACK_WIDTH_ERROR_MM: f64 = 0.1;
 const TRACK_WIDTH_WARNING_MM: f64 = 0.15;
 /// Endpoint matching tolerance for the `unrouted` graph, in millimetres.
 const CONNECTIVITY_TOLERANCE_MM: f64 = 0.01;
+/// Slack allowed when comparing differential-pair geometry, in millimetres.
+const DIFFPAIR_TOLERANCE_MM: f64 = 0.01;
 
 /// Every declared check, in report order.
 pub(crate) const CHECKS: &[&str] = &[
@@ -51,6 +55,8 @@ pub(crate) const CHECKS: &[&str] = &[
     "hole-to-hole",
     "copper-to-edge",
     "silkscreen-over-pad",
+    "diffpair",
+    "dangling-copper",
 ];
 
 /// Checks this build can actually run.
@@ -70,6 +76,8 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "hole-to-hole",
     "copper-to-edge",
     "silkscreen-over-pad",
+    "diffpair",
+    "dangling-copper",
 ];
 
 /// Runs the requested checks and returns an `InspectReport`.
@@ -102,6 +110,8 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "hole-to-hole" => hole_to_hole(board, &mut report),
             "copper-to-edge" => copper_to_edge(board, &mut report),
             "silkscreen-over-pad" => silkscreen_over_pad(board, &mut report),
+            "diffpair" => diffpair(board, &mut report),
+            "dangling-copper" => dangling_copper(board, &mut report),
             other => report.push(finding(
                 "check/unsupported",
                 Severity::Warning,
@@ -936,6 +946,222 @@ fn silkscreen_over_pad(board: &Board, issues: &mut CheckReport) {
             }
         }
     }
+}
+
+/// Compares each declared differential pair against its routing targets.
+///
+/// Length is the sum of the routed copper segments of one net, straight-line
+/// per segment; via barrels are not counted. The spacing is the smallest
+/// edge-to-edge gap between a positive and a negative segment that share a
+/// layer. Both halves must be routed and share at least one layer before a
+/// measurement is claimed; otherwise the pair is reported as unrouted.
+fn diffpair(board: &Board, issues: &mut CheckReport) {
+    let scale = board.millimetres();
+    if scale <= 0.0 {
+        return;
+    }
+    for pair in &board.differential_pairs {
+        let positive: Vec<_> =
+            board.tracks.iter().filter(|track| track.net.as_deref() == Some(pair.positive.as_str())).collect();
+        let negative: Vec<_> =
+            board.tracks.iter().filter(|track| track.net.as_deref() == Some(pair.negative.as_str())).collect();
+        if positive.is_empty() || negative.is_empty() {
+            let missing = if positive.is_empty() { &pair.positive } else { &pair.negative };
+            issues.push(finding(
+                "drc/diffpair-unrouted",
+                Severity::Warning,
+                board,
+                None,
+                Some(&pair.id),
+                format!("differential pair `{}`/`{}` has no copper on net `{missing}`", pair.positive, pair.negative),
+            ));
+            continue;
+        }
+
+        let positive_length = pair_length(&positive) * scale;
+        let negative_length = pair_length(&negative) * scale;
+        let skew = (positive_length - negative_length).abs();
+        let max_skew = pair.max_skew * scale;
+        if skew > max_skew + DIFFPAIR_TOLERANCE_MM {
+            issues.push(finding(
+                "drc/diffpair-length-mismatch",
+                Severity::Error,
+                board,
+                None,
+                Some(&pair.id),
+                format!(
+                    "differential pair `{}`/`{}` differs by {:.3} mm ({:.3} mm versus {:.3} mm); the limit is {:.3} mm",
+                    pair.positive, pair.negative, skew, positive_length, negative_length, max_skew
+                ),
+            ));
+        }
+
+        let mut minimum: Option<f64> = None;
+        for first in &positive {
+            if board.layer(&first.layer).is_none_or(|layer| layer.kind != LayerKind::Copper) {
+                continue;
+            }
+            for second in &negative {
+                if second.layer != first.layer {
+                    continue;
+                }
+                let centres = segment_distance(first.from, first.to, second.from, second.to);
+                let gap = (centres - (first.width + second.width) / 2.0) * scale;
+                minimum = Some(minimum.map_or(gap, |current| current.min(gap)));
+            }
+        }
+        let target_gap = pair.gap * scale;
+        match minimum {
+            Some(gap) if gap < target_gap - DIFFPAIR_TOLERANCE_MM => issues.push(finding(
+                "drc/diffpair-spacing",
+                Severity::Error,
+                board,
+                None,
+                Some(&pair.id),
+                format!(
+                    "differential pair `{}`/`{}` closes to {:.3} mm; the target gap is {:.3} mm",
+                    pair.positive, pair.negative, gap, target_gap
+                ),
+            )),
+            Some(_) => {}
+            None => issues.push(finding(
+                "drc/diffpair-unrouted",
+                Severity::Warning,
+                board,
+                None,
+                Some(&pair.id),
+                format!(
+                    "differential pair `{}`/`{}` has no pair of segments on a shared copper layer",
+                    pair.positive, pair.negative
+                ),
+            )),
+        }
+
+        let target_width = pair.width * scale;
+        if positive
+            .iter()
+            .chain(negative.iter())
+            .any(|track| (track.width * scale - target_width).abs() > DIFFPAIR_TOLERANCE_MM)
+        {
+            issues.push(finding(
+                "drc/diffpair-width",
+                Severity::Warning,
+                board,
+                None,
+                Some(&pair.id),
+                format!(
+                    "differential pair `{}`/`{}` has a track width that differs from the {:.3} mm target",
+                    pair.positive, pair.negative, target_width
+                ),
+            ));
+        }
+    }
+}
+
+/// Total routed length of one net's segments, in board units.
+fn pair_length(tracks: &[&crate::board::Track]) -> f64 {
+    tracks
+        .iter()
+        .map(|track| {
+            let dx = track.to[0] - track.from[0];
+            let dy = track.to[1] - track.from[1];
+            (dx * dx + dy * dy).sqrt()
+        })
+        .sum()
+}
+
+/// Reports copper track ends that touch no pad, via or same-net track.
+///
+/// A track endpoint is connected when it reaches a pad of the same net on its
+/// layer, a via of the same net whose span covers the layer, an endpoint of
+/// another same-net segment on the same layer, or lies on such a segment. A
+/// track found dangling at either end is reported once.
+fn dangling_copper(board: &Board, issues: &mut CheckReport) {
+    let scale = board.millimetres();
+    if scale <= 0.0 {
+        return;
+    }
+    let tolerance = CONNECTIVITY_TOLERANCE_MM / scale;
+    let pads = board.placed_pads();
+    for track in &board.tracks {
+        let Some(net) = track.net.as_deref()
+        else {
+            continue;
+        };
+        if board.layer(&track.layer).is_none_or(|layer| layer.kind != LayerKind::Copper) {
+            continue;
+        }
+        let mut dangling = false;
+        for point in [track.from, track.to] {
+            if track_point_connected(board, &pads, net, &track.layer, point, track, tolerance) {
+                continue;
+            }
+            dangling = true;
+            break;
+        }
+        if dangling {
+            issues.push(finding(
+                "drc/dangling-copper",
+                Severity::Warning,
+                board,
+                Some(&track.layer),
+                Some(&track.id),
+                format!("track `{}` has a loose end that reaches no pad, via or same-net track", track.id),
+            ));
+        }
+    }
+}
+
+/// Whether one point on a track reaches other copper of the same net.
+fn track_point_connected(
+    board: &Board,
+    pads: &[crate::board::PlacedPad<'_>],
+    net: &str,
+    layer: &str,
+    point: [f64; 2],
+    current: &crate::board::Track,
+    tolerance: f64,
+) -> bool {
+    for pad in pads {
+        if pad.net.as_deref() != Some(net) || pad.layer != layer {
+            continue;
+        }
+        if point_box_distance(point, pad.at, pad.half) <= tolerance {
+            return true;
+        }
+    }
+    for via in &board.vias {
+        if via.net.as_deref() != Some(net) || !board.via_covers(via, layer) {
+            continue;
+        }
+        if near(point, via.at, tolerance) {
+            return true;
+        }
+    }
+    for other in &board.tracks {
+        if other.id == current.id || other.net.as_deref() != Some(net) || other.layer != layer {
+            continue;
+        }
+        if near(point, other.from, tolerance) || near(point, other.to, tolerance) {
+            return true;
+        }
+        if point_segment_distance(point, other.from, other.to) <= tolerance {
+            return true;
+        }
+    }
+    false
+}
+
+/// Distance from a point to an axis-aligned pad box; zero inside the box.
+fn point_box_distance(point: [f64; 2], centre: [f64; 2], half: [f64; 2]) -> f64 {
+    let dx = ((point[0] - centre[0]).abs() - half[0]).max(0.0);
+    let dy = ((point[1] - centre[1]).abs() - half[1]).max(0.0);
+    (dx * dx + dy * dy).sqrt()
+}
+
+/// Distance from a point to a segment.
+fn point_segment_distance(point: [f64; 2], start: [f64; 2], end: [f64; 2]) -> f64 {
+    geo_point_segment_distance(geo(point), geo(start), geo(end))
 }
 
 /// Distance from a point to the border of a rectangle; zero on or outside it.
