@@ -25,6 +25,10 @@ SDK and studio shell share one native model:
 - Add, rename, hide and lock layers; set a rectangular board outline; read and
   edit the design rules the checks and writers use, including the solder-mask
   expansion.
+- Declare a physical stackup (copper foil thickness, dielectric height and
+  permittivity), compute microstrip or stripline single-ended impedance from it,
+  and convert a target impedance to the trace width that reaches it; per-request
+  overrides replace the stored values without changing the document.
 - Declare copper pour regions on copper layers as closed polygons; the Gerber
   writer emits each one as a `G36`/`G37` region and the SVG and PDF previews
   draw the pour.
@@ -53,19 +57,25 @@ SDK and studio shell share one native model:
   and `netclass` enforce the width and via targets.
 - Mark existing pads and vias as test points and export a CSV probe report with
   the pad key or via id, designator, net, layer and millimetre coordinates.
+- Export an IPC-D-356A bare-board test netlist: every pad is a fixed-width `327`
+  record, every via a `317` or `307` record, with net, reference, pin, hole,
+  access side, millimetre coordinates and pad size in the standard columns.
 - Import a KiCad PCB or IPC-2581 document into the native document: copper
   layers, nets, footprints and pads, tracks, through, blind and buried vias and a
   rectangular profile, with a stable loss ledger for everything the document
   cannot hold. Micro vias imported from KiCad stay in that ledger instead of
   being approximated.
 - Write Gerber RS-274X, Excellon drill, drill map SVG, BOM, pick-and-place,
-  placement JSON, test point CSV, SVG, vector PDF, 8-bit RGB PNG, KiCad PCB and
-  IPC-2581 files atomically. Gerber writes one file per copper layer plus `F_SilkS`, `B_SilkS`,
-  `F_Mask`, `B_Mask` and `Edge_Cuts`; every file carries Gerber X2 file and
+  placement JSON, test point CSV, IPC-D-356 netlist, SVG, vector PDF, 8-bit RGB
+  PNG, KiCad PCB and IPC-2581 files atomically. Gerber writes one file per copper
+  layer plus `F_SilkS`, `B_SilkS`, `F_Mask`, `B_Mask`, `F_Paste`, `B_Paste` and
+  `Edge_Cuts`; every file carries Gerber X2 file and
   aperture attributes (`%TF.FileFunction`, `%TF.Part`, `%TF.FilePolarity` and
   `%TA.AperFunction`); the two silkscreen files carry the legend
-  tracks the document holds, and the mask files open every outer-layer pad by the
-  document's solder-mask expansion while vias stay tented. Copper pour regions
+  tracks the document holds, the mask files open every outer-layer pad by the
+  document's solder-mask expansion while vias stay tented, and the paste files
+  open a stencil window exactly the size of each outer-layer pad.
+  Copper pour regions
   are written as `G36`/`G37` regions in the Gerber file of their layer. One
   Excellon file lists every drilled hole, including blind and buried
   vias; back-drilled vias repeat their hit under a `;Back drill` comment carrying
@@ -77,9 +87,10 @@ STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
 through, blind and buried vias, back drilling, linear teardrops, editable design
-rules, solder-mask Gerber layers, Gerber X2 attributes, copper pour regions,
-copper keepouts, via stitching, net classes, test point reports and
-waiver/severity policy as supported, micro vias as unsupported, and
+rules, solder-mask and solder-paste Gerber layers, Gerber X2 attributes, copper
+pour regions, copper keepouts, via stitching, net classes, test point reports,
+stackup definition, microstrip/stripline impedance, controlled-width conversion
+and waiver/severity policy as supported, micro vias as unsupported, and
 both `kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities`
 prints exactly that matrix.
 
@@ -155,6 +166,9 @@ open-pcb rules set blinker.opcb --hole-clearance 0.3 --solder-mask-expansion 0.1
 open-pcb severity set blinker.opcb --code drc/track-width-too-small --severity info
 open-pcb waiver add blinker.opcb --code drc/footprint-no-pads --object fp-1 --reason mechanical
 open-pcb waiver delete blinker.opcb --id waiver-1
+open-pcb stackup set blinker.opcb --copper-thickness 0.035 --dielectric-height 0.2 --dielectric-constant 4.2
+open-pcb stackup impedance blinker.opcb --structure microstrip --width 0.2
+open-pcb stackup width blinker.opcb --structure stripline --impedance 50
 open-pcb undo blinker.opcb
 open-pcb redo blinker.opcb
 
@@ -162,7 +176,7 @@ open-pcb redo blinker.opcb
 open-pcb list blinker.opcb
 open-pcb inspect blinker.opcb --checks drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,edge-clearance
 
-# Export the implemented targets; Gerber writes one file per copper layer plus silk, mask and edge cuts
+# Export the implemented targets; Gerber writes copper, silk, mask, paste and edge cuts
 open-pcb export blinker.opcb --format gbr --out gerber
 open-pcb export blinker.opcb --format drl --out blinker.drl
 open-pcb export blinker.opcb --format drill_map --out blinker.drill-map.svg
@@ -170,6 +184,7 @@ open-pcb export blinker.opcb --format bom --out blinker.bom.csv
 open-pcb export blinker.opcb --format pos --out blinker.pos.csv
 open-pcb export blinker.opcb --format placement --out blinker.placement.json
 open-pcb export blinker.opcb --format testpoints --out blinker.testpoints.csv
+open-pcb export blinker.opcb --format ipc_d_356 --out blinker.d356
 open-pcb export blinker.opcb --format svg --out blinker.svg
 open-pcb export blinker.opcb --format pdf --out blinker.pdf
 open-pcb export blinker.opcb --format kicad_pcb --out blinker.kicad_pcb
@@ -210,6 +225,9 @@ await board.addZone({ layer: 'F.Cu', net: 'VCC', points: [[5, 5], [40, 5], [40, 
 await board.addKeepout({ layer: 'F.Cu', points: [[45, 5], [60, 5], [60, 20], [45, 20]] });
 await board.addNetClass({ name: 'Power', width: 0.5, clearance: 0.6, viaDiameter: 0.8, viaDrill: 0.4 });
 await board.assignNetClass({ net: 'VCC', class: 'Power' });
+await board.setStackup({ copperThickness: 0.035, dielectricHeight: 0.2, dielectricConstant: 4.2 });
+await board.impedance({ structure: 'microstrip', width: 0.2 });
+await board.impedanceWidth({ structure: 'stripline', impedance: 50 });
 await board.addTestPoint({ target: 'fp-1:1' });
 await board.route(); // { routed, unrouted, tracks, vias }
 await board.addTeardrops({ shape: 'linear', length: 0.6 });
@@ -254,9 +272,10 @@ flowchart LR
     Studio["OpenPCB Studio"] <-->|"JSON-RPC"| NAPI
     Model --> Store["Handle store"]
     Model --> Checks["DRC and connectivity"]
+    Model --> Stackup["stackup and impedance"]
     Model --> Route["deterministic two-layer router"]
     Model --> Readers["kicad_pcb / ipc2581 readers"]
-    Model --> Writers["gbr / drl / drill_map / bom / pos / placement / svg / pdf / png / kicad_pcb / ipc2581 writers"]
+    Model --> Writers["gbr / drl / drill_map / bom / pos / placement / testpoints / ipc_d_356 / svg / pdf / png / kicad_pcb / ipc2581 writers"]
 ```
 
 The TypeScript layer owns argument parsing, help text and exit codes. The native
@@ -298,6 +317,10 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
 - `placement` writes millimetre coordinates as JSON; the `pos` CSV keeps its
   existing columns and appends the footprint layer. Neither writer invents pad
   geometry or rotations the document does not hold.
+- The stackup stores one copper thickness, one dielectric height and one
+  permittivity, so impedance is single-ended only: there is no differential,
+  coplanar or per-layer stackup, and the IPC-2141 closed forms replace a field
+  solver. Width conversion rejects a target outside the formula's valid range.
 - The test point report lists only explicitly declared pads and vias. It does not
   infer probes from nets or create panel or fixture geometry.
 - Keepout regions are design intent: the `keepout` check reads them, but they are
@@ -320,7 +343,12 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
 - It does not rotate rectangular pad apertures in Gerber output.
 - Solder-mask openings are rectangular, follow the pad's outer copper side and
   add the document's expansion per side; vias stay tented and inner-layer pads
-  open no mask. Paste layers and mask-defined pad shapes are not written.
+  open no mask. Solder-paste windows are rectangular and equal to the outer pad
+  size; mask-defined pad shapes are not written.
+- IPC-D-356 output writes the header, `327` pad records, `317`/`307` via records
+  and the `999` terminator with fixed 80-column lines. It does not write net
+  conductor segment (`327`/`367` trace) records, board-outline records or test
+  channel assignments.
 - A waiver silences a finding by code and, when set, by object id; it never
   hides the finding from the report. Overrides apply before waivers, so
   `passed` is false only while a non-waived error remains. Waivers and overrides

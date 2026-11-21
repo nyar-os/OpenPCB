@@ -1,6 +1,6 @@
 ---
 name: open-pcb
-description: Create, edit, inspect, route and export PCB board documents with OpenPCB. Use when a task involves board stackup, layers, outline, footprints, nets, tracks, vias, autorouting, undo/redo, DRC, connectivity or clearance review, or Gerber, drill, BOM, position, PNG, PDF and SVG outputs.
+description: Create, edit, inspect, route and export PCB board documents with OpenPCB. Use when a task involves board stackup, controlled impedance, layers, outline, footprints, nets, tracks, vias, autorouting, undo/redo, DRC, connectivity or clearance review, or Gerber, drill, BOM, position, IPC-D-356, PNG, PDF and SVG outputs.
 ---
 
 # open-pcb
@@ -30,12 +30,18 @@ Implemented:
 - Read and edit the design rules (`rules show`, `rules set`): drill-hole
   clearance, copper-, component- and hole-to-edge gaps and the solder-mask
   expansion. Values are millimetres; a partial update keeps the other rules.
+- Declare a physical stackup (`stackup set`) with copper thickness, dielectric
+  height and permittivity; compute microstrip or stripline single-ended
+  impedance (`stackup impedance`) and convert a target impedance to a trace
+  width (`stackup width`). Per-request overrides replace the stored values.
 - Declare net classes (`netclass add`), move nets into them (`netclass assign`)
   and let their optional width, clearance, via diameter and via drill targets
   drive the `netclass` check; `clearance` also uses the strictest class value.
 - Mark existing pads and vias as test points (`testpoint add` with
   `footprint-id:pad-number` or a via id) and export `testpoints` as a CSV probe
-  report with designator, net, layer and millimetre coordinates.
+  report with designator, net, layer and millimetre coordinates. Export
+  `ipc_d_356` for an IPC-D-356A netlist with fixed 80-column `327` pad and
+  `317`/`307` via records.
 - Waive a finding by code (`waiver add`) or override a code's severity
   (`severity set`). A waived error no longer blocks `passed`, but the issue stays
   in the report with `waived: true`, its waiver id and reason.
@@ -53,11 +59,12 @@ Implemented:
   `silkscreen-over-pad`, `diffpair`, `dangling-copper`, `netclass`, `keepout`.
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `drill_map`
   (hole map SVG with tool legend and back-drill marks), `bom`, `pos`,
-  `placement` (millimetre JSON), `testpoints` (CSV probe report), `svg`, `pdf`,
-  `png` (1024x768 RGB raster), `kicad_pcb` and `ipc2581`. The Gerber directory holds one file per copper
-  layer plus `F_SilkS`, `B_SilkS`, `F_Mask`, `B_Mask` and `Edge_Cuts`; every
-  file carries Gerber X2 file and aperture attributes (`%TF.FileFunction`,
-  `%TF.Part`, `%TF.FilePolarity`, `%TA.AperFunction`).
+  `placement` (millimetre JSON), `testpoints` (CSV probe report), `ipc_d_356`
+  (IPC-D-356A netlist), `svg`, `pdf`, `png` (1024x768 RGB raster), `kicad_pcb`
+  and `ipc2581`. The Gerber directory holds one file per copper layer plus
+  `F_SilkS`, `B_SilkS`, `F_Mask`, `B_Mask`, `F_Paste`, `B_Paste` and
+  `Edge_Cuts`; every file carries Gerber X2 file and aperture attributes
+  (`%TF.FileFunction`, `%TF.Part`, `%TF.FilePolarity`, `%TA.AperFunction`).
 - Import a KiCad PCB or IPC-2581 document with a loss ledger for unrepresentable
   constructs; the CLI and SDK detect the format from the content.
 
@@ -76,8 +83,14 @@ intent only: the `keepout` check reads them, but they are not written to Gerber,
 drill data, IPC-2581 or KiCad output and the router does not avoid them. Via
 stitching follows the rectangular outline only, places through vias, skips
 occupied positions and does not test the new vias against existing copper. Solder-mask openings are rectangular
-and cover outer-layer pads only; vias stay tented, inner-layer pads open no mask,
-and paste layers are not written. All unimplemented targets stay
+and cover outer-layer pads only; vias stay tented and inner-layer pads open no
+mask. Solder-paste windows are rectangular and exactly the outer pad size, with
+no paste expansion rule. The stackup is a single copper thickness, dielectric
+height and permittivity, so impedance is single-ended only: no differential,
+coplanar or per-layer stackup, and the IPC-2141 closed forms replace a field
+solver. IPC-D-356 output writes the header, `327` pads, `317`/`307` vias and the
+`999` terminator; it writes no net conductor segment, board-outline or test
+channel records. All unimplemented targets stay
 `unsupported` in the capability matrix and reject with
 `capability/not-implemented`. Do not fill the gap with local parsers, routers,
 geometry code or fabricated reports.
@@ -126,12 +139,16 @@ a format, check or target.
 | `open-pcb testpoint delete <file.opcb> --id <id>` | Delete a test point by id. |
 | `open-pcb rules show <file.opcb>` | Print the design rules the checks and writers use. |
 | `open-pcb rules set <file.opcb> --hole-clearance <mm> --copper-to-edge <mm> --component-to-edge <mm> --hole-to-edge <mm> --solder-mask-expansion <mm>` | Replace one or more design rules in place; at least one value is required and none may be negative. |
+| `open-pcb stackup set <file.opcb> --copper-thickness <mm> --dielectric-height <mm> --dielectric-constant <er>` | Declare the physical stackup used by impedance calculations. |
+| `open-pcb stackup show <file.opcb>` | Print the declared stackup, or `stackup unset`. |
+| `open-pcb stackup impedance <file.opcb> --width <mm> [--structure microstrip\|stripline] [--dielectric-height <mm>] [--dielectric-constant <er>] [--copper-thickness <mm>]` | Compute single-ended impedance, defaulting to microstrip and the stored stackup. |
+| `open-pcb stackup width <file.opcb> --impedance <ohm> [--structure microstrip\|stripline] [--dielectric-height <mm>] [--dielectric-constant <er>] [--copper-thickness <mm>]` | Convert a target impedance to the trace width that reaches it. |
 | `open-pcb waiver add <file.opcb> --code <code> --object <id> --reason <text>` | Waive a finding code, optionally narrowed to one object. `--object` and `--reason` are optional. |
 | `open-pcb waiver delete <file.opcb> --id <id>` | Delete a waiver by id. |
 | `open-pcb severity set <file.opcb> --code <code> --severity <info\|warning\|error>` | Override the severity of one finding code. |
 | `open-pcb severity delete <file.opcb> --code <code>` | Remove the severity override of one finding code. |
 | `open-pcb inspect <file.opcb> --checks <list>` | Run the implemented checks. |
-| `open-pcb export <file.opcb> --format <format> --out <file-or-directory>` | Write one implemented projection: `gbr` (directory), `drl`, `drill_map`, `bom`, `pos`, `placement`, `svg`, `pdf`, `png`, `kicad_pcb` or `ipc2581`. |
+| `open-pcb export <file.opcb> --format <format> --out <file-or-directory>` | Write one implemented projection: `gbr` (directory), `drl`, `drill_map`, `bom`, `pos`, `placement`, `testpoints`, `ipc_d_356`, `svg`, `pdf`, `png`, `kicad_pcb` or `ipc2581`. |
 | `open-pcb gui` | Open the OpenPCB Studio window. |
 
 The editing commands open the document, validate one mutation, increment the
@@ -190,11 +207,13 @@ mutating command also records the previous document for CLI undo/redo.
 1. Confirm the stackup, drill sizes and outline the export depends on. Gerber
    edge cuts and the outline checks need `open-pcb outline set` first.
 2. Export `gbr` to an explicit directory; the writer produces `F_Cu.gbr`,
-   `B_Cu.gbr`, `F_SilkS.gbr`, `B_SilkS.gbr`, `F_Mask.gbr`, `B_Mask.gbr` and
-   `Edge_Cuts.gbr`. Export `drl`, `drill_map`, `pos`, `placement`, `testpoints`,
-   `bom`, `svg`, `pdf`, `png`, `kicad_pcb` and `ipc2581` to explicit paths.
+   `B_Cu.gbr`, `F_SilkS.gbr`, `B_SilkS.gbr`, `F_Mask.gbr`, `B_Mask.gbr`,
+   `F_Paste.gbr`, `B_Paste.gbr` and `Edge_Cuts.gbr`. Export `drl`, `drill_map`,
+   `pos`, `placement`, `testpoints`, `ipc_d_356`, `bom`, `svg`, `pdf`, `png`,
+   `kicad_pcb` and `ipc2581` to explicit paths.
    `testpoints` writes a probe CSV with a `Target,Designator,Pad,Kind,Net,Layer,X,Y`
-   header; only explicitly declared test points appear.
+   header; only explicitly declared test points appear. `ipc_d_356` writes
+   80-column IPC-D-356A records and ends with `999`.
 3. State exactly which targets were written and which reject, then inspect the
    files for the expected markers (`%TF.FileFunction` and `%FSLAX46Y46*%` and
    `M02*` in every Gerber file, `M48` and `M30` in drill, a `Designator` header in position, a
@@ -202,7 +221,9 @@ mutating command also records the previous document for CLI undo/redo.
    `<svg` in the SVG). Back-drilled vias appear again under `;Back drill`
    comments with their depth and stub and gain a dashed ring in the drill map.
    Each mask file flashes a rectangular opening per pad on its side, expanded by
-   `solderMaskExpansion` per side; vias never open a mask. Copper pour regions
+   `solderMaskExpansion` per side; vias never open a mask. Each paste file
+   flashes a rectangular stencil window exactly the pad size on its side; vias
+   never open paste. Copper pour regions
    appear as `G36`/`G37` regions in the Gerber file of their layer. KiCad PCB and
    IPC-2581 exchange do not carry zones, and the PNG raster omits the pour fill.
 
@@ -213,7 +234,7 @@ mutating command also records the previous document for CLI undo/redo.
   fails `stackup` and `outline` with `drc/outline-missing`. A waivered finding is
   accepted, not repaired; report it with its waiver id and reason.
 - Never describe a format as supported because an extension is listed; read the
-  capability matrix. Gerber export needs an outline and writes seven files; it is
+  capability matrix. Gerber export needs an outline and writes nine files; it is
   not a single-file target.
 - Keep one board model: copper layers, stackup, footprints, nets, tracks and vias
   must agree on the same revision.

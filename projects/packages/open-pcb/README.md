@@ -63,7 +63,7 @@ await board.export({ format: 'png', target: 'blinker.png' });
 await board.export({ format: 'kicad_pcb', target: 'blinker.kicad_pcb' });
 await board.export({ format: 'ipc2581', target: 'blinker.ipc2581' });
 const gerber = await board.export({ format: 'gbr', target: 'gerber' });
-console.log(gerber.artifacts?.length); // 7
+console.log(gerber.artifacts?.length); // 9
 
 const imported = await pcb.importBoard({ path: 'blinker.ipc2581' });
 console.log(imported.format, imported.losses.length);
@@ -81,12 +81,15 @@ await pcb.dispose();
 - Undo and redo are per handle: `open` and `create` start with empty history,
   and `save` does not add a step. `board/history-empty` reports an exhausted
   direction.
-- Gerber export writes a directory of seven files (`F_Cu`, `B_Cu`, `F_SilkS`,
-  `B_SilkS`, `F_Mask`, `B_Mask`, `Edge_Cuts`) and needs a board outline. The two
+- Gerber export writes a directory of nine files (`F_Cu`, `B_Cu`, `F_SilkS`,
+  `B_SilkS`, `F_Mask`, `B_Mask`, `F_Paste`, `B_Paste`, `Edge_Cuts`) and needs a
+  board outline. The two
   silkscreen files carry the legend tracks the document holds; they are valid
   empty layers when the board has no silkscreen geometry. The mask files open
   every pad on their copper side by `solderMaskExpansion` per side (0.05 mm
-  default); vias stay tented and inner-layer pads open no mask. Copper pour
+  default); vias stay tented and inner-layer pads open no mask. The paste files
+  open a stencil window exactly the pad size on their copper side, with no
+  expansion. Copper pour
   regions are written as `G36`/`G37` regions in the Gerber file of their layer;
   the SVG and PDF previews draw them, while KiCad PCB and IPC-2581 exchange do
   not carry them and the PNG raster omits the pour fill.
