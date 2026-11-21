@@ -39,10 +39,10 @@ use std::{fs, path::Path};
 
 pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
-    AddPadRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest,
-    AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest, ImpedanceRequest, MoveFootprintRequest,
-    RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest,
-    UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest, WidthRequest,
+    AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest,
+    AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest, ImpedanceRequest,
+    MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest,
+    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 use serde_json::{Map, Value, json};
@@ -202,6 +202,7 @@ pub fn capabilities() -> Value {
         "zones": "supported",
         "keepouts": "supported",
         "viaStitching": "supported",
+        "slots": "supported",
         "netClasses": "supported",
         "testPoints": "supported",
         "stackup": "supported",
@@ -611,6 +612,29 @@ pub fn delete_via(handle: u64, id: &str) -> Result<Value, ServiceError> {
     let mut deleted = String::new();
     store::mutate(handle, |board| {
         deleted = board.delete_via(id)?;
+        Ok(())
+    })?;
+    edit_result(handle, None, Some(deleted))
+}
+
+/// Adds one plated routed slot to an open board.
+///
+/// A slot spans every copper layer and is written as a `G85` routed segment in
+/// the Excellon drill file.
+pub fn add_slot(handle: u64, request: AddSlotRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.add_slot(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Deletes one slot from an open board.
+pub fn delete_slot(handle: u64, id: &str) -> Result<Value, ServiceError> {
+    let mut deleted = String::new();
+    store::mutate(handle, |board| {
+        deleted = board.delete_slot(id)?;
         Ok(())
     })?;
     edit_result(handle, None, Some(deleted))

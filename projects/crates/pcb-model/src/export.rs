@@ -343,22 +343,35 @@ fn gerber_number(value: f64) -> i64 {
     if scaled.is_finite() { scaled as i64 } else { 0 }
 }
 
-/// Excellon drill file with one tool per distinct finished hole size.
+/// Excellon drill file with one tool per distinct finished hole or slot width.
 fn drill(board: &Board) -> String {
     let scale = board.millimetres();
-    let mut tools: BTreeMap<String, Vec<&crate::board::Via>> = BTreeMap::new();
+    let mut tools: BTreeMap<String, (Vec<&crate::board::Via>, Vec<&crate::board::Slot>)> = BTreeMap::new();
     for via in &board.vias {
-        tools.entry(number(via.drill * scale)).or_default().push(via);
+        tools.entry(number(via.drill * scale)).or_default().0.push(via);
+    }
+    for slot in &board.slots {
+        tools.entry(number(slot.width * scale)).or_default().1.push(slot);
     }
     let mut out = String::from("M48\n;OpenPCB drill file\n;Units: mm\nMETRIC,TZ\n");
     for (index, (size, _)) in tools.iter().enumerate() {
         let _ = writeln!(out, "T{}C{size}", index + 1);
     }
     out.push_str("%\nG90\nG05\n");
-    for (index, (_, hits)) in tools.iter().enumerate() {
+    for (index, (_, (hits, slots))) in tools.iter().enumerate() {
         let _ = writeln!(out, "T{}", index + 1);
         for via in hits {
             let _ = writeln!(out, "X{}Y{}", number(via.at[0] * scale), number(via.at[1] * scale));
+        }
+        for slot in slots {
+            let _ = writeln!(
+                out,
+                "X{}Y{}G85X{}Y{}",
+                number(slot.from[0] * scale),
+                number(slot.from[1] * scale),
+                number(slot.to[0] * scale),
+                number(slot.to[1] * scale)
+            );
         }
     }
     for via in board.vias.iter().filter(|via| via.back_drill.is_some()) {
@@ -444,6 +457,18 @@ fn drill_map(board: &Board) -> String {
         }
         tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0)).1 += 1;
     }
+    for slot in &board.slots {
+        let width = slot.width * scale;
+        let _ = writeln!(
+            out,
+            "<line x1=\"{:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"#111111\" stroke-width=\"{width:.3}\" stroke-linecap=\"round\"/>",
+            map_x(slot.from[0] * scale),
+            map_y(slot.from[1] * scale),
+            map_x(slot.to[0] * scale),
+            map_y(slot.to[1] * scale)
+        );
+        tools.entry(format!("{width:.3}")).or_insert((width, 0)).1 += 1;
+    }
 
     let mut line = 0usize;
     for (index, (_, (diameter, count))) in tools.iter().enumerate() {
@@ -454,6 +479,15 @@ fn drill_map(board: &Board) -> String {
             index + 1,
             diameter,
             count
+        );
+        line += 1;
+    }
+    if !board.slots.is_empty() {
+        let _ = writeln!(
+            out,
+            "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#111111\">routed slots x{} (line)</text>",
+            8.0 + line as f64 * 3.0,
+            board.slots.len()
         );
         line += 1;
     }
@@ -827,6 +861,15 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>) -> D
             Style::fill(layer_color_value(board, "F.Cu")),
         ));
     }
+    for slot in &board.slots {
+        drawing.push(Element::new(
+            Shape::Line {
+                from: layout.point(slot.from[0] * scale, slot.from[1] * scale),
+                to: layout.point(slot.to[0] * scale, slot.to[1] * scale),
+            },
+            Style::stroke(layer_color_value(board, "F.Cu"), slot.width * scale * layout.scale),
+        ));
+    }
     drawing
 }
 
@@ -889,6 +932,11 @@ fn drawing_bounds(board: &Board) -> ([f64; 2], [f64; 2]) {
         include(&mut min, &mut max, (via.at[0] - radius) * scale, (via.at[1] - radius) * scale);
         include(&mut min, &mut max, (via.at[0] + radius) * scale, (via.at[1] + radius) * scale);
     }
+    for slot in &board.slots {
+        let radius = slot.width / 2.0;
+        include(&mut min, &mut max, (slot.from[0] - radius) * scale, (slot.from[1] - radius) * scale);
+        include(&mut min, &mut max, (slot.to[0] + radius) * scale, (slot.to[1] + radius) * scale);
+    }
     for zone in &board.zones {
         for point in &zone.points {
             include(&mut min, &mut max, point[0] * scale, point[1] * scale);
@@ -924,6 +972,11 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
     }
     for via in &board.vias {
         include(&mut min, &mut max, via.at[0] * scale, via.at[1] * scale);
+    }
+    for slot in &board.slots {
+        let radius = slot.width / 2.0;
+        include(&mut min, &mut max, (slot.from[0] - radius) * scale, (slot.from[1] - radius) * scale);
+        include(&mut min, &mut max, (slot.to[0] + radius) * scale, (slot.to[1] + radius) * scale);
     }
     for zone in &board.zones {
         for point in &zone.points {

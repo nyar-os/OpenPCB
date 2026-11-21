@@ -647,6 +647,64 @@ via
         return 0;
     });
 
+const slot = cli.command('slot', 'cli.cmd.slot');
+slot
+    .command('add', 'cli.cmd.slot-add')
+    .option('--net <name>', 'cli.opt.net')
+    .option('--from <x,y>', 'cli.opt.from')
+    .option('--to <x,y>', 'cli.opt.to')
+    .option('--width <mm>', 'cli.opt.slot-width')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const from = pair(text(options, 'from'));
+        const to = pair(text(options, 'to'));
+        const width = numberOption(text(options, 'width'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (from === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--from <x,y>` needs two numbers' });
+            return 2;
+        }
+        if (to === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--to <x,y>` needs two numbers' });
+            return 2;
+        }
+        if (width === undefined || width <= 0) {
+            ctx.fail('open-pcb.cli.width-required', { message: '`--width <mm>` must be greater than zero' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addSlot({ net: text(options, 'net'), from, to, width });
+            ctx.emitResult(result, `added ${result.object?.id ?? 'slot'} ${from[0]},${from[1]} to ${to[0]},${to[1]}`);
+            return 0;
+        });
+        return 0;
+    });
+
+slot
+    .command('delete', 'cli.cmd.slot-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteSlot(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
 const zone = cli.command('zone', 'cli.cmd.zone');
 zone
     .command('add', 'cli.cmd.zone-add')

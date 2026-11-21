@@ -193,6 +193,33 @@ pub(crate) struct Via {
     pub(crate) back_drill: Option<BackDrill>,
 }
 
+/// One plated routed slot.
+///
+/// A slot is a straight cut with round ends that spans every copper layer, so
+/// the Excellon writer emits it as one `G85` routed segment under a tool whose
+/// diameter is the slot width. Back drilling only applies to vias.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Slot {
+    /// Stable slot id.
+    pub(crate) id: String,
+    /// Declared net name, when assigned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) net: Option<String>,
+    /// One end of the slot centreline.
+    pub(crate) from: [f64; 2],
+    /// The other end of the slot centreline.
+    pub(crate) to: [f64; 2],
+    /// Tool diameter, equal to the cut width.
+    pub(crate) width: f64,
+}
+
+impl Slot {
+    /// Api projection of one slot.
+    pub(crate) fn to_value(&self) -> Value {
+        json!({ "id": self.id, "net": self.net, "from": self.from, "to": self.to, "width": self.width })
+    }
+}
+
 /// Back-drill depth and remaining stub on one through via.
 ///
 /// Back drilling removes unused barrel copper from the secondary side. The
@@ -512,6 +539,9 @@ pub(crate) struct Board {
     pub(crate) tracks: Vec<Track>,
     /// Placed vias.
     pub(crate) vias: Vec<Via>,
+    /// Plated routed slots; absent on documents written before slots existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) slots: Vec<Slot>,
     /// Copper pour regions; absent on documents written before zones existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) zones: Vec<Zone>,
@@ -545,6 +575,9 @@ pub(crate) struct Board {
     pub(crate) next_track: u64,
     /// Next via sequence number.
     pub(crate) next_via: u64,
+    /// Next slot sequence number.
+    #[serde(default = "one")]
+    pub(crate) next_slot: u64,
     /// Next zone sequence number.
     #[serde(default = "one")]
     pub(crate) next_zone: u64,
@@ -609,6 +642,7 @@ impl Board {
             footprints: Vec::new(),
             tracks: Vec::new(),
             vias: Vec::new(),
+            slots: Vec::new(),
             zones: Vec::new(),
             keepouts: Vec::new(),
             net_classes: Vec::new(),
@@ -621,6 +655,7 @@ impl Board {
             next_footprint: 1,
             next_track: 1,
             next_via: 1,
+            next_slot: 1,
             next_zone: 1,
             next_keepout: 1,
             next_net_class: 1,
@@ -1237,6 +1272,50 @@ impl Board {
         self.editable_via(&via)?;
         let removed = self.vias.remove(index);
         self.test_points.retain(|point| point.target != removed.id);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
+    /// Adds one plated routed slot and returns its public object shape.
+    ///
+    /// A slot needs a non-zero width and two distinct endpoints, so it always
+    /// describes a routed cut rather than a round hole. It spans every copper
+    /// layer, so a locked copper layer rejects the edit.
+    pub(crate) fn add_slot(&mut self, request: AddSlotRequest) -> Result<Value, ServiceError> {
+        let net = self.declared_net(request.net.as_deref())?;
+        let from = finite_pair(request.from, "from")?;
+        let to = finite_pair(request.to, "to")?;
+        let width = positive(request.width, "width")?;
+        if (to[0] - from[0]).hypot(to[1] - from[1]) <= 1e-9 {
+            return Err(crate::argument("a slot needs two distinct endpoints"));
+        }
+        for layer in self.layers.iter().filter(|layer| layer.kind == LayerKind::Copper) {
+            if layer.locked {
+                return Err(ServiceError::new("board/layer-locked", format!("layer `{}` is locked", layer.id)));
+            }
+        }
+        let id = format!("slot-{}", self.next_slot);
+        self.next_slot += 1;
+        let slot = Slot { id, net, from, to, width };
+        let object = slot.to_value();
+        self.slots.push(slot);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Removes one slot by id and returns the removed id.
+    pub(crate) fn delete_slot(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .slots
+            .iter()
+            .position(|slot| slot.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no slot with id `{id}`")))?;
+        for layer in self.layers.iter().filter(|layer| layer.kind == LayerKind::Copper) {
+            if layer.locked {
+                return Err(ServiceError::new("board/layer-locked", format!("layer `{}` is locked", layer.id)));
+            }
+        }
+        let removed = self.slots.remove(index);
         self.revision += 1;
         Ok(removed.id)
     }
@@ -2240,6 +2319,29 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         }
     }
 
+    let mut slot_ids = HashSet::new();
+    for slot in &board.slots {
+        if slot.id.trim().is_empty() {
+            return Err(crate::invalid("a slot has an empty id"));
+        }
+        if !slot_ids.insert(slot.id.as_str()) {
+            return Err(crate::invalid(format!("slot id `{}` is duplicated", slot.id)));
+        }
+        checks(slot.from[0], &format!("slot `{}` from.x", slot.id))?;
+        checks(slot.from[1], &format!("slot `{}` from.y", slot.id))?;
+        checks(slot.to[0], &format!("slot `{}` to.x", slot.id))?;
+        checks(slot.to[1], &format!("slot `{}` to.y", slot.id))?;
+        sizes(slot.width, &format!("slot `{}` width", slot.id))?;
+        if (slot.to[0] - slot.from[0]).hypot(slot.to[1] - slot.from[1]) <= 1e-9 {
+            return Err(crate::invalid(format!("slot `{}` has no length", slot.id)));
+        }
+        if let Some(net) = slot.net.as_deref()
+            && !net_names.contains(net)
+        {
+            return Err(crate::invalid(format!("slot `{}` references undeclared net `{net}`", slot.id)));
+        }
+    }
+
     let mut class_ids = HashSet::new();
     let mut class_names = HashSet::new();
     let mut assigned_nets = HashSet::new();
@@ -2464,6 +2566,7 @@ pub(crate) fn summary(board: &Board) -> Value {
             "footprints": board.footprints.len(),
             "tracks": board.tracks.len(),
             "vias": board.vias.len(),
+            "slots": board.slots.len(),
             "zones": board.zones.len(),
             "keepouts": board.keepouts.len(),
             "netClasses": board.net_classes.len(),
@@ -2481,6 +2584,7 @@ fn objects_on(board: &Board, layer: &Layer) -> usize {
     count += board.keepouts.iter().filter(|keepout| board.keepout_covers(keepout, &layer.id)).count();
     if layer.kind == LayerKind::Copper {
         count += board.vias.iter().filter(|via| board.via_covers(via, &layer.id)).count();
+        count += board.slots.len();
     }
     count
 }
@@ -2654,6 +2758,21 @@ pub struct AddViaRequest {
     /// Copper layer the span ends on; omit both span fields for a through via.
     #[serde(default)]
     pub to_layer: Option<String>,
+}
+
+/// Request of [`crate::add_slot`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddSlotRequest {
+    /// Declared net name, when assigned.
+    #[serde(default)]
+    pub net: Option<String>,
+    /// One end of the slot centreline.
+    pub from: [f64; 2],
+    /// The other end of the slot centreline.
+    pub to: [f64; 2],
+    /// Tool diameter, equal to the cut width; greater than zero.
+    pub width: f64,
 }
 
 /// Request of [`crate::add_teardrops`].

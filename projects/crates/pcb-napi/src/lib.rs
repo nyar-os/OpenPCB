@@ -444,6 +444,26 @@ fn board_delete_via(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Adds one plated routed slot to an open board.
+#[function]
+fn board_add_slot(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::AddSlotRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::add_slot(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Deletes one slot from an open board.
+#[function]
+fn board_delete_slot(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let value = open_pcb_model::delete_slot(handle, &id).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds one layer to an open board.
 #[function]
 fn board_add_layer(ctx: CallContext) -> Result<JsValue> {
@@ -793,6 +813,16 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
         "board.redo" => {
             let handle = rpc_handle(value)?;
             open_pcb_model::redo(handle)
+        }
+        "board.addSlot" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::AddSlotRequest = serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::add_slot(handle, request)
+        }
+        "board.deleteSlot" => {
+            let handle = rpc_handle(value)?;
+            let id = rpc_text(value, "id")?;
+            open_pcb_model::delete_slot(handle, id)
         }
         "board.addLayer" => {
             let handle = rpc_handle(value)?;
@@ -1210,6 +1240,8 @@ register_module![
     board_update_footprint,
     board_delete_track,
     board_delete_via,
+    board_add_slot,
+    board_delete_slot,
     board_add_differential_pair,
     board_delete_differential_pair,
     board_add_waiver,

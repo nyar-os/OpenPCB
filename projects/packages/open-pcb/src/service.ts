@@ -17,6 +17,7 @@ import type {
     AddLayerOptions,
     AddNetClassOptions,
     AddNetOptions,
+    AddSlotOptions,
     AddTrackOptions,
     AddViaOptions,
     AddWaiverOptions,
@@ -167,6 +168,16 @@ export function addTrack(handle: number, options: AddTrackOptions): BoardEditRes
 /** Adds one via to an open board. */
 export function addVia(handle: number, options: AddViaOptions): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.addVia').board_add_via(handle, JSON.stringify(options)));
+}
+
+/** Adds one plated routed slot to an open board. */
+export function addSlot(handle: number, options: AddSlotOptions): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.addSlot').board_add_slot(handle, JSON.stringify(options)));
+}
+
+/** Deletes one slot from an open board. */
+export function deleteSlot(handle: number, id: string): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deleteSlot').board_delete_slot(handle, id));
 }
 
 /** Sets the back-drill depth and remaining stub of one through via. */

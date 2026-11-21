@@ -240,6 +240,8 @@ export interface BoardCapabilities {
     readonly keepouts: SupportLevel;
     /** Whether stitching via fences can be generated along the board outline. */
     readonly viaStitching: SupportLevel;
+    /** Whether plated routed slots can be declared and written to drill data. */
+    readonly slots: SupportLevel;
     /** Whether net classes with clearance and width targets are available. */
     readonly netClasses: SupportLevel;
     /** Whether declared test points can be reported. */
@@ -283,6 +285,7 @@ export interface BoardSummaryCounts {
     readonly footprints: number;
     readonly tracks: number;
     readonly vias: number;
+    readonly slots: number;
     readonly zones: number;
     readonly keepouts: number;
     readonly netClasses: number;
@@ -513,6 +516,18 @@ export interface AddViaOptions {
     readonly fromLayer?: string;
     /** Copper layer the span ends on; must sit below `fromLayer` in the stack. */
     readonly toLayer?: string;
+}
+
+/** Options of `board.addSlot()`. */
+export interface AddSlotOptions {
+    /** Declared net name, when assigned. */
+    readonly net?: string;
+    /** One end of the slot centreline. */
+    readonly from: readonly [number, number];
+    /** The other end of the slot centreline. */
+    readonly to: readonly [number, number];
+    /** Tool diameter, equal to the cut width; greater than zero. */
+    readonly width: number;
 }
 
 /** Options of `board.stitchVias()`. */
@@ -775,6 +790,8 @@ export interface Board {
     addTrack(options: AddTrackOptions): Promise<BoardEditResult>;
     deleteTrack(id: ObjectId): Promise<BoardEditResult>;
     addVia(options: AddViaOptions): Promise<BoardEditResult>;
+    addSlot(options: AddSlotOptions): Promise<BoardEditResult>;
+    deleteSlot(id: ObjectId): Promise<BoardEditResult>;
     stitchVias(options: StitchViasOptions): Promise<BoardEditResult>;
     deleteVia(id: ObjectId): Promise<BoardEditResult>;
     addZone(options: AddZoneOptions): Promise<BoardEditResult>;

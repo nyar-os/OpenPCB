@@ -22,6 +22,7 @@ import type {
     AddLayerOptions,
     AddNetClassOptions,
     AddNetOptions,
+    AddSlotOptions,
     AddTrackOptions,
     AddViaOptions,
     AddWaiverOptions,
@@ -426,6 +427,14 @@ function attach(
         async addVia(options: AddViaOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.addVia(current, options));
+        },
+        async addSlot(options: AddSlotOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addSlot(current, options));
+        },
+        async deleteSlot(id: string): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deleteSlot(current, id));
         },
         async stitchVias(options: StitchViasOptions): Promise<BoardEditResult> {
             ensure();

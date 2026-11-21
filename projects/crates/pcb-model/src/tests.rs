@@ -13,16 +13,17 @@ use serde_json::Value;
 
 use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
-    AddPadRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest,
-    AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest, MoveFootprintRequest,
-    RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest,
-    UpdateFootprintRequest, UpdateLayerRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer,
-    add_net, add_net_class, add_pad, add_teardrops, add_test_point, add_track, add_via, add_waiver, add_zone, assign_net_class,
+    AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest,
+    AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
+    MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest,
+    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, WidthRequest, add_differential_pair, add_footprint,
+    add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_track, add_via,
+    add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class, delete_severity,
-    delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import, inspect, move_footprint, open,
-    redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance, stackup_width,
-    stitch_vias, store, summary, undo, update_footprint, update_layer,
+    delete_slot, delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import, inspect,
+    move_footprint, open, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill,
+    stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -220,6 +221,7 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["zones"], "supported");
     assert_eq!(matrix["keepouts"], "supported");
     assert_eq!(matrix["viaStitching"], "supported");
+    assert_eq!(matrix["slots"], "supported");
     assert_eq!(matrix["netClasses"], "supported");
     assert_eq!(matrix["testPoints"], "supported");
     assert_eq!(matrix["stackup"], "supported");
@@ -359,6 +361,49 @@ fn copper_zones_persist_and_write_gerber_regions() {
     let removed = delete_zone(reopened, "zone-1").expect("the zone is deleted");
     assert_eq!(removed["deleted"], "zone-1");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["zones"], 0);
+    close(reopened).expect("the board closes");
+}
+
+#[test]
+fn slots_persist_and_write_excellon_g85_segments() {
+    let directory = TempDir::new();
+    let path = directory.join("slots.opcb");
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    let added =
+        add_slot(handle, AddSlotRequest { net: Some("VCC".to_string()), from: [10.0, 10.0], to: [20.0, 10.0], width: 0.8 })
+            .expect("the slot is added");
+    assert_eq!(added["object"]["id"], "slot-1");
+    assert_eq!(added["object"]["width"], 0.8);
+    assert_eq!(added["board"]["counts"]["slots"], 1);
+
+    let flat = add_slot(handle, AddSlotRequest { net: None, from: [0.0, 0.0], to: [0.0, 0.0], width: 0.5 })
+        .expect_err("a slot needs a length");
+    assert_eq!(flat.code, "session/argument-invalid");
+    let narrow = add_slot(handle, AddSlotRequest { net: None, from: [0.0, 0.0], to: [1.0, 0.0], width: 0.0 })
+        .expect_err("a slot needs a width");
+    assert_eq!(narrow.code, "session/argument-invalid");
+
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["slots"], 1);
+
+    let drill = directory.join("slots.drl");
+    export(reopened, "drl", &drill).expect("the drill file writes");
+    let text = fs::read_to_string(&drill).expect("the drill file is readable");
+    assert!(text.contains("T1C0.800"), "the slot width becomes a tool; got {text}");
+    assert!(text.contains("X10.000Y10.000G85X20.000Y10.000"), "the slot is a routed segment; got {text}");
+
+    let map = directory.join("slots.drill-map.svg");
+    export(reopened, "drill_map", &map).expect("the drill map writes");
+    let map = fs::read_to_string(&map).expect("the drill map is readable");
+    assert!(map.contains("<line"), "the slot is drawn on the map");
+    assert!(map.contains("routed slots x1"), "the legend counts routed slots; got {map}");
+
+    let removed = delete_slot(reopened, "slot-1").expect("the slot is deleted");
+    assert_eq!(removed["deleted"], "slot-1");
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["slots"], 0);
     close(reopened).expect("the board closes");
 }
 
