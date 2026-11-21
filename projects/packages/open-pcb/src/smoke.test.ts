@@ -128,12 +128,14 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     for (const format of ['gbr', 'drl', 'bom', 'pos', 'svg', 'pdf', 'kicad_pcb', 'ipc2581', 'png'] as const) {
         assert.equal(matrix.formats[format].export, 'supported');
     }
-    for (const format of ['gbr', 'drl', 'bom', 'pos', 'svg', 'pdf', 'ipc2581', 'png'] as const) {
+    for (const format of ['gbr', 'drl', 'bom', 'pos', 'svg', 'pdf', 'png'] as const) {
         assert.equal(matrix.formats[format].import, 'unsupported');
     }
     assert.equal(matrix.formats.kicad_pcb.import, 'supported');
     assert.ok(matrix.formats.kicad_pcb.lossCodes.includes('kicad/construct-not-imported'));
     assert.ok(matrix.formats.kicad_pcb.lossCodes.includes('kicad/outline-not-rectangular'));
+    assert.equal(matrix.formats.ipc2581.import, 'supported');
+    assert.ok(matrix.formats.ipc2581.lossCodes.includes('ipc2581/outline-not-rectangular'));
     assert.equal(matrix.formats.step.export, 'unsupported');
     assert.equal(matrix.formats.step.import, 'unsupported');
     assert.equal(matrix.checks.drc, 'supported');
@@ -216,9 +218,9 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
 
         const gerber = path.join(directory, 'gerber');
         const artifacts = await board.export({ format: 'gbr', target: gerber });
-        assert.equal(artifacts.artifacts?.length, 4);
+        assert.equal(artifacts.artifacts?.length, 5);
         assert.equal(artifacts.bytes, artifacts.artifacts?.reduce((total, item) => total + item.bytes, 0));
-        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'Edge_Cuts.gbr']) {
+        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'B_SilkS.gbr', 'Edge_Cuts.gbr']) {
             const content = fs.readFileSync(path.join(gerber, name), 'utf8');
             assert.match(content, /%FSLAX46Y46\*%/);
             assert.match(content, /M02\*/);
@@ -227,7 +229,7 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         const vector = await board.export({ format: 'pdf', target: path.join(directory, 'blinker.pdf') });
         assert.ok(vector.bytes > 0);
         const pdf = fs.readFileSync(path.join(directory, 'blinker.pdf'), 'utf8');
-        assert.ok(pdf.startsWith('%PDF-1.4'));
+        assert.match(pdf, /^%PDF-1\./);
         assert.match(pdf, /%%EOF/);
 
         await board.export({ format: 'kicad_pcb', target: path.join(directory, 'blinker.kicad_pcb') });
@@ -242,6 +244,14 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         assert.equal(imported.board.summary.counts.vias, 1);
         assert.equal(imported.saved, undefined, 'an import without a target stays unsaved');
         await imported.board.close();
+
+        const ipcImported = await pcb.importBoard({ path: path.join(directory, 'blinker.ipc2581') });
+        assert.equal(ipcImported.format, 'ipc2581');
+        assert.equal(ipcImported.board.summary.counts.footprints, 1);
+        assert.equal(ipcImported.board.summary.counts.tracks, 1);
+        assert.equal(ipcImported.board.summary.counts.vias, 1);
+        assert.deepEqual(ipcImported.losses, [], 'the exported IPC-2581 document round trips without losses');
+        await ipcImported.board.close();
 
         await assert.rejects(
             board.export({ format: 'step', target: path.join(directory, 'blinker.step') }),
@@ -483,7 +493,7 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
 
         const gerber = path.join(directory, 'gerber');
         run('export', document, '--format', 'gbr', '--out', gerber);
-        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'Edge_Cuts.gbr']) {
+        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'B_SilkS.gbr', 'Edge_Cuts.gbr']) {
             const content = fs.readFileSync(path.join(gerber, name), 'utf8');
             assert.match(content, /%FSLAX46Y46\*%/, `${name} declares the coordinate format`);
             assert.match(content, /M02\*/, `${name} ends with M02`);
@@ -496,8 +506,14 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         run('export', document, '--format', 'kicad_pcb', '--out', kicad);
         const imported = path.join(directory, 'imported.opcb');
         const result = run('import', kicad, '--out', imported);
-        assert.match(result, /nets=1 footprints=1 tracks=2 vias=1/);
+        assert.match(result, /imported kicad_pcb .*nets=1 footprints=1 tracks=2 vias=1/);
         assert.match(run('list', imported), /nets=1 footprints=1 tracks=2 vias=1/);
+
+        const ipc = path.join(directory, 'blinker.ipc2581');
+        run('export', document, '--format', 'ipc2581', '--out', ipc);
+        const ipcImported = path.join(directory, 'imported-ipc.opcb');
+        assert.match(run('import', ipc, '--out', ipcImported), /imported ipc2581 .*losses=0/);
+        assert.match(run('list', ipcImported), /nets=1 footprints=1 tracks=2 vias=1/);
 
         run('footprint', 'delete', document, '--id', 'fp-1');
         assert.match(run('list', document), /footprints=0/);
