@@ -160,6 +160,8 @@ export interface BoardCapabilities {
     readonly designRules: SupportLevel;
     /** Whether Gerber solder-mask layers are written. */
     readonly solderMask: SupportLevel;
+    /** Whether Gerber files carry X2 file, aperture and polarity attributes. */
+    readonly gerberX2: SupportLevel;
     /** Whether findings can be waived and their severity overridden. */
     readonly drcPolicy: SupportLevel;
     /** Whether `board.route()` ships in this engine. */

@@ -165,6 +165,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         "diffpair",
         "dangling-copper",
         "netclass",
+        "keepout",
     ] {
         assert_eq!(matrix["checks"][check], "supported", "{check} check");
     }
@@ -188,9 +189,12 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["teardrops"]["arc"], "unsupported");
     assert_eq!(matrix["designRules"], "supported");
     assert_eq!(matrix["solderMask"], "supported");
+    assert_eq!(matrix["gerberX2"], "supported");
     assert_eq!(matrix["drcPolicy"], "supported");
     assert_eq!(matrix["routing"], "supported");
     assert_eq!(matrix["zones"], "supported");
+    assert_eq!(matrix["keepouts"], "supported");
+    assert_eq!(matrix["viaStitching"], "supported");
     assert_eq!(matrix["netClasses"], "supported");
     assert_eq!(matrix["testPoints"], "supported");
 }
@@ -1115,17 +1119,31 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
         assert!(text.contains("M02*"), "{name} ends with M02");
     }
     let copper = fs::read_to_string(gbr.join("F_Cu.gbr")).expect("the copper layer is readable");
+    assert!(copper.contains("%TF.FileFunction,Copper,L1,Top*%"), "the top copper function is declared");
+    assert!(copper.contains("%TA.AperFunction,Conductor*%"), "copper apertures declare their function");
     assert!(copper.contains("%ADD10C,0.250000*%"), "the track aperture is sized to its width");
     assert!(copper.contains("D01*"), "the track is a draw");
     assert!(copper.contains("D03*"), "the via is a flash");
     let bottom = fs::read_to_string(gbr.join("B_Cu.gbr")).expect("the bottom copper layer is readable");
+    assert!(bottom.contains("%TF.FileFunction,Copper,L2,Bot*%"), "the bottom copper function is declared");
     assert!(bottom.contains("D03*"), "a through via is flashed on both outer layers");
+    assert!(
+        fs::read_to_string(gbr.join("F_SilkS.gbr"))
+            .expect("the front silkscreen is readable")
+            .contains("%TF.FileFunction,Legend,Top*%")
+    );
+    assert!(
+        fs::read_to_string(gbr.join("B_Mask.gbr"))
+            .expect("the back mask is readable")
+            .contains("%TF.FileFunction,Soldermask,Bot*%")
+    );
     let mask = fs::read_to_string(gbr.join("F_Mask.gbr")).expect("the front solder mask is readable");
     assert!(mask.contains("%ADD10R,0.600000X0.600000*%"), "the opening is the pad plus twice the 0.05mm expansion");
     assert!(mask.contains("X30000000Y20000000D03*"), "the front pad opens the front mask");
     let back_mask = fs::read_to_string(gbr.join("B_Mask.gbr")).expect("the back solder mask is readable");
     assert!(!back_mask.contains("D03*"), "a footprint without pads opens no mask and vias stay tented");
     let edges = fs::read_to_string(gbr.join("Edge_Cuts.gbr")).expect("edge cuts are readable");
+    assert!(edges.contains("%TF.FileFunction,Profile,NP*%"), "edge cuts declare the profile function");
     assert_eq!(edges.matches("D01*").count(), 4, "the outline is four draws");
 
     let pdf = directory.join("blinker.pdf");

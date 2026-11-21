@@ -163,15 +163,47 @@ impl Gerber {
         let _ = writeln!(self.body, "X{}Y{}D01*\nG37*", gerber_number(first[0]), gerber_number(first[1]));
     }
 
-    fn render(&self) -> String {
+    /// Renders the file with Gerber X2 file and aperture attributes.
+    ///
+    /// The header declares the generation software, the shared coordinate
+    /// origin, the file function, positive polarity and a single part. The
+    /// aperture block carries one `.AperFunction` attribute derived from the
+    /// file function, then resets it with `%TD*%` before the draws.
+    fn render(&self, file_function: &str) -> String {
         let mut out = String::new();
-        out.push_str("%FSLAX46Y46*%\n%MOMM*%\n%LPD*%\nG01*\n");
-        for (index, definition) in self.apertures.iter().enumerate() {
-            let _ = writeln!(out, "%ADD{}{definition}*%", 10 + index);
+        let _ = writeln!(out, "%TF.GenerationSoftware,OpenPCB,open-pcb,{}*%", env!("CARGO_PKG_VERSION"));
+        out.push_str("%TF.SameCoordinates,Original*%\n");
+        let _ = writeln!(out, "%TF.FileFunction,{file_function}*%");
+        out.push_str("%TF.FilePolarity,Positive*%\n%TF.Part,Single*%\n%FSLAX46Y46*%\n%MOMM*%\n%LPD*%\nG01*\n");
+        if !self.apertures.is_empty() {
+            let _ = writeln!(out, "%TA.AperFunction,{}*%", aperture_function(file_function));
+            for (index, definition) in self.apertures.iter().enumerate() {
+                let _ = writeln!(out, "%ADD{}{definition}*%", 10 + index);
+            }
+            out.push_str("%TD*%\n");
         }
         out.push_str(&self.body);
         out.push_str("M02*\n");
         out
+    }
+}
+
+/// Maps an X2 file function to the aperture function of its objects.
+fn aperture_function(file_function: &str) -> &'static str {
+    if file_function.starts_with("Copper") {
+        "Conductor"
+    }
+    else if file_function.starts_with("Legend") {
+        "Legend"
+    }
+    else if file_function.starts_with("Soldermask") {
+        "Soldermask"
+    }
+    else if file_function.starts_with("Profile") {
+        "Profile"
+    }
+    else {
+        "Other"
     }
 }
 
@@ -205,7 +237,18 @@ fn copper(board: &Board, layer: &str) -> String {
     for zone in board.zones.iter().filter(|zone| zone.layer == layer) {
         gerber.region(&zone.points, scale);
     }
-    gerber.render()
+    let stack = board.copper_stack();
+    let index = stack.iter().position(|id| *id == layer).unwrap_or(0);
+    let position = if index == 0 {
+        "Top"
+    }
+    else if index + 1 == stack.len() {
+        "Bot"
+    }
+    else {
+        "Inr"
+    };
+    gerber.render(&format!("Copper,L{},{}", index + 1, position))
 }
 
 /// Writes one silkscreen layer: the document stores legend geometry as tracks
@@ -220,7 +263,8 @@ fn silkscreen(board: &Board, layer: &str) -> String {
             [track.to[0] * scale, track.to[1] * scale],
         );
     }
-    gerber.render()
+    let position = if layer.starts_with("B.") { "Bot" } else { "Top" };
+    gerber.render(&format!("Legend,{position}"))
 }
 
 /// Writes one solder-mask layer: every pad on the matching copper side is a
@@ -238,7 +282,8 @@ fn solder_mask(board: &Board, layer: &str) -> String {
             );
         }
     }
-    gerber.render()
+    let position = if layer.starts_with("B.") { "Bot" } else { "Top" };
+    gerber.render(&format!("Soldermask,{position}"))
 }
 
 /// Writes the rectangular Edge.Cuts outline as four draws.
@@ -253,7 +298,7 @@ fn edge_cuts(from: [f64; 2], to: [f64; 2], scale: f64) -> String {
     {
         gerber.draw("C,0.100000".to_string(), start, end);
     }
-    gerber.render()
+    gerber.render("Profile,NP")
 }
 
 /// Formats millimetres in the 4.6 coordinate format used by every file.

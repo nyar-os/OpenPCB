@@ -61,7 +61,9 @@ SDK and studio shell share one native model:
 - Write Gerber RS-274X, Excellon drill, drill map SVG, BOM, pick-and-place,
   placement JSON, test point CSV, SVG, vector PDF, 8-bit RGB PNG, KiCad PCB and
   IPC-2581 files atomically. Gerber writes one file per copper layer plus `F_SilkS`, `B_SilkS`,
-  `F_Mask`, `B_Mask` and `Edge_Cuts`; the two silkscreen files carry the legend
+  `F_Mask`, `B_Mask` and `Edge_Cuts`; every file carries Gerber X2 file and
+  aperture attributes (`%TF.FileFunction`, `%TF.Part`, `%TF.FilePolarity` and
+  `%TA.AperFunction`); the two silkscreen files carry the legend
   tracks the document holds, and the mask files open every outer-layer pad by the
   document's solder-mask expansion while vias stay tented. Copper pour regions
   are written as `G36`/`G37` regions in the Gerber file of their layer. One
@@ -75,9 +77,9 @@ STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
 through, blind and buried vias, back drilling, linear teardrops, editable design
-rules, solder-mask Gerber layers, copper pour regions, copper keepouts, via
-stitching, net classes, test point reports and waiver/severity policy as
-supported, micro vias as unsupported, and
+rules, solder-mask Gerber layers, Gerber X2 attributes, copper pour regions,
+copper keepouts, via stitching, net classes, test point reports and
+waiver/severity policy as supported, micro vias as unsupported, and
 both `kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities`
 prints exactly that matrix.
 
@@ -313,6 +315,8 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   and PDF writers draw them, the Gerber writer emits them into `F_SilkS` and
   `B_SilkS`, and the `silkscreen-over-pad` check reads them. DRC treats a
   silkscreen track as legend rather than a copper rule violation.
+- Gerber output carries X2 file and aperture attributes only: it writes no
+  object attributes (`%TO`), no net attributes (`%TO.N`) and no component data.
 - It does not rotate rectangular pad apertures in Gerber output.
 - Solder-mask openings are rectangular, follow the pad's outer copper side and
   add the document's expansion per side; vias stay tented and inner-layer pads

@@ -55,7 +55,9 @@ Implemented:
   (hole map SVG with tool legend and back-drill marks), `bom`, `pos`,
   `placement` (millimetre JSON), `testpoints` (CSV probe report), `svg`, `pdf`,
   `png` (1024x768 RGB raster), `kicad_pcb` and `ipc2581`. The Gerber directory holds one file per copper
-  layer plus `F_SilkS`, `B_SilkS`, `F_Mask`, `B_Mask` and `Edge_Cuts`.
+  layer plus `F_SilkS`, `B_SilkS`, `F_Mask`, `B_Mask` and `Edge_Cuts`; every
+  file carries Gerber X2 file and aperture attributes (`%TF.FileFunction`,
+  `%TF.Part`, `%TF.FilePolarity`, `%TA.AperFunction`).
 - Import a KiCad PCB or IPC-2581 document with a loss ledger for unrepresentable
   constructs; the CLI and SDK detect the format from the content.
 
@@ -194,8 +196,8 @@ mutating command also records the previous document for CLI undo/redo.
    `testpoints` writes a probe CSV with a `Target,Designator,Pad,Kind,Net,Layer,X,Y`
    header; only explicitly declared test points appear.
 3. State exactly which targets were written and which reject, then inspect the
-   files for the expected markers (`%FSLAX46Y46*%` and `M02*` in every Gerber
-   file, `M48` and `M30` in drill, a `Designator` header in position, a
+   files for the expected markers (`%TF.FileFunction` and `%FSLAX46Y46*%` and
+   `M02*` in every Gerber file, `M48` and `M30` in drill, a `Designator` header in position, a
    `placements` array in placement, `OpenPCB drill map` in the drill map,
    `<svg` in the SVG). Back-drilled vias appear again under `;Back drill`
    comments with their depth and stub and gain a dashed ring in the drill map.
