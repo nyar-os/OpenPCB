@@ -1121,6 +1121,80 @@ impl Board {
         Ok(object)
     }
 
+    /// Generates a stitching via fence along the inset board outline.
+    ///
+    /// Vias are placed on one evenly spaced perimeter ring inset from the four
+    /// rectangular edges. The ring is closed and deterministic: the segment count
+    /// is `ceil(perimeter / spacing)` and every segment has the same length.
+    /// Positions that already hold a via are skipped rather than duplicated. The
+    /// generated vias are ordinary through vias on the requested net.
+    pub(crate) fn stitch_vias(&mut self, request: AddStitchingRequest) -> Result<Value, ServiceError> {
+        let net = request.net.trim();
+        if net.is_empty() {
+            return Err(crate::argument("via stitching needs a non-empty `net`"));
+        }
+        if self.net(net).is_none() {
+            return Err(crate::argument(format!("net `{net}` is not declared on this board")));
+        }
+        let spacing = positive(request.spacing, "spacing")?;
+        let inset = non_negative(request.inset.unwrap_or(0.5), "inset")?;
+        let diameter = positive(request.diameter.unwrap_or(0.6), "diameter")?;
+        let drill = positive(request.drill.unwrap_or(0.3), "drill")?;
+        if drill >= diameter {
+            return Err(crate::argument("`drill` must be smaller than `diameter`"));
+        }
+        let Some(outline) = self.outline
+        else {
+            return Err(crate::argument("via stitching needs a board outline; set one first"));
+        };
+        for layer in ["F.Cu", "B.Cu"] {
+            if self.layer(layer).is_some_and(|entry| entry.locked) {
+                return Err(ServiceError::new("board/layer-locked", format!("layer `{layer}` is locked")));
+            }
+        }
+        let width = (outline.to[0] - outline.from[0]) - inset * 2.0;
+        let height = (outline.to[1] - outline.from[1]) - inset * 2.0;
+        if width <= 0.0 || height <= 0.0 {
+            return Err(crate::argument("`inset` leaves no perimeter inside the outline"));
+        }
+        let min = [outline.from[0] + inset, outline.from[1] + inset];
+        let max = [outline.to[0] - inset, outline.to[1] - inset];
+        let perimeter = 2.0 * (width + height);
+        let segments = (perimeter / spacing).ceil().max(1.0);
+        if !segments.is_finite() || segments > 1_000_000.0 {
+            return Err(crate::argument("`spacing` is too small for this outline"));
+        }
+        let count = segments as usize;
+        let step = perimeter / segments;
+        let mut pending: Vec<Via> = Vec::new();
+        let mut skipped = 0usize;
+        for index in 0..count {
+            let at = perimeter_point(min, max, width, height, step * index as f64);
+            if self.vias.iter().any(|via| same_point(via.at, at)) || pending.iter().any(|via| same_point(via.at, at)) {
+                skipped += 1;
+                continue;
+            }
+            pending.push(Via {
+                id: format!("via-{}", self.next_via + pending.len() as u64),
+                net: Some(net.to_string()),
+                at,
+                diameter,
+                drill,
+                from_layer: None,
+                to_layer: None,
+                back_drill: None,
+            });
+        }
+        let added = pending.len();
+        if added == 0 {
+            return Ok(json!({ "net": net, "vias": 0, "skipped": skipped, "spacing": step, "inset": inset }));
+        }
+        self.next_via += added as u64;
+        self.vias.extend(pending);
+        self.revision += 1;
+        Ok(json!({ "net": net, "vias": added, "skipped": skipped, "spacing": step, "inset": inset }))
+    }
+
     /// Removes one via by id and returns the removed id.
     pub(crate) fn delete_via(&mut self, id: &str) -> Result<String, ServiceError> {
         let index = self
@@ -1865,6 +1939,23 @@ fn same_point(left: [f64; 2], right: [f64; 2]) -> bool {
     (left[0] - right[0]).abs() <= 1e-9 && (left[1] - right[1]).abs() <= 1e-9
 }
 
+/// One point at a distance along the inset rectangle, walking its perimeter
+/// clockwise from the lower-left corner.
+fn perimeter_point(min: [f64; 2], max: [f64; 2], width: f64, height: f64, distance: f64) -> [f64; 2] {
+    if distance <= width {
+        [min[0] + distance, min[1]]
+    }
+    else if distance <= width + height {
+        [max[0], min[1] + (distance - width)]
+    }
+    else if distance <= 2.0 * width + height {
+        [max[0] - (distance - width - height), max[1]]
+    }
+    else {
+        [min[0], max[1] - (distance - 2.0 * width - height)]
+    }
+}
+
 fn finite(value: f64, field: &str) -> Result<f64, ServiceError> {
     if value.is_finite() { Ok(value) } else { Err(crate::argument(format!("`{field}` must be a finite number"))) }
 }
@@ -2488,6 +2579,25 @@ pub struct AddTeardropsRequest {
     /// Length from the pad edge to the teardrop tip, in board units.
     #[serde(default)]
     pub length: Option<f64>,
+}
+
+/// Request of [`crate::stitch_vias`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddStitchingRequest {
+    /// Declared net the stitching vias join.
+    pub net: String,
+    /// Target spacing between adjacent vias along the perimeter; greater than zero.
+    pub spacing: f64,
+    /// Inset from the board edge; defaults to 0.5.
+    #[serde(default)]
+    pub inset: Option<f64>,
+    /// Via copper diameter; defaults to 0.6.
+    #[serde(default)]
+    pub diameter: Option<f64>,
+    /// Via finished drill; defaults to 0.3.
+    #[serde(default)]
+    pub drill: Option<f64>,
 }
 
 /// Request of [`crate::set_via_back_drill`].

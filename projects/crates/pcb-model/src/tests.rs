@@ -13,16 +13,16 @@ use serde_json::Value;
 
 use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
-    AddPadRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
-    AssignNetClassRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
-    SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, add_differential_pair,
-    add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_teardrops, add_test_point, add_track, add_via,
-    add_waiver, add_zone, assign_net_class,
+    AddPadRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest,
+    AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, MoveFootprintRequest, RouteOptions,
+    SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
+    add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_teardrops,
+    add_test_point, add_track, add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class, delete_severity,
     delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export, import, inspect, move_footprint, open,
-    redo, route, save, set_outline, set_rules, set_severity, set_via_back_drill, store, summary, undo, update_footprint,
-    update_layer,
+    redo, route, save, set_outline, set_rules, set_severity, set_via_back_drill, stitch_vias, store, summary, undo,
+    update_footprint, update_layer,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -522,6 +522,59 @@ fn keepouts_reject_copper_on_their_layer() {
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["keepouts"], 1);
     delete_keepout(reopened, "keepout-1").expect("the keepout is deleted");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["keepouts"], 0);
+    close(reopened).expect("the board closes");
+}
+
+#[test]
+fn stitching_vias_follow_the_inset_outline() {
+    let directory = TempDir::new();
+    let path = directory.join("stitch.opcb");
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the ground net is declared");
+    let no_outline = stitch_vias(
+        handle,
+        AddStitchingRequest { net: "GND".to_string(), spacing: 20.0, inset: None, diameter: None, drill: None },
+    )
+    .expect_err("stitching needs an outline");
+    assert_eq!(no_outline.code, "session/argument-invalid");
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [100.0, 80.0] }).expect("the outline is set");
+    let missing = stitch_vias(
+        handle,
+        AddStitchingRequest { net: "NOPE".to_string(), spacing: 20.0, inset: None, diameter: None, drill: None },
+    )
+    .expect_err("the net must be declared");
+    assert_eq!(missing.code, "session/argument-invalid");
+
+    let first = stitch_vias(
+        handle,
+        AddStitchingRequest { net: "GND".to_string(), spacing: 20.0, inset: Some(1.0), diameter: Some(0.6), drill: Some(0.3) },
+    )
+    .expect("the fence is generated");
+    assert_eq!(first["object"]["vias"], 18, "352 mm of perimeter at 20 mm spacing gives 18 vias");
+    assert_eq!(first["object"]["skipped"], 0);
+    assert_eq!(first["board"]["counts"]["vias"], 18);
+    let revision = first["revision"].as_u64().expect("a revision is reported");
+
+    let second = stitch_vias(
+        handle,
+        AddStitchingRequest { net: "GND".to_string(), spacing: 20.0, inset: Some(1.0), diameter: Some(0.6), drill: Some(0.3) },
+    )
+    .expect("a repeat run is harmless");
+    assert_eq!(second["object"]["vias"], 0);
+    assert_eq!(second["object"]["skipped"], 18);
+    assert_eq!(second["revision"].as_u64(), Some(revision), "a repeat run adds no revision");
+
+    let invalid = stitch_vias(
+        handle,
+        AddStitchingRequest { net: "GND".to_string(), spacing: 20.0, inset: Some(1.0), diameter: Some(0.3), drill: Some(0.3) },
+    )
+    .expect_err("the drill must be smaller than the pad");
+    assert_eq!(invalid.code, "session/argument-invalid");
+
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["vias"], 18);
     close(reopened).expect("the board closes");
 }
 

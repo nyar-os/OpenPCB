@@ -36,6 +36,7 @@ import type {
     RouteReport,
     SaveReport,
     SetOutlineOptions,
+    StitchViasOptions,
     SetRulesOptions,
     SetSeverityOptions,
     SetViaBackDrillOptions,
@@ -167,6 +168,13 @@ export function addVia(handle: number, options: AddViaOptions): BoardEditResult 
 export function setViaBackDrill(handle: number, options: SetViaBackDrillOptions): BoardEditResult {
     return decode<BoardEditResult>(() =>
         binding('board.setViaBackDrill').board_set_via_back_drill(handle, JSON.stringify(options)),
+    );
+}
+
+/** Generates a stitching via fence along the inset board outline. */
+export function stitchVias(handle: number, options: StitchViasOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.stitchVias').board_stitch_vias(handle, JSON.stringify(options)),
     );
 }
 

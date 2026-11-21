@@ -168,6 +168,8 @@ export interface BoardCapabilities {
     readonly zones: SupportLevel;
     /** Whether copper keepout regions can be declared and checked. */
     readonly keepouts: SupportLevel;
+    /** Whether stitching via fences can be generated along the board outline. */
+    readonly viaStitching: SupportLevel;
     /** Whether net classes with clearance and width targets are available. */
     readonly netClasses: SupportLevel;
     /** Whether declared test points can be reported. */
@@ -437,6 +439,20 @@ export interface AddViaOptions {
     readonly toLayer?: string;
 }
 
+/** Options of `board.stitchVias()`. */
+export interface StitchViasOptions {
+    /** Declared net the stitching vias join. */
+    readonly net: string;
+    /** Target spacing between adjacent vias along the perimeter. */
+    readonly spacing: number;
+    /** Inset from the board edge; defaults to 0.5. */
+    readonly inset?: number;
+    /** Via copper diameter; defaults to 0.6. */
+    readonly diameter?: number;
+    /** Via finished drill; defaults to 0.3. */
+    readonly drill?: number;
+}
+
 /** Options of `board.addZone()`. */
 export interface AddZoneOptions {
     /** Copper layer id that receives the pour. */
@@ -673,6 +689,7 @@ export interface Board {
     addTrack(options: AddTrackOptions): Promise<BoardEditResult>;
     deleteTrack(id: ObjectId): Promise<BoardEditResult>;
     addVia(options: AddViaOptions): Promise<BoardEditResult>;
+    stitchVias(options: StitchViasOptions): Promise<BoardEditResult>;
     deleteVia(id: ObjectId): Promise<BoardEditResult>;
     addZone(options: AddZoneOptions): Promise<BoardEditResult>;
     deleteZone(id: ObjectId): Promise<BoardEditResult>;

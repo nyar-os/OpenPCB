@@ -24,6 +24,9 @@ Implemented:
 - Declare copper keepout regions (`keepout add`) on one copper layer or on `*`
   for the whole stack; the `keepout` check flags tracks, vias, pads and pours
   that enter one.
+- Generate a stitching via fence (`stitch`) on a declared net around the inset
+  board outline; the ring is evenly spaced, deterministic and skips positions
+  that already hold a via.
 - Read and edit the design rules (`rules show`, `rules set`): drill-hole
   clearance, copper-, component- and hole-to-edge gaps and the solder-mask
   expansion. Values are millimetres; a partial update keeps the other rules.
@@ -68,7 +71,9 @@ drill spacing to the four edges. Teardrops are only generated as linear copper
 tracks; arc teardrops stay unimplemented. The test point report lists only
 explicitly declared pads and vias, never inferred probes. Keepouts are design
 intent only: the `keepout` check reads them, but they are not written to Gerber,
-drill data, IPC-2581 or KiCad output and the router does not avoid them. Solder-mask openings are rectangular
+drill data, IPC-2581 or KiCad output and the router does not avoid them. Via
+stitching follows the rectangular outline only, places through vias, skips
+occupied positions and does not test the new vias against existing copper. Solder-mask openings are rectangular
 and cover outer-layer pads only; vias stay tented, inner-layer pads open no mask,
 and paste layers are not written. All unimplemented targets stay
 `unsupported` in the capability matrix and reject with
@@ -102,6 +107,7 @@ a format, check or target.
 | `open-pcb via backdrill <file.opcb> --id <id> --depth <mm> --stub <mm>` | Record back-drill depth and remaining stub on a through via. Blind and buried vias are rejected. |
 | `open-pcb via delete <file.opcb> --id <id>` | Delete a via by id. |
 | `open-pcb route <file.opcb> --width <mm> --clearance <mm> --via <mm> --net <name>` | Route every two-pad net, or only `--net`. Defaults: width 0.25, clearance 0.2, via diameter 0.6. Prints `{routed, unrouted, tracks, vias}`. |
+| `open-pcb stitch <file.opcb> --net <name> --spacing <mm> [--inset <mm>] [--diameter <mm>] [--drill <mm>]` | Generate a stitching via fence around the inset rectangular outline. |
 | `open-pcb layer add <file.opcb> --name <name> --kind <kind> --color <css>` | Add a layer. `--kind` defaults to `copper`; `--color` defaults to the kind colour. |
 | `open-pcb layer rename <file.opcb> --id <id> --name <name>` | Rename a layer and rewrite every footprint and track reference. |
 | `open-pcb layer visible <file.opcb> --id <id> --visible <true\|false>` | Set layer visibility. |

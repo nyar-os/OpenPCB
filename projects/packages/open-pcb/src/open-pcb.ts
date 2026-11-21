@@ -51,6 +51,7 @@ import type {
     SetRulesOptions,
     SetSeverityOptions,
     SetViaBackDrillOptions,
+    StitchViasOptions,
     UpdateFootprintOptions,
     UpdateLayerOptions,
 } from './types.js';
@@ -420,6 +421,10 @@ function attach(
         async addVia(options: AddViaOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.addVia(current, options));
+        },
+        async stitchVias(options: StitchViasOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.stitchVias(current, options));
         },
         async deleteVia(id: string): Promise<BoardEditResult> {
             ensure();

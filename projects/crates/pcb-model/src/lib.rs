@@ -38,9 +38,10 @@ use std::{fs, path::Path};
 
 pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
-    AddPadRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
-    AssignNetClassRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
-    SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
+    AddPadRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest, AddViaRequest,
+    AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions,
+    SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
+    UpdatePadRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 use serde_json::{Map, Value, json};
@@ -169,6 +170,7 @@ pub fn capabilities() -> Value {
         "routing": "supported",
         "zones": "supported",
         "keepouts": "supported",
+        "viaStitching": "supported",
         "netClasses": "supported",
         "testPoints": "supported",
     })
@@ -559,6 +561,16 @@ pub fn delete_track(handle: u64, id: &str) -> Result<Value, ServiceError> {
         Ok(())
     })?;
     edit_result(handle, None, Some(deleted))
+}
+
+/// Generates a stitching via fence along the inset board outline.
+pub fn stitch_vias(handle: u64, request: AddStitchingRequest) -> Result<Value, ServiceError> {
+    let mut report = Value::Null;
+    store::mutate(handle, |board| {
+        report = board.stitch_vias(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(report), None)
 }
 
 /// Deletes one via from an open board.

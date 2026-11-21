@@ -994,6 +994,57 @@ cli
     });
 
 cli
+    .command('stitch', 'cli.cmd.stitch')
+    .option('--net <name>', 'cli.opt.net')
+    .option('--spacing <mm>', 'cli.opt.spacing')
+    .option('--inset <mm>', 'cli.opt.inset')
+    .option('--diameter <mm>', 'cli.opt.diameter')
+    .option('--drill <mm>', 'cli.opt.drill')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const net = text(options, 'net');
+        const spacing = numberOption(text(options, 'spacing'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (net === undefined || net.length === 0) {
+            ctx.fail('open-pcb.cli.net-required', { message: '`--net <name>` is required' });
+            return 2;
+        }
+        if (spacing === undefined || spacing <= 0) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--spacing <mm>` must be greater than zero' });
+            return 2;
+        }
+        const inset = numberOption(text(options, 'inset'));
+        const diameter = numberOption(text(options, 'diameter'));
+        const drill = numberOption(text(options, 'drill'));
+        if (text(options, 'inset') !== undefined && (inset === undefined || inset < 0)) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--inset <mm>` must not be negative' });
+            return 2;
+        }
+        if (text(options, 'diameter') !== undefined && (diameter === undefined || diameter <= 0)) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--diameter <mm>` must be greater than zero' });
+            return 2;
+        }
+        if (text(options, 'drill') !== undefined && (drill === undefined || drill <= 0)) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--drill <mm>` must be greater than zero' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.stitchVias({ net, spacing, inset, diameter, drill });
+            const object = result.object ?? {};
+            ctx.emitResult(
+                result,
+                `stitched ${String(object.vias ?? 0)} vias on ${net}`
+                    + ` (${String(object.skipped ?? 0)} skipped, spacing ${String(object.spacing ?? '-')})`,
+            );
+            return 0;
+        });
+        return 0;
+    });
+
+cli
     .command('route', 'cli.cmd.route')
     .option('--width <mm>', 'cli.opt.width')
     .option('--clearance <mm>', 'cli.opt.clearance')

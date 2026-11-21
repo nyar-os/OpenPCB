@@ -30,6 +30,9 @@ SDK and studio shell share one native model:
   draw the pour.
 - Declare copper keepout regions on one copper layer or on `*` for the whole
   stack; the `keepout` check flags any track, via, pad or pour that enters one.
+- Generate a stitching via fence on a declared net around the inset board
+  outline; the ring is evenly spaced, deterministic, and skips positions that
+  already hold a via.
 - Undo and redo up to 32 snapshots per handle, optionally persisted in
   `<file>.history.json` with `history: 'sidecar'`, with `canUndo`/`canRedo` on
   every summary and edit result.
@@ -72,8 +75,9 @@ STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
 through, blind and buried vias, back drilling, linear teardrops, editable design
-rules, solder-mask Gerber layers, copper pour regions, copper keepouts, net
-classes, test point reports and waiver/severity policy as supported, micro vias as unsupported, and
+rules, solder-mask Gerber layers, copper pour regions, copper keepouts, via
+stitching, net classes, test point reports and waiver/severity policy as
+supported, micro vias as unsupported, and
 both `kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities`
 prints exactly that matrix.
 
@@ -105,6 +109,9 @@ open-pcb track add blinker.opcb --net VCC --layer F.Cu --from 10,10 --to 30,10 -
 open-pcb via add blinker.opcb --net VCC --at 20,20 --diameter 0.6 --drill 0.3
 open-pcb via add blinker.opcb --net VCC --at 25,20 --diameter 0.6 --drill 0.3 --from-layer F.Cu --to-layer In1
 open-pcb via backdrill blinker.opcb --id via-1 --depth 0.8 --stub 0.2
+
+# Generate a stitching via fence around the inset board outline
+open-pcb stitch blinker.opcb --net VCC --spacing 8 --inset 1 --diameter 0.6 --drill 0.3
 
 # Route all two-pad nets, then route only VCC at a wider width
 open-pcb route blinker.opcb
@@ -195,6 +202,7 @@ await board.addFootprint({ reference: 'U1', value: 'MCU', footprint: 'QFN32', x:
 await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], to: [30, 10] });
 await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
 await board.setViaBackDrill({ id: 'via-1', depth: 0.8, stub: 0.2 });
+await board.stitchVias({ net: 'VCC', spacing: 8, inset: 1, diameter: 0.6, drill: 0.3 });
 await board.setOutline({ from: [0, 0], to: [100, 80] });
 await board.addZone({ layer: 'F.Cu', net: 'VCC', points: [[5, 5], [40, 5], [40, 30], [5, 30]] });
 await board.addKeepout({ layer: 'F.Cu', points: [[45, 5], [60, 5], [60, 20], [45, 20]] });
@@ -293,6 +301,9 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
 - Keepout regions are design intent: the `keepout` check reads them, but they are
   not written to Gerber, drill data, IPC-2581 or KiCad output, and the router
   does not yet avoid them.
+- Via stitching follows the rectangular outline only, places through vias and
+  skips positions that already hold a via. It does not test the new vias against
+  existing copper, use a polygon outline or choose a net by itself.
 - It does not render an interactive board viewport; SVG export is a writer, not
   a viewport.
 - It does not store silkscreen text or shapes. The `silkscreen` check therefore
