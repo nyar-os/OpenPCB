@@ -182,6 +182,17 @@ fn board_add_via(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Adds linear teardrop copper at every pad-track junction.
+#[function]
+fn board_add_teardrops(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::AddTeardropsRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::add_teardrops(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Sets the back-drill depth and remaining stub of one through via.
 #[function]
 fn board_set_via_back_drill(ctx: CallContext) -> Result<JsValue> {
@@ -576,6 +587,12 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
             let id = rpc_text(value, "id")?;
             open_pcb_model::delete_via(handle, id)
         }
+        "board.addTeardrops" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::AddTeardropsRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::add_teardrops(handle, request)
+        }
         "board.setViaBackDrill" => {
             let handle = rpc_handle(value)?;
             let request: open_pcb_model::SetViaBackDrillRequest =
@@ -898,6 +915,7 @@ register_module![
     board_delete_footprint,
     board_add_track,
     board_add_via,
+    board_add_teardrops,
     board_set_via_back_drill,
     board_route,
     board_add_net,

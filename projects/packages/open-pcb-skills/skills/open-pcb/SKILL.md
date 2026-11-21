@@ -23,6 +23,9 @@ Implemented:
 - Declare differential pairs (`diffpair add`) with a target width, gap and
   maximum length skew; the `diffpair` check compares the routed copper against
   those targets.
+- Generate linear teardrops (`teardrop`) at pad-track junctions as ordinary
+  copper tracks; a repeat run skips existing segments. Arc teardrops stay
+  unsupported.
 - Checks: `drc`, `connectivity`, `clearance`, `annular_rings`, `annular-ring`,
   `track-width`, `unrouted`, `stackup`, `outline`, `silkscreen`, `courtyard`,
   `netlist`, `diffpair`, `dangling-copper`.
@@ -36,7 +39,8 @@ text/shapes, pad drills (so `annular-ring` covers vias only), diagonal or rip-up
 routing, and templates other than `blank`. Rectangular pad apertures are not
 rotated in Gerber output. Back-drill depth and stub live in `.opcb` and
 IPC-2581 and appear as `;Back drill` comments in the Excellon file; KiCad PCB
-exchange does not carry back drill. All unimplemented targets stay `unsupported` in the
+exchange does not carry back drill. Teardrops are only generated as linear
+copper tracks; arc teardrops stay unimplemented. All unimplemented targets stay `unsupported` in the
 capability matrix and reject with `capability/not-implemented`. Do not fill the
 gap with local parsers, routers, geometry code or fabricated reports.
 
@@ -56,6 +60,7 @@ a format, check or target.
 | `open-pcb net add <file.opcb> --name <name>` | Declare a net in place. |
 | `open-pcb diffpair add <file.opcb> --positive <net> --negative <net> --width <mm> --gap <mm> --max-skew <mm>` | Declare a differential pair and its routing targets. |
 | `open-pcb diffpair delete <file.opcb> --id <id>` | Delete a differential pair by id. |
+| `open-pcb teardrop <file.opcb> --shape linear --length <mm>` | Generate linear teardrops at pad-track junctions. Arc is rejected. |
 | `open-pcb footprint add <file.opcb> --ref <ref> --value <value> --footprint <package> --rotation <deg> --layer <layer>` | Place a footprint in place. Position comes from `--x` and `--y` (both default to 0). |
 | `open-pcb footprint move <file.opcb> --id <id> -x <mm> -y <mm> --rotation <deg> --layer <layer>` | Move, rotate or re-layer a footprint in place. `-x` and `-y` also accept the `--x` and `--y` spelling; `--layer` is optional. |
 | `open-pcb footprint update <file.opcb> --id <id> --value <value> --footprint <package>` | Update the value or package of a footprint. |

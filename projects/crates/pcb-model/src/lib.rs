@@ -36,9 +36,9 @@ mod tests;
 use std::{fs, path::Path};
 
 pub use board::{
-    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTrackRequest,
-    AddViaRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetViaBackDrillRequest,
-    UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
+    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTeardropsRequest,
+    AddTrackRequest, AddViaRequest, DeletePadRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest,
+    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 use serde_json::{Map, Value, json};
@@ -155,6 +155,10 @@ pub fn capabilities() -> Value {
         },
         "differentialPairs": "supported",
         "backDrill": "supported",
+        "teardrops": {
+            "linear": "supported",
+            "arc": "unsupported",
+        },
         "routing": "supported",
     })
 }
@@ -409,6 +413,16 @@ pub fn add_via(handle: u64, request: AddViaRequest) -> Result<Value, ServiceErro
         Ok(())
     })?;
     edit_result(handle, Some(object), None)
+}
+
+/// Adds linear teardrop copper at every pad-track junction.
+pub fn add_teardrops(handle: u64, request: AddTeardropsRequest) -> Result<Value, ServiceError> {
+    let mut report = Value::Null;
+    store::mutate(handle, |board| {
+        report = board.add_teardrops(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(report), None)
 }
 
 /// Sets the back-drill depth and remaining stub of one through via.

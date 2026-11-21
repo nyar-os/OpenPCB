@@ -686,6 +686,34 @@ diffpair
     });
 
 cli
+    .command('teardrop', 'cli.cmd.teardrop')
+    .option('--shape <shape>', 'cli.opt.shape')
+    .option('--length <mm>', 'cli.opt.length')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const shape = text(options, 'shape') as 'linear' | undefined;
+        const length = numberOption(text(options, 'length'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (shape !== undefined && shape !== 'linear') {
+            ctx.fail('open-pcb.cli.shape-invalid', { message: 'only `--shape linear` is implemented' });
+            return 2;
+        }
+        if (text(options, 'length') !== undefined && (length === undefined || length <= 0)) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--length <mm>` must be greater than zero' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addTeardrops({ shape, length });
+            ctx.emitResult(result, `generated teardrops for ${file}`);
+            return 0;
+        });
+        return 0;
+    });
+
+cli
     .command('route', 'cli.cmd.route')
     .option('--width <mm>', 'cli.opt.width')
     .option('--clearance <mm>', 'cli.opt.clearance')

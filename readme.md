@@ -30,6 +30,8 @@ SDK and studio shell share one native model:
   autorouter that reports collisions instead of inventing copper.
 - Declare differential pairs with a target width, gap and maximum length skew,
   then compare the routed copper against those targets.
+- Generate linear teardrops at every pad-track junction as ordinary copper
+  tracks; repeated runs skip segments that already exist.
 - Run DRC, connectivity, clearance, annular ring, stackup, outline, silkscreen,
   courtyard, netlist, `annular-ring`, `track-width`, `unrouted`, `diffpair` and
   `dangling-copper` checks.
@@ -50,8 +52,9 @@ SDK and studio shell share one native model:
 STEP export remains declared and rejects with `capability/not-implemented`. PNG
 is an export writer only; preview rendering stays SVG-only. The interactive
 viewport renderer is not implemented either. The capability matrix reports
-through, blind and buried vias and back drilling as supported, micro vias as
-unsupported, and both `kicad_pcb` and `ipc2581` import as supported.
+through, blind and buried vias, back drilling and linear teardrops as
+supported, micro vias as unsupported, and both `kicad_pcb` and `ipc2581` import
+as supported.
 `open-pcb capabilities` prints exactly that matrix.
 
 ## Usage
@@ -67,6 +70,9 @@ open-pcb create --out blinker.opcb --title "Blinker" --template blank
 # document could not keep; the format is detected from the content
 open-pcb import legacy.kicad_pcb --out legacy.opcb
 open-pcb import panel.ipc2581 --out panel.opcb
+
+# Generate linear teardrops at pad-track junctions
+open-pcb teardrop blinker.opcb --shape linear --length 0.6
 
 # Declare a differential pair with its routing targets
 open-pcb diffpair add blinker.opcb --positive USB_D+ --negative USB_D- --width 0.2 --gap 0.15 --max-skew 0.5
@@ -147,6 +153,7 @@ await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
 await board.setViaBackDrill({ id: 'via-1', depth: 0.8, stub: 0.2 });
 await board.setOutline({ from: [0, 0], to: [100, 80] });
 await board.route(); // { routed, unrouted, tracks, vias }
+await board.addTeardrops({ shape: 'linear', length: 0.6 });
 
 await board.save({ target: 'blinker.opcb' });
 await board.export({ format: 'gbr', target: 'gerber' });
@@ -210,6 +217,9 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   holes and undeclared nets are reported in its own loss ledger.
 - It does not export STEP. PNG export is a fixed 1024x768 top-down raster; it
   does not render silkscreen text, zones or a live viewport.
+- Teardrops are linear only; arc teardrops stay unsupported. Generated teardrops
+  are ordinary copper tracks, so they are indistinguishable from hand-routed
+  segments after export.
 - Back-drill depth and stub live in `.opcb` and IPC-2581 and are reported in
   the Excellon drill file. KiCad PCB import and export do not carry back drill,
   so that exchange path keeps the via without the back-drill information.

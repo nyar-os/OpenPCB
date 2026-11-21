@@ -11,6 +11,7 @@ import { nativeBinding } from './native.js';
 import type {
     AddDifferentialPairOptions,
     AddFootprintOptions,
+    AddTeardropsOptions,
     AddLayerOptions,
     AddNetOptions,
     AddTrackOptions,
@@ -186,6 +187,13 @@ export function deleteVia(handle: number, id: string): BoardEditResult {
 /** Declares one net on an open board. */
 export function addNet(handle: number, options: AddNetOptions): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.addNet').board_add_net(handle, JSON.stringify(options)));
+}
+
+/** Adds linear teardrop copper at every pad-track junction. */
+export function addTeardrops(handle: number, options: AddTeardropsOptions = {}): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.addTeardrops').board_add_teardrops(handle, JSON.stringify(options)),
+    );
 }
 
 /** Declares one differential pair on an open board. */

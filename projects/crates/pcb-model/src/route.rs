@@ -214,6 +214,7 @@ pub(crate) fn run(board: &mut Board, options: RouteOptions) -> Result<(Value, bo
             width: settings.width,
             from: segment.from,
             to: segment.to,
+            teardrop: false,
         });
     }
     for (net, at) in &best.vias {

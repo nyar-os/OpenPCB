@@ -142,6 +142,9 @@ pub(crate) struct Track {
     pub(crate) from: [f64; 2],
     /// Segment end.
     pub(crate) to: [f64; 2],
+    /// Whether this segment was generated as teardrop copper.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) teardrop: bool,
 }
 
 /// One pad resolved to board coordinates, as the router and checks see it.
@@ -708,11 +711,117 @@ impl Board {
         let to = finite_pair(request.to, "to")?;
         let id = format!("track-{}", self.next_track);
         self.next_track += 1;
-        let track = Track { id: id.clone(), net, layer: layer.to_string(), width, from, to };
+        let track = Track { id: id.clone(), net, layer: layer.to_string(), width, from, to, teardrop: false };
         let object = json!(track);
         self.tracks.push(track);
         self.revision += 1;
         Ok(object)
+    }
+
+    /// Adds linear teardrop copper at every pad-track junction.
+    ///
+    /// A teardrop is materialised as two ordinary copper tracks: from two
+    /// points on the pad edge to a point on the track beyond the pad. Only
+    /// same-net, same-layer junctions are considered, existing identical
+    /// segments are skipped, and the request is rejected when it repeats no
+    /// work. The `arc` shape stays unimplemented.
+    pub(crate) fn add_teardrops(&mut self, request: AddTeardropsRequest) -> Result<Value, ServiceError> {
+        let shape =
+            request.shape.as_deref().map(str::trim).filter(|shape| !shape.is_empty()).unwrap_or("linear").to_ascii_lowercase();
+        if shape != "linear" {
+            return Err(ServiceError::new(
+                "capability/not-implemented",
+                format!("teardrop shape `{shape}` is not implemented; only `linear` is"),
+            ));
+        }
+        if let Some(length) = request.length
+            && (!length.is_finite() || length <= 0.0)
+        {
+            return Err(crate::argument("`length` must be a finite number greater than zero"));
+        }
+        let pads = self.placed_pads();
+        let mut pending: Vec<Track> = Vec::new();
+        let mut skipped = 0usize;
+        for track in self.tracks.clone() {
+            if track.teardrop {
+                continue;
+            }
+            let Some(net) = track.net.clone()
+            else {
+                continue;
+            };
+            if self.layer(&track.layer).is_none_or(|layer| layer.kind != LayerKind::Copper) {
+                continue;
+            }
+            let length = request.length.unwrap_or((track.width * 2.0).max(0.2));
+            for (end, other) in [(track.from, track.to), (track.to, track.from)] {
+                let Some(pad) = pads.iter().find(|pad| {
+                    pad.net.as_deref() == Some(net.as_str())
+                        && pad.layer == track.layer
+                        && point_box_distance(end, pad.at, pad.half) <= 1e-6
+                })
+                else {
+                    continue;
+                };
+                let mut direction = [end[0] - pad.at[0], end[1] - pad.at[1]];
+                if direction[0].abs() + direction[1].abs() < 1e-12 {
+                    direction = [end[0] - other[0], end[1] - other[1]];
+                }
+                let norm = (direction[0] * direction[0] + direction[1] * direction[1]).sqrt();
+                if norm <= 1e-12 {
+                    continue;
+                }
+                let unit = [direction[0] / norm, direction[1] / norm];
+                let side = [-unit[1], unit[0]];
+                let x_run = if unit[0].abs() > 1e-12 { pad.half[0] / unit[0].abs() } else { f64::INFINITY };
+                let y_run = if unit[1].abs() > 1e-12 { pad.half[1] / unit[1].abs() } else { f64::INFINITY };
+                let edge_run = x_run.min(y_run);
+                if !edge_run.is_finite() {
+                    continue;
+                }
+                let edge = [pad.at[0] + unit[0] * edge_run, pad.at[1] + unit[1] * edge_run];
+                let tip = [edge[0] + unit[0] * length, edge[1] + unit[1] * length];
+                let half_base = pad.half[0] * side[0].abs() + pad.half[1] * side[1].abs();
+                for base in [
+                    [edge[0] + side[0] * half_base, edge[1] + side[1] * half_base],
+                    [edge[0] - side[0] * half_base, edge[1] - side[1] * half_base],
+                ] {
+                    let exists = |from: [f64; 2], to: [f64; 2]| {
+                        let matches = |existing: &Track| {
+                            existing.net.as_deref() == Some(net.as_str())
+                                && existing.layer == track.layer
+                                && ((same_point(existing.from, from) && same_point(existing.to, to))
+                                    || (same_point(existing.from, to) && same_point(existing.to, from)))
+                        };
+                        self.tracks.iter().any(matches) || pending.iter().any(matches)
+                    };
+                    if exists(base, tip) {
+                        skipped += 1;
+                        continue;
+                    }
+                    pending.push(Track {
+                        id: String::new(),
+                        net: Some(net.clone()),
+                        layer: track.layer.clone(),
+                        width: track.width,
+                        from: base,
+                        to: tip,
+                        teardrop: true,
+                    });
+                }
+            }
+        }
+        let added = pending.len();
+        if added == 0 {
+            return Ok(json!({ "shape": "linear", "teardrops": 0, "tracks": 0, "skipped": skipped }));
+        }
+        for mut track in pending {
+            track.id = format!("track-{}", self.next_track);
+            self.next_track += 1;
+            self.tracks.push(track);
+        }
+        self.revision += 1;
+        Ok(json!({ "shape": "linear", "teardrops": added, "tracks": added, "skipped": skipped }))
     }
 
     /// Removes one track by id and returns the removed id.
@@ -1161,6 +1270,18 @@ fn default_color(kind: LayerKind) -> &'static str {
     }
 }
 
+/// Distance from a point to an axis-aligned box; zero inside the box.
+fn point_box_distance(point: [f64; 2], centre: [f64; 2], half: [f64; 2]) -> f64 {
+    let dx = ((point[0] - centre[0]).abs() - half[0]).max(0.0);
+    let dy = ((point[1] - centre[1]).abs() - half[1]).max(0.0);
+    (dx * dx + dy * dy).sqrt()
+}
+
+/// Whether two ordered points name the same location.
+fn same_point(left: [f64; 2], right: [f64; 2]) -> bool {
+    (left[0] - right[0]).abs() <= 1e-9 && (left[1] - right[1]).abs() <= 1e-9
+}
+
 fn finite(value: f64, field: &str) -> Result<f64, ServiceError> {
     if value.is_finite() { Ok(value) } else { Err(crate::argument(format!("`{field}` must be a finite number"))) }
 }
@@ -1531,6 +1652,18 @@ pub struct AddViaRequest {
     /// Copper layer the span ends on; omit both span fields for a through via.
     #[serde(default)]
     pub to_layer: Option<String>,
+}
+
+/// Request of [`crate::add_teardrops`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTeardropsRequest {
+    /// Teardrop shape; `linear` is the only implemented value.
+    #[serde(default)]
+    pub shape: Option<String>,
+    /// Length from the pad edge to the teardrop tip, in board units.
+    #[serde(default)]
+    pub length: Option<f64>,
 }
 
 /// Request of [`crate::set_via_back_drill`].

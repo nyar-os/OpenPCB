@@ -25,6 +25,7 @@ export interface NativeBinding {
     board_delete_footprint(handle: number, id: string): string;
     board_add_track(handle: number, requestJson: string): string;
     board_add_via(handle: number, requestJson: string): string;
+    board_add_teardrops(handle: number, requestJson: string): string;
     board_set_via_back_drill(handle: number, requestJson: string): string;
     board_route(handle: number, optionsJson: string): string;
     board_add_net(handle: number, requestJson: string): string;

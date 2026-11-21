@@ -510,7 +510,7 @@ fn track(node: &Node, layers: &BTreeSet<String>, nets: &BTreeMap<u32, String>, l
             }
         },
     };
-    Some(Track { id: String::new(), net, layer, width, from, to })
+    Some(Track { id: String::new(), net, layer, width, from, to, teardrop: false })
 }
 
 /// Parses one through, blind or buried via; micro and unknown types are refused.

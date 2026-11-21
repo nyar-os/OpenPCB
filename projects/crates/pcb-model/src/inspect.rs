@@ -336,12 +336,12 @@ fn clearance(board: &Board, issues: &mut CheckReport) {
             if board.layer(&other.layer).is_none_or(|layer| layer.kind != LayerKind::Copper) {
                 continue;
             }
-            if track.net == other.net && shares_endpoint(track, other) {
-                // Two segments of one net that meet at a point are connected;
-                // their shared endpoint is not a clearance violation.
+            let centres = segment_distance(track.from, track.to, other.from, other.to);
+            if track.net == other.net && (shares_endpoint(track, other) || centres <= 1e-6) {
+                // Two segments of one net that meet or cross are connected; a
+                // shared endpoint or a T-junction is not a clearance violation.
                 continue;
             }
-            let centres = segment_distance(track.from, track.to, other.from, other.to);
             let gap = (centres - (track.width + other.width) / 2.0) * scale;
             if gap < MIN_CLEARANCE_MM {
                 issues.push(finding(

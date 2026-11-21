@@ -480,6 +480,7 @@ fn import_tracks(features: &[(String, &Element)], board: &mut Board, scale: f64,
                     width,
                     from: [start_x * scale, start_y * scale],
                     to: [end_x * scale, end_y * scale],
+                    teardrop: false,
                 });
             }
         }

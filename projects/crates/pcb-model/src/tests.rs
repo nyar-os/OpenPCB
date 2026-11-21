@@ -12,10 +12,10 @@ use std::{
 use serde_json::Value;
 
 use crate::{
-    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTrackRequest,
-    AddViaRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetViaBackDrillRequest,
-    UpdateFootprintRequest, UpdateLayerRequest, add_differential_pair, add_footprint, add_layer, add_net, add_pad, add_track,
-    add_via,
+    AddDifferentialPairRequest, AddFootprintRequest, AddLayerRequest, AddNetRequest, AddPadRequest, AddTeardropsRequest,
+    AddTrackRequest, AddViaRequest, CreateRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest,
+    SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, add_differential_pair, add_footprint, add_layer,
+    add_net, add_pad, add_teardrops, add_track, add_via,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, create, delete_differential_pair, delete_footprint, delete_track, delete_via, export, import, inspect,
     move_footprint, open, redo, route, save, set_outline, set_via_back_drill, store, summary, undo, update_footprint,
@@ -175,6 +175,8 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["vias"]["micro"], "unsupported");
     assert_eq!(matrix["differentialPairs"], "supported");
     assert_eq!(matrix["backDrill"], "supported");
+    assert_eq!(matrix["teardrops"]["linear"], "supported");
+    assert_eq!(matrix["teardrops"]["arc"], "unsupported");
     assert_eq!(matrix["routing"], "supported");
 }
 
@@ -349,6 +351,7 @@ fn open_rejects_wrong_tag_version_and_broken_documents() {
         width: -1.0,
         from: [0.0, 0.0],
         to: [1.0, 1.0],
+        teardrop: false,
     });
     let negative_path = write("negative.opcb", &Document::new(negative));
     assert_eq!(open(&negative_path).expect_err("a negative width is rejected").code, "format/invalid");
@@ -399,6 +402,7 @@ fn drc_flags_track_rules_and_connectivity() {
         width: 0.25,
         from: [0.0, 0.0],
         to: [1.0, 0.0],
+        teardrop: false,
     });
     board.tracks.push(Track {
         id: "track-silk".to_string(),
@@ -407,6 +411,7 @@ fn drc_flags_track_rules_and_connectivity() {
         width: 0.25,
         from: [0.0, 5.0],
         to: [1.0, 5.0],
+        teardrop: false,
     });
     board.tracks.push(Track {
         id: "track-thin".to_string(),
@@ -415,6 +420,7 @@ fn drc_flags_track_rules_and_connectivity() {
         width: 0.1,
         from: [0.0, 10.0],
         to: [1.0, 10.0],
+        teardrop: false,
     });
     let handle = store::insert(board);
 
@@ -497,6 +503,7 @@ fn drc_flags_clearance_between_tracks() {
         width: 0.25,
         from: [0.0, 0.0],
         to: [10.0, 0.0],
+        teardrop: false,
     });
     board.tracks.push(Track {
         id: "track-b".to_string(),
@@ -505,6 +512,7 @@ fn drc_flags_clearance_between_tracks() {
         width: 0.25,
         from: [0.0, 0.25],
         to: [5.0, 0.25],
+        teardrop: false,
     });
     board.tracks.push(Track {
         id: "track-a-extension".to_string(),
@@ -513,6 +521,7 @@ fn drc_flags_clearance_between_tracks() {
         width: 0.25,
         from: [10.0, 0.0],
         to: [20.0, 0.0],
+        teardrop: false,
     });
     board.tracks.push(Track {
         id: "track-b-ok".to_string(),
@@ -521,6 +530,7 @@ fn drc_flags_clearance_between_tracks() {
         width: 0.25,
         from: [0.0, 10.0],
         to: [10.0, 10.0],
+        teardrop: false,
     });
     let handle = store::insert(board);
 
@@ -2714,4 +2724,92 @@ fn back_drill_is_validated_exported_and_round_tripped() {
     .expect("the reopened board is readable");
     assert_eq!(back, Some((0.8, 0.2)));
     close(native).expect("the native board closes");
+}
+
+#[test]
+fn linear_teardrops_materialise_without_drc_false_positives() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "SIG".to_string() }).expect("the net is declared");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("J1".to_string()),
+            x: Some(10.0),
+            y: Some(10.0),
+            layer: Some("F.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the first footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("SIG".to_string()),
+        },
+    )
+    .expect("the first pad is placed");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("J2".to_string()),
+            x: Some(30.0),
+            y: Some(10.0),
+            layer: Some("F.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the second footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-2".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("SIG".to_string()),
+        },
+    )
+    .expect("the second pad is placed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("SIG".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.3,
+            from: [10.0, 10.0],
+            to: [30.0, 10.0],
+        },
+    )
+    .expect("the pads are routed");
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [40.0, 20.0] }).expect("the outline is set");
+
+    let first = add_teardrops(handle, AddTeardropsRequest::default()).expect("teardrops are generated");
+    assert_eq!(first["object"]["tracks"], 4);
+    assert_eq!(first["object"]["skipped"], 0);
+    assert_eq!(first["board"]["counts"]["tracks"], 5);
+
+    let second = add_teardrops(handle, AddTeardropsRequest::default()).expect("a repeat run is harmless");
+    assert_eq!(second["object"]["tracks"], 0);
+    assert_eq!(second["object"]["skipped"], 4);
+
+    let report = inspect(
+        handle,
+        Some(vec!["drc".to_string(), "clearance".to_string(), "connectivity".to_string(), "dangling-copper".to_string()]),
+    )
+    .expect("the checks run");
+    assert!(report["passed"].as_bool().expect("passed is a boolean"), "{report}");
+    assert_eq!(codes(&report), Vec::<&str>::new());
+
+    let arc = add_teardrops(handle, AddTeardropsRequest { shape: Some("arc".to_string()), length: None })
+        .expect_err("the arc shape stays unimplemented");
+    assert_eq!(arc.code, "capability/not-implemented");
+    close(handle).expect("the board closes");
 }

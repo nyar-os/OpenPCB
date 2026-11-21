@@ -118,6 +118,8 @@ export interface BoardCapabilities {
     readonly differentialPairs: SupportLevel;
     /** Whether back-drill information can be stored and exported. */
     readonly backDrill: SupportLevel;
+    /** Whether each teardrop shape can be generated. */
+    readonly teardrops: Readonly<Record<'linear' | 'arc', SupportLevel>>;
     /** Whether `board.route()` ships in this engine. */
     readonly routing: SupportLevel;
 }
@@ -363,6 +365,19 @@ export interface AddNetOptions {
 }
 
 /**
+ * Options of `board.addTeardrops()`.
+ *
+ * Teardrops are materialised as ordinary copper tracks, so they follow every
+ * export and inspection path. Only the `linear` shape is implemented.
+ */
+export interface AddTeardropsOptions {
+    /** Teardrop shape; defaults to and only accepts `linear`. */
+    readonly shape?: 'linear';
+    /** Length from the pad edge to the teardrop tip, in board units. */
+    readonly length?: number;
+}
+
+/**
  * Options of `board.addDifferentialPair()`.
  *
  * Lengths are in board units. Declaring a pair routes nothing; the `diffpair`
@@ -493,6 +508,7 @@ export interface Board {
     deleteVia(id: ObjectId): Promise<BoardEditResult>;
     setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult>;
     addNet(options: AddNetOptions): Promise<BoardEditResult>;
+    addTeardrops(options?: AddTeardropsOptions): Promise<BoardEditResult>;
     addDifferentialPair(options: AddDifferentialPairOptions): Promise<BoardEditResult>;
     deleteDifferentialPair(id: ObjectId): Promise<BoardEditResult>;
     route(options?: RouteOptions): Promise<RouteReport>;

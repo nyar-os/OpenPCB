@@ -16,6 +16,7 @@ import * as service from './service.js';
 import type {
     AddDifferentialPairOptions,
     AddFootprintOptions,
+    AddTeardropsOptions,
     AddLayerOptions,
     AddNetOptions,
     AddTrackOptions,
@@ -423,6 +424,10 @@ function attach(
         async addNet(options: AddNetOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.addNet(current, options));
+        },
+        async addTeardrops(options: AddTeardropsOptions = {}): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addTeardrops(current, options));
         },
         async addDifferentialPair(options: AddDifferentialPairOptions): Promise<BoardEditResult> {
             ensure();
