@@ -56,7 +56,7 @@ annular-ring     track-width        unrouted           stackup
 outline          silkscreen         courtyard          netlist
 hole-to-hole     copper-to-edge     edge-clearance     silkscreen-over-pad
 diffpair         dangling-copper    netclass           keepout
-via-in-pad
+via-in-pad       testpoints
 ```
 
 `annular_rings` and `annular-ring` are both accepted spellings.
@@ -294,6 +294,12 @@ being approximated.
   copper actually excluded.
 - The test point report lists only explicitly declared pads and vias. It does not
   infer probes from nets or create panel or fixture geometry.
+- The `testpoints` check treats a net as covered only by a declared test point on
+  one of its pads or vias; copper geometry never implies a probe. A connectable
+  net with no declared test point warns `testpoints/net-not-covered`. A declared
+  net with neither a pad nor a via has no physical contact point, so it errors
+  `testpoints/net-unconnected`. A net that appears only on tracks or copper
+  pours has no contact point either, so it reports the same error.
 
 ### Document lifecycle
 

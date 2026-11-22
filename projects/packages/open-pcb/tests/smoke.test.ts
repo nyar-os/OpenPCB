@@ -231,8 +231,8 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         assert.equal(report.passed, true, "warnings do not fail the board");
         assert.deepEqual(
             report.issues.map((issue) => issue.code),
-            ['drc/footprint-no-pads', 'silkscreen/no-reference-text', 'drc/dangling-copper'],
-            "a footprint without pads, a missing reference legend and loose copper are warnings",
+            ['drc/footprint-no-pads', 'silkscreen/no-reference-text', 'drc/dangling-copper', 'testpoints/net-not-covered'],
+            "a footprint without pads, a missing reference legend, loose copper and an uncovered net are warnings",
         );
         const placement = await board.inspect({ checks: ['silkscreen', 'courtyard'] });
         assert.equal(placement.passed, true);

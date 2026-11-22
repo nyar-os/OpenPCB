@@ -75,8 +75,9 @@ Implemented:
   `track-width`, `unrouted`, `stackup`, `outline`, `silkscreen`, `courtyard`,
   `netlist`, `hole-to-hole`, `copper-to-edge`, `edge-clearance`,
   `silkscreen-over-pad`, `diffpair`, `dangling-copper`, `netclass`, `keepout`,
-  `via-in-pad`. The `via-in-pad` check warns about vias whose centre lands inside
-  a pad they share copper with.
+  `via-in-pad`, `testpoints`. The `via-in-pad` check warns about vias whose centre
+  lands inside a pad they share copper with; `testpoints` warns about connectable
+  nets with no declared test point and errors on nets with no pad or via.
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `drill_map`
   (hole map SVG with tool legend and back-drill marks), `bom`, `pos`,
   `placement` (millimetre JSON), `testpoints` (CSV probe report), `ipc_d_356`
@@ -226,7 +227,7 @@ mutating command also records the previous document for CLI undo/redo.
 
 1. `open-pcb list <file>` and record the revision under review.
 2. Run `open-pcb inspect <file> --checks <list>` with
-   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper,netclass,keepout,via-in-pad`.
+   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper,netclass,keepout,via-in-pad,testpoints`.
 3. Report each finding with its code, layer and object. `passed` is false when
    any non-waived error-severity issue remains; `active` and `waived` count the
    findings after policy is applied. A waived issue stays in `issues` with
@@ -238,7 +239,9 @@ mutating command also records the previous document for CLI undo/redo.
    rectangular outline using `componentToEdge` and `holeToEdge`;
    `dangling-copper` warns about track ends that reach no pad, via or same-net
    track; `via-in-pad` warns about vias whose centre lands inside a pad on a
-   layer the via reaches, naming both objects.
+   layer the via reaches, naming both objects; `testpoints` warns
+   `testpoints/net-not-covered` for a connectable net without a declared test
+   point and errors `testpoints/net-unconnected` for a net with no pad or via.
 4. Waivers and severity overrides are document state: confirm the code, the
    optional object id and the reason before writing them, and say that a waiver
    accepts the finding rather than repairing it.

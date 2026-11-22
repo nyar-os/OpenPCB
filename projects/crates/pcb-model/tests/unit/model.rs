@@ -184,6 +184,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         "netclass",
         "keepout",
         "via-in-pad",
+        "testpoints",
     ] {
         assert_eq!(matrix["checks"][check], "supported", "{check} check");
     }
@@ -995,6 +996,79 @@ fn test_points_report_pad_and_via_probes() {
     delete_test_point(reopened, "testpoint-1").expect("the pad test point is deleted");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["testPoints"], 0);
     close(reopened).expect("the board closes");
+}
+
+#[test]
+fn testpoints_requires_a_declared_probe_for_every_connectable_net() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "SIGNAL".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "POWER".to_string() }).expect("the net is declared");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("U1".to_string()),
+            value: Some("MCU".to_string()),
+            footprint: Some("QFN32".to_string()),
+            x: Some(30.0),
+            y: Some(20.0),
+            rotation: Some(0.0),
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 1.0,
+            y: 1.0,
+            w: 0.8,
+            h: 0.8,
+            net: Some("SIGNAL".to_string()),
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("POWER".to_string()), at: [20.0, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+
+    add_test_point(handle, AddTestPointRequest { target: "fp-1:1".to_string() }).expect("the pad is a test point");
+    add_test_point(handle, AddTestPointRequest { target: "via-1".to_string() }).expect("the via is a test point");
+    let covered = inspect(handle, Some(vec!["testpoints".to_string()])).expect("the check runs");
+    assert_eq!(codes(&covered), Vec::<&str>::new(), "a declared pad or via test point covers its net");
+    assert_eq!(covered["passed"], true);
+
+    delete_test_point(handle, "testpoint-1").expect("the pad test point is deleted");
+    delete_test_point(handle, "testpoint-2").expect("the via test point is deleted");
+    let missing = inspect(handle, Some(vec!["testpoints".to_string()])).expect("the check runs again");
+    assert_eq!(codes(&missing), ["testpoints/net-not-covered", "testpoints/net-not-covered"]);
+    assert_eq!(missing["passed"], true, "a missing test point is a warning");
+    let issues = missing["issues"].as_array().expect("issues is an array");
+    assert_eq!(issues[0]["objectId"], "net-1");
+    assert!(issues[0]["message"].as_str().expect("a message").contains("SIGNAL"));
+    assert_eq!(issues[1]["objectId"], "net-2");
+    assert!(issues[1]["message"].as_str().expect("a message").contains("POWER"));
+    close(handle).expect("the board closes");
+
+    let unconnected = created();
+    add_net(unconnected, AddNetRequest { name: "GHOST".to_string() }).expect("the net is declared");
+    let report = inspect(unconnected, Some(vec!["testpoints".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["testpoints/net-unconnected"]);
+    assert_eq!(report["issues"][0]["severity"], "error");
+    assert_eq!(report["issues"][0]["objectId"], "net-1");
+    assert!(report["issues"][0]["message"].as_str().expect("a message").contains("GHOST"));
+    assert_eq!(report["passed"], false, "a net without a physical contact point is an error");
+    close(unconnected).expect("the board closes");
+
+    let empty = created();
+    let report = inspect(empty, Some(vec!["testpoints".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "a board with no nets has nothing to cover");
+    assert_eq!(report["passed"], true);
+    close(empty).expect("the board closes");
 }
 
 #[test]

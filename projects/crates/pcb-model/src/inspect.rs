@@ -58,6 +58,7 @@ pub(crate) const CHECKS: &[&str] = &[
     "netclass",
     "keepout",
     "via-in-pad",
+    "testpoints",
 ];
 
 /// Checks this build can actually run.
@@ -83,6 +84,7 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "netclass",
     "keepout",
     "via-in-pad",
+    "testpoints",
 ];
 
 /// Runs the requested checks and returns an `InspectReport`.
@@ -121,6 +123,7 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "netclass" => netclass(board, &mut report),
             "keepout" => keepout(board, &mut report),
             "via-in-pad" => via_in_pad(board, &mut report),
+            "testpoints" => testpoints(board, &mut report),
             other => report.push(finding(
                 "check/unsupported",
                 Severity::Warning,
@@ -520,6 +523,63 @@ fn via_in_pad(board: &Board, issues: &mut CheckReport) {
             issue = issue.with_detail("pad", pad.key.clone());
             issues.push(issue);
         }
+    }
+}
+
+/// Checks that every declared net offers a declared probe point.
+///
+/// A net is covered only by an explicit test point: the document stores test
+/// points as pad or via targets, so no probe is inferred from copper geometry.
+/// A net with neither a pad nor a via has no physical contact point at all and
+/// is reported as an error; a connectable net with no declared test point is a
+/// warning that names the net.
+fn testpoints(board: &Board, issues: &mut CheckReport) {
+    let mut covered = HashSet::new();
+    for point in &board.test_points {
+        if let Some(net) = board.resolve_test_point(&point.target).and_then(|resolved| resolved.net) {
+            covered.insert(net);
+        }
+    }
+
+    let mut pads: HashMap<&str, usize> = HashMap::new();
+    let placed = board.placed_pads();
+    for pad in &placed {
+        if let Some(net) = pad.net.as_deref() {
+            *pads.entry(net).or_default() += 1;
+        }
+    }
+    let mut vias: HashMap<&str, usize> = HashMap::new();
+    for via in &board.vias {
+        if let Some(net) = via.net.as_deref() {
+            *vias.entry(net).or_default() += 1;
+        }
+    }
+
+    for net in &board.nets {
+        let pad_count = pads.get(net.name.as_str()).copied().unwrap_or(0);
+        let via_count = vias.get(net.name.as_str()).copied().unwrap_or(0);
+        if pad_count == 0 && via_count == 0 {
+            issues.push(finding(
+                "testpoints/net-unconnected",
+                Severity::Error,
+                board,
+                None,
+                Some(&net.id),
+                format!("net `{}` has no pad or via, so it offers no physical test point", net.name),
+            ));
+            continue;
+        }
+        if covered.contains(&net.name) {
+            continue;
+        }
+        issues.push(finding(
+            "testpoints/net-not-covered",
+            Severity::Warning,
+            board,
+            None,
+            Some(&net.id),
+            format!("net `{}` has pads and vias but no declared test point", net.name),
+        ));
     }
 }
 
