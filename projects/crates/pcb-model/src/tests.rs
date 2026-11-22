@@ -13,19 +13,19 @@ use serde_json::{Value, json};
 
 use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
-    AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest,
-    AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
+    AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTextRequest,
+    AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
     ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, SetOutlineRequest,
     SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    UpdateTrackRequest, UpdateViaRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net,
-    add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_track, add_via, add_waiver, add_zone,
-    assign_net_class,
+    UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout,
+    add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via,
+    add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
-    delete_severity, delete_slot, delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export,
-    impedance_table, import, inspect, move_footprint, open, outline_geometry, panelize, redo, route, save, set_outline,
-    set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance, stackup_width, stitch_vias, store, summary,
-    undo, update_footprint, update_layer, update_track, update_via,
+    delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver, delete_zone, export,
+    impedance_table, import, inspect, list_texts, move_footprint, open, outline_geometry, panelize, redo, route, save,
+    set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance, stackup_width, stitch_vias,
+    store, summary, undo, update_footprint, update_layer, update_text, update_track, update_via,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -369,6 +369,118 @@ fn copper_zones_persist_and_write_gerber_regions() {
     assert_eq!(removed["deleted"], "zone-1");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["zones"], 0);
     close(reopened).expect("the board closes");
+}
+
+#[test]
+fn silkscreen_text_items_edit_persist_and_reach_kicad_and_svg() {
+    let directory = TempDir::new();
+    let handle = created();
+    let added = add_text(
+        handle,
+        AddTextRequest {
+            text: "REV A".to_string(),
+            layer: "F.SilkS".to_string(),
+            at: [10.0, 20.0],
+            rotation: Some(90.0),
+            size: None,
+            thickness: None,
+        },
+    )
+    .expect("the text item is added");
+    assert_eq!(added["object"]["id"], "text-1");
+    assert_eq!(added["object"]["layer"], "F.SilkS");
+    assert_eq!(added["object"]["rotation"], 90.0);
+    assert_eq!(added["object"]["size"], 1.0);
+    assert_eq!(added["object"]["thickness"], 0.15);
+    assert_eq!(added["board"]["counts"]["texts"], 1);
+
+    add_text(
+        handle,
+        AddTextRequest {
+            text: " ".to_string(),
+            layer: "F.SilkS".to_string(),
+            at: [0.0, 0.0],
+            rotation: None,
+            size: None,
+            thickness: None,
+        },
+    )
+    .expect_err("blank text is rejected");
+    add_text(
+        handle,
+        AddTextRequest {
+            text: "VCC".to_string(),
+            layer: "F.Cu".to_string(),
+            at: [0.0, 0.0],
+            rotation: None,
+            size: None,
+            thickness: None,
+        },
+    )
+    .expect_err("copper is not a legend layer");
+
+    let updated = update_text(
+        handle,
+        UpdateTextRequest { id: "text-1".to_string(), text: Some("REV B".to_string()), size: Some(2.0), ..Default::default() },
+    )
+    .expect("the text item is updated");
+    assert_eq!(updated["object"]["text"], "REV B");
+    assert_eq!(updated["object"]["size"], 2.0);
+    assert_eq!(updated["object"]["at"][1], 20.0, "an update keeps untouched fields");
+
+    let listed = list_texts(handle).expect("the text items are listed");
+    assert_eq!(listed["count"], 1);
+    assert_eq!(listed["items"][0]["text"], "REV B");
+
+    let path = directory.join("texts.opcb");
+    save(handle, &path, false).expect("the board is saved");
+    let reopened = handle_of(&open(&path).expect("the board reopens"));
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["texts"], 1);
+
+    let kicad = directory.join("texts.kicad_pcb");
+    export(reopened, "kicad_pcb", &kicad).expect("the KiCad file writes");
+    let text = fs::read_to_string(&kicad).expect("the KiCad file is readable");
+    assert!(text.contains("(gr_text \"REV B\""), "the KiCad writer emits the legend");
+    assert!(text.contains("(layer \"F.SilkS\")"), "the legend keeps its silkscreen layer");
+
+    let svg = directory.join("texts.svg");
+    export(reopened, "svg", &svg).expect("the preview writes");
+    let text = fs::read_to_string(&svg).expect("the preview is readable");
+    assert!(text.contains(">REV B</text>"), "the preview draws the legend text");
+
+    let removed = delete_text(reopened, "text-1").expect("the text item is deleted");
+    assert_eq!(removed["deleted"], "text-1");
+    assert_eq!(summary(reopened).expect("the board is listed")["counts"]["texts"], 0);
+
+    add_footprint(
+        reopened,
+        AddFootprintRequest {
+            reference: Some("U9".to_string()),
+            value: None,
+            footprint: None,
+            x: Some(1.0),
+            y: Some(1.0),
+            rotation: None,
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the footprint is placed");
+    let before = inspect(reopened, Some(vec!["silkscreen".to_string()])).expect("silkscreen runs");
+    assert!(codes(&before).contains(&"silkscreen/no-reference-text"), "a missing legend is reported");
+    add_text(
+        reopened,
+        AddTextRequest {
+            text: "U9".to_string(),
+            layer: "F.SilkS".to_string(),
+            at: [1.0, 3.0],
+            rotation: None,
+            size: None,
+            thickness: None,
+        },
+    )
+    .expect("the matching legend is added");
+    let after = inspect(reopened, Some(vec!["silkscreen".to_string()])).expect("silkscreen runs");
+    assert!(!codes(&after).contains(&"silkscreen/no-reference-text"), "a matching legend satisfies the check");
 }
 
 #[test]

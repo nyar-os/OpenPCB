@@ -39,6 +39,20 @@ pub(crate) fn write(board: &Board) -> String {
         );
     }
 
+    for text in &board.texts {
+        let _ = writeln!(
+            out,
+            "  (gr_text \"{}\" (at {} {}) (layer \"{}\") (effects (font (size {} {}) (thickness {}))))",
+            sexpr(&text.text),
+            point(text.at, scale),
+            mm(text.rotation),
+            sexpr(&kicad_layer_name(board, &text.layer)),
+            mm(text.size * scale),
+            mm(text.size * scale),
+            mm(text.thickness * scale)
+        );
+    }
+
     for track in &board.tracks {
         let _ = writeln!(
             out,

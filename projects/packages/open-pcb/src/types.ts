@@ -374,6 +374,10 @@ export interface BoardCapabilities {
     readonly routing: SupportLevel;
     /** Whether copper pour regions can be declared, previewed and written as Gerber regions. */
     readonly zones: SupportLevel;
+    /** Whether silkscreen text items can be declared and written to KiCad and the preview. */
+    readonly texts: SupportLevel;
+    /** Whether a copper pour area and perimeter report can be produced. */
+    /** Whether a drill tool and hole report can be produced. */
     /** Whether copper keepout regions can be declared and checked. */
     readonly keepouts: SupportLevel;
     /** Whether stitching via fences can be generated along the board outline. */
@@ -434,6 +438,7 @@ export interface BoardSummaryCounts {
     readonly slots: number;
     readonly zones: number;
     readonly keepouts: number;
+    readonly texts: number;
     readonly netClasses: number;
     readonly testPoints: number;
     readonly differentialPairs: number;
@@ -716,6 +721,56 @@ export interface AddZoneOptions {
     readonly net?: string;
     /** Closed polygon in board units, in drawing order; at least three points. */
     readonly points: readonly (readonly [number, number])[];
+}
+
+/** One silkscreen text item. */
+export interface BoardText {
+    readonly id: ObjectId;
+    readonly text: string;
+    readonly layer: LayerId;
+    /** Anchor position in board units. */
+    readonly at: readonly [number, number];
+    /** Rotation in degrees, counter-clockwise. */
+    readonly rotation: number;
+    /** Glyph height in board units. */
+    readonly size: number;
+    /** Stroke thickness in board units. */
+    readonly thickness: number;
+}
+
+/** Options of `board.addText()`. */
+export interface AddTextOptions {
+    /** Text content; must not be blank. */
+    readonly text: string;
+    /** Silkscreen layer id, for example `F.SilkS`. */
+    readonly layer: string;
+    /** Anchor position in board units. */
+    readonly at: readonly [number, number];
+    /** Rotation in degrees; defaults to 0. */
+    readonly rotation?: number;
+    /** Glyph height in board units; defaults to 1. */
+    readonly size?: number;
+    /** Stroke thickness in board units; defaults to 0.15. */
+    readonly thickness?: number;
+}
+
+/** Options of `board.updateText()`. At least one field is required. */
+export interface UpdateTextOptions {
+    readonly id: ObjectId;
+    readonly text?: string;
+    readonly layer?: string;
+    readonly at?: readonly [number, number];
+    readonly rotation?: number;
+    readonly size?: number;
+    readonly thickness?: number;
+}
+
+/** Result of `board.listTexts()`. Positions use the board unit. */
+export interface TextListReport {
+    readonly revision: number;
+    readonly units: BoardUnits;
+    readonly count: number;
+    readonly items: readonly BoardText[];
 }
 
 /** Options of `board.addKeepout()`. */
@@ -1054,6 +1109,10 @@ export interface Board {
     deleteVia(id: ObjectId): Promise<BoardEditResult>;
     addZone(options: AddZoneOptions): Promise<BoardEditResult>;
     deleteZone(id: ObjectId): Promise<BoardEditResult>;
+    addText(options: AddTextOptions): Promise<BoardEditResult>;
+    updateText(options: UpdateTextOptions): Promise<BoardEditResult>;
+    deleteText(id: ObjectId): Promise<BoardEditResult>;
+    listTexts(): Promise<TextListReport>;
     addKeepout(options: AddKeepoutOptions): Promise<BoardEditResult>;
     deleteKeepout(id: ObjectId): Promise<BoardEditResult>;
     addNetClass(options: AddNetClassOptions): Promise<BoardEditResult>;

@@ -438,6 +438,46 @@ pub(crate) struct Zone {
     pub(crate) points: Vec<[f64; 2]>,
 }
 
+/// One silkscreen text item.
+///
+/// Text is a legend annotation, not copper: it sits on a silkscreen layer and
+/// carries its own position, rotation, glyph size and stroke thickness. The
+/// KiCad writer emits it as `gr_text` and the preview draws it as SVG text; the
+/// Gerber legend writer does not stroke glyphs yet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TextItem {
+    /// Stable text id.
+    pub(crate) id: String,
+    /// Text content; never empty after trimming.
+    pub(crate) text: String,
+    /// Silkscreen layer the legend lives on.
+    pub(crate) layer: String,
+    /// Anchor position in board units.
+    pub(crate) at: [f64; 2],
+    /// Rotation in degrees, counter-clockwise.
+    pub(crate) rotation: f64,
+    /// Glyph height in board units.
+    pub(crate) size: f64,
+    /// Stroke thickness in board units.
+    pub(crate) thickness: f64,
+}
+
+impl TextItem {
+    /// Api projection of one text item.
+    pub(crate) fn to_value(&self) -> Value {
+        json!({
+            "id": self.id,
+            "text": self.text,
+            "layer": self.layer,
+            "at": self.at,
+            "rotation": self.rotation,
+            "size": self.size,
+            "thickness": self.thickness,
+        })
+    }
+}
+
 /// One copper keepout region.
 ///
 /// A keepout is a closed polygon with at least three vertices that no copper
@@ -548,6 +588,9 @@ pub(crate) struct Board {
     /// Copper keepout regions; absent on documents written before them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) keepouts: Vec<Keepout>,
+    /// Silkscreen text items; absent on documents written before them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) texts: Vec<TextItem>,
     /// Declared net classes; absent on documents written before classes existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) net_classes: Vec<NetClass>,
@@ -584,6 +627,9 @@ pub(crate) struct Board {
     /// Next keepout sequence number.
     #[serde(default = "one")]
     pub(crate) next_keepout: u64,
+    /// Next text item sequence number.
+    #[serde(default = "one")]
+    pub(crate) next_text: u64,
     /// Next net class sequence number.
     #[serde(default = "one")]
     pub(crate) next_net_class: u64,
@@ -645,6 +691,7 @@ impl Board {
             slots: Vec::new(),
             zones: Vec::new(),
             keepouts: Vec::new(),
+            texts: Vec::new(),
             net_classes: Vec::new(),
             test_points: Vec::new(),
             differential_pairs: Vec::new(),
@@ -658,6 +705,7 @@ impl Board {
             next_slot: 1,
             next_zone: 1,
             next_keepout: 1,
+            next_text: 1,
             next_net_class: 1,
             next_test_point: 1,
             next_net: 1,
@@ -1635,6 +1683,105 @@ impl Board {
         Ok(removed.id)
     }
 
+    /// Adds one silkscreen text item and returns its public object shape.
+    ///
+    /// A text item needs non-empty content and a declared silkscreen layer.
+    /// `size` defaults to 1.0 and `thickness` to 0.15, both in board units.
+    pub(crate) fn add_text(&mut self, request: AddTextRequest) -> Result<Value, ServiceError> {
+        if request.text.trim().is_empty() {
+            return Err(crate::argument("a text item needs a non-empty `text`"));
+        }
+        let layer = request.layer.trim();
+        if layer.is_empty() {
+            return Err(crate::argument("a text item needs a non-empty `layer`"));
+        }
+        self.text_layer(layer)?;
+        let at = finite_pair(request.at, "at")?;
+        let rotation = finite(request.rotation.unwrap_or(0.0), "rotation")?;
+        let size = positive(request.size.unwrap_or(1.0), "size")?;
+        let thickness = positive(request.thickness.unwrap_or(0.15), "thickness")?;
+        let id = format!("text-{}", self.next_text);
+        self.next_text += 1;
+        let item = TextItem { id, text: request.text, layer: layer.to_string(), at, rotation, size, thickness };
+        let object = item.to_value();
+        self.texts.push(item);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Updates the content, layer, position or metrics of one text item.
+    pub(crate) fn update_text(&mut self, request: UpdateTextRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .texts
+            .iter()
+            .position(|item| item.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no text item with id `{}`", request.id)))?;
+        self.editable_layer(&self.texts[index].layer)?;
+        let layer = match request.layer {
+            Some(layer) => {
+                let layer = layer.trim().to_string();
+                if layer.is_empty() {
+                    return Err(crate::argument("a text item needs a non-empty `layer`"));
+                }
+                self.text_layer(&layer)?;
+                Some(layer)
+            }
+            None => None,
+        };
+        if request.text.is_none()
+            && layer.is_none()
+            && request.at.is_none()
+            && request.rotation.is_none()
+            && request.size.is_none()
+            && request.thickness.is_none()
+        {
+            return Err(crate::argument("a text update needs `text`, `layer`, `at`, `rotation`, `size` or `thickness`"));
+        }
+        if let Some(text) = request.text.as_deref()
+            && text.trim().is_empty()
+        {
+            return Err(crate::argument("a text item needs a non-empty `text`"));
+        }
+        let at = request.at.map(|at| finite_pair(at, "at")).transpose()?;
+        let rotation = request.rotation.map(|value| finite(value, "rotation")).transpose()?;
+        let size = request.size.map(|value| positive(value, "size")).transpose()?;
+        let thickness = request.thickness.map(|value| positive(value, "thickness")).transpose()?;
+        let item = &mut self.texts[index];
+        if let Some(text) = request.text {
+            item.text = text;
+        }
+        if let Some(layer) = layer {
+            item.layer = layer;
+        }
+        if let Some(at) = at {
+            item.at = at;
+        }
+        if let Some(rotation) = rotation {
+            item.rotation = rotation;
+        }
+        if let Some(size) = size {
+            item.size = size;
+        }
+        if let Some(thickness) = thickness {
+            item.thickness = thickness;
+        }
+        self.revision += 1;
+        Ok(self.texts[index].to_value())
+    }
+
+    /// Removes one text item by id and returns the removed id.
+    pub(crate) fn delete_text(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .texts
+            .iter()
+            .position(|item| item.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no text item with id `{id}`")))?;
+        self.editable_layer(&self.texts[index].layer)?;
+        let removed = self.texts.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
     /// Adds one copper keepout region and returns its public object shape.
     ///
     /// A keepout needs at least three vertices and a non-zero enclosed area.
@@ -2048,6 +2195,15 @@ impl Board {
         let layer = self.layer(id).ok_or_else(|| crate::argument(format!("layer `{id}` is not declared on this board")))?;
         if layer.locked {
             return Err(ServiceError::new("board/layer-locked", format!("layer `{id}` is locked")));
+        }
+        Ok(())
+    }
+
+    /// Rejects a missing or non-silkscreen text layer before an edit uses it.
+    fn text_layer(&self, id: &str) -> Result<(), ServiceError> {
+        self.editable_layer(id)?;
+        if self.layer(id).is_none_or(|layer| layer.kind != LayerKind::Silkscreen) {
+            return Err(crate::argument(format!("`{id}` is not a silkscreen layer; text needs a legend layer")));
         }
         Ok(())
     }
@@ -2512,6 +2668,34 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         }
     }
 
+    let mut text_ids = HashSet::new();
+    for item in &board.texts {
+        if item.id.trim().is_empty() {
+            return Err(crate::invalid("a text item has an empty id"));
+        }
+        if !text_ids.insert(item.id.as_str()) {
+            return Err(crate::invalid(format!("text item id `{}` is duplicated", item.id)));
+        }
+        if item.text.trim().is_empty() {
+            return Err(crate::invalid(format!("text item `{}` has empty content", item.id)));
+        }
+        let Some(layer) = board.layer(&item.layer)
+        else {
+            return Err(crate::invalid(format!("text item `{}` references missing layer `{}`", item.id, item.layer)));
+        };
+        if layer.kind != LayerKind::Silkscreen {
+            return Err(crate::invalid(format!(
+                "text item `{}` sits on `{}`, which is not a silkscreen layer",
+                item.id, item.layer
+            )));
+        }
+        checks(item.at[0], &format!("text item `{}` at.x", item.id))?;
+        checks(item.at[1], &format!("text item `{}` at.y", item.id))?;
+        checks(item.rotation, &format!("text item `{}` rotation", item.id))?;
+        sizes(item.size, &format!("text item `{}` size", item.id))?;
+        sizes(item.thickness, &format!("text item `{}` thickness", item.id))?;
+    }
+
     let mut keepout_ids = HashSet::new();
     for keepout in &board.keepouts {
         if keepout.id.trim().is_empty() {
@@ -2648,6 +2832,7 @@ pub(crate) fn summary(board: &Board) -> Value {
             "slots": board.slots.len(),
             "zones": board.zones.len(),
             "keepouts": board.keepouts.len(),
+            "texts": board.texts.len(),
             "netClasses": board.net_classes.len(),
             "testPoints": board.test_points.len(),
             "differentialPairs": board.differential_pairs.len(),
@@ -2661,6 +2846,7 @@ fn objects_on(board: &Board, layer: &Layer) -> usize {
     count += board.tracks.iter().filter(|track| track.layer == layer.id).count();
     count += board.zones.iter().filter(|zone| zone.layer == layer.id).count();
     count += board.keepouts.iter().filter(|keepout| board.keepout_covers(keepout, &layer.id)).count();
+    count += board.texts.iter().filter(|item| item.layer == layer.id).count();
     if layer.kind == LayerKind::Copper {
         count += board.vias.iter().filter(|via| board.via_covers(via, &layer.id)).count();
         count += board.slots.len();
@@ -2788,6 +2974,53 @@ pub struct AddZoneRequest {
     pub net: Option<String>,
     /// Polygon vertices in board units, in drawing order.
     pub points: Vec<[f64; 2]>,
+}
+
+/// Request of [`crate::add_text`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTextRequest {
+    /// Text content; must not be blank.
+    pub text: String,
+    /// Silkscreen layer id the legend lives on.
+    pub layer: String,
+    /// Anchor position in board units.
+    pub at: [f64; 2],
+    /// Rotation in degrees; defaults to 0.
+    #[serde(default)]
+    pub rotation: Option<f64>,
+    /// Glyph height in board units; defaults to 1.0.
+    #[serde(default)]
+    pub size: Option<f64>,
+    /// Stroke thickness in board units; defaults to 0.15.
+    #[serde(default)]
+    pub thickness: Option<f64>,
+}
+
+/// Request of [`crate::update_text`]. At least one field is required.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTextRequest {
+    /// Text item id to update.
+    pub id: String,
+    /// New content.
+    #[serde(default)]
+    pub text: Option<String>,
+    /// New silkscreen layer id.
+    #[serde(default)]
+    pub layer: Option<String>,
+    /// New anchor position in board units.
+    #[serde(default)]
+    pub at: Option<[f64; 2]>,
+    /// New rotation in degrees.
+    #[serde(default)]
+    pub rotation: Option<f64>,
+    /// New glyph height in board units.
+    #[serde(default)]
+    pub size: Option<f64>,
+    /// New stroke thickness in board units.
+    #[serde(default)]
+    pub thickness: Option<f64>,
 }
 
 /// Request of [`crate::add_keepout`].

@@ -19,6 +19,7 @@ import type {
     AddNetOptions,
     AddPadInput,
     AddSlotOptions,
+    AddTextOptions,
     AddTrackOptions,
     AddViaOptions,
     AddWaiverOptions,
@@ -55,9 +56,11 @@ import type {
     SetRulesOptions,
     SetSeverityOptions,
     SetViaBackDrillOptions,
+    TextListReport,
     UpdateFootprintOptions,
     UpdateLayerOptions,
     UpdatePadInput,
+    UpdateTextOptions,
     UpdateTrackOptions,
     UpdateViaOptions,
 } from './types.js';
@@ -241,6 +244,26 @@ export function addZone(handle: number, options: AddZoneOptions): BoardEditResul
 /** Deletes one copper pour region from an open board. */
 export function deleteZone(handle: number, id: string): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.deleteZone').board_delete_zone(handle, id));
+}
+
+/** Adds one silkscreen text item to an open board. */
+export function addText(handle: number, options: AddTextOptions): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.addText').board_add_text(handle, JSON.stringify(options)));
+}
+
+/** Updates one silkscreen text item on an open board. */
+export function updateText(handle: number, options: UpdateTextOptions): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.updateText').board_update_text(handle, JSON.stringify(options)));
+}
+
+/** Deletes one silkscreen text item from an open board. */
+export function deleteText(handle: number, id: string): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deleteText').board_delete_text(handle, id));
+}
+
+/** Lists the silkscreen text items of an open board. */
+export function listTexts(handle: number): TextListReport {
+    return decode<TextListReport>(() => binding('board.listTexts').board_list_texts(handle));
 }
 
 /** Adds one copper keepout region to an open board. */

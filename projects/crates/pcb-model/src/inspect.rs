@@ -940,13 +940,17 @@ fn outline(board: &Board, issues: &mut CheckReport) {
 /// Reports whether every footprint reference can be represented on silkscreen
 /// and whether every pad stays inside the board outline.
 ///
-/// The document model has no silkscreen text or shape field, so a footprint
-/// reference cannot be represented on the silk layer yet. That is reported as a
-/// warning per footprint instead of a clean pass. Pad placement is still checked
-/// against real coordinates.
+/// A footprint reference is satisfied by a silkscreen text item whose content
+/// matches the designator; without one the warning names the missing legend.
+/// Pad placement is still checked against real coordinates.
 fn silkscreen(board: &Board, issues: &mut CheckReport) {
     for footprint in &board.footprints {
         let layer = silkscreen_layer(board, &footprint.layer);
+        if let Some(layer) = layer
+            && board.texts.iter().any(|item| item.text == footprint.ref_ && item.layer == layer)
+        {
+            continue;
+        }
         issues.push(finding(
             "silkscreen/no-reference-text",
             Severity::Warning,
@@ -954,8 +958,8 @@ fn silkscreen(board: &Board, issues: &mut CheckReport) {
             layer,
             Some(&footprint.id),
             format!(
-                "footprint `{}` has no silkscreen reference text; this document model carries no silkscreen text geometry",
-                footprint.ref_
+                "footprint `{}` has no silkscreen reference text; add a `{}` legend or keep the reference off the legend",
+                footprint.ref_, footprint.ref_
             ),
         ));
     }

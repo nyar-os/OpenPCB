@@ -43,11 +43,11 @@ use std::{fs, path::Path};
 
 pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
-    AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest,
-    AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest, ImpedanceRequest,
-    ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
-    SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
-    UpdateTrackRequest, UpdateViaRequest, WidthRequest,
+    AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTextRequest,
+    AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest,
+    ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
+    SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
+    UpdatePadRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 pub use outline::OutlineGeometryRequest;
@@ -207,6 +207,7 @@ pub fn capabilities() -> Value {
         "drcPolicy": "supported",
         "routing": "supported",
         "zones": "supported",
+        "texts": "supported",
         "keepouts": "supported",
         "viaStitching": "supported",
         "slots": "supported",
@@ -561,6 +562,48 @@ pub fn delete_zone(handle: u64, id: &str) -> Result<Value, ServiceError> {
         Ok(())
     })?;
     edit_result(handle, None, Some(deleted))
+}
+
+/// Adds one silkscreen text item to an open board.
+pub fn add_text(handle: u64, request: AddTextRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.add_text(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Updates the content, layer or metrics of one silkscreen text item.
+pub fn update_text(handle: u64, request: UpdateTextRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.update_text(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Deletes one silkscreen text item and returns its id.
+pub fn delete_text(handle: u64, id: &str) -> Result<Value, ServiceError> {
+    let mut deleted = String::new();
+    store::mutate(handle, |board| {
+        deleted = board.delete_text(id)?;
+        Ok(())
+    })?;
+    edit_result(handle, None, Some(deleted))
+}
+
+/// Lists every silkscreen text item of one open board.
+pub fn list_texts(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, |board| {
+        Ok(json!({
+            "revision": board.revision,
+            "units": board.units,
+            "count": board.texts.len(),
+            "items": board.texts.iter().map(board::TextItem::to_value).collect::<Vec<_>>(),
+        }))
+    })?
 }
 
 /// Adds one copper keepout region to an open board.

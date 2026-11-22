@@ -156,6 +156,7 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.solderMask, 'supported');
     assert.equal(matrix.drcPolicy, 'supported');
     assert.equal(matrix.routing, 'supported');
+    assert.equal(matrix.texts, 'supported');
     assert.equal(matrix.exportTargets.drl, 'supported');
     assert.equal(matrix.exportTargets.gbr, 'supported');
     assert.equal(matrix.exportTargets.pdf, 'supported');
@@ -199,8 +200,8 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         assert.equal(report.passed, true, "warnings do not fail the board");
         assert.deepEqual(
             report.issues.map((issue) => issue.code),
-            ['drc/footprint-no-pads', 'silkscreen/no-reference-text'],
-            "a footprint without pads is a warning and its reference text is reported as missing",
+            ['drc/footprint-no-pads', 'silkscreen/no-reference-text', 'drc/dangling-copper'],
+            "a footprint without pads, a missing reference legend and loose copper are warnings",
         );
         const placement = await board.inspect({ checks: ['silkscreen', 'courtyard'] });
         assert.equal(placement.passed, true);
@@ -232,9 +233,9 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
 
         const gerber = path.join(directory, 'gerber');
         const artifacts = await board.export({ format: 'gbr', target: gerber });
-        assert.equal(artifacts.artifacts?.length, 7);
+        assert.equal(artifacts.artifacts?.length, 9);
         assert.equal(artifacts.bytes, artifacts.artifacts?.reduce((total, item) => total + item.bytes, 0));
-        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'B_SilkS.gbr', 'F_Mask.gbr', 'B_Mask.gbr', 'Edge_Cuts.gbr']) {
+        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'B_SilkS.gbr', 'F_Mask.gbr', 'B_Mask.gbr', 'F_Paste.gbr', 'B_Paste.gbr', 'Edge_Cuts.gbr']) {
             const content = fs.readFileSync(path.join(gerber, name), 'utf8');
             assert.match(content, /%FSLAX46Y46\*%/);
             assert.match(content, /M02\*/);
@@ -321,6 +322,28 @@ test('waivers and severity overrides change the inspection verdict', { skip: wit
 
     await board.deleteWaiver('waiver-1');
     assert.equal((await board.inspect({ checks })).passed, false);
+    await board.close();
+    await pcb.dispose();
+});
+
+test('silkscreen text round trips through the SDK', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+    const board = await pcb.create({ title: 'Reports' });
+    await board.addNet({ name: 'VCC' });
+    await board.addVia({ net: 'VCC', at: [10, 10], diameter: 0.6, drill: 0.3 });
+    await board.addSlot({ net: 'VCC', from: [1, 1], to: [6, 1], width: 0.8 });
+    const legend = await board.addText({ text: 'REV A', layer: 'F.SilkS', at: [5, 75], size: 2, thickness: 0.2 });
+    assert.equal(legend.object?.id, 'text-1');
+    assert.equal(board.summary.counts.texts, 1);
+    const updated = await board.updateText({ id: 'text-1', text: 'REV B', rotation: 90 });
+    assert.equal(updated.object?.text, 'REV B');
+    const legends = await board.listTexts();
+    assert.equal(legends.count, 1);
+    assert.equal(legends.items[0].rotation, 90);
+    assert.deepEqual(legends.items[0].at, [5, 75]);
+
+    assert.equal((await board.deleteText('text-1')).deleted, 'text-1');
+    assert.equal((await board.listTexts()).count, 0);
     await board.close();
     await pcb.dispose();
 });
@@ -508,6 +531,9 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         );
         run('track', 'add', document, '--net', 'VCC', '--layer', 'F.Cu', '--from', '10,10', '--to', '30,10', '--width', '0.25');
         run('via', 'add', document, '--net', 'VCC', '--at', '20,20', '--diameter', '0.6', '--drill', '0.3');
+        run('text', 'add', document, '--text', 'REV A', '--layer', 'F.SilkS', '--at', '5,75', '--size', '2');
+        run('text', 'update', document, '--id', 'text-1', '--text', 'REV B');
+        assert.match(run('text', 'list', document), /texts=1/);
 
         run('footprint', 'move', document, '--id', 'fp-1', '--x', '40', '--y', '25', '--rotation', '90');
         assert.equal(footprintX(), 40);
@@ -553,7 +579,7 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
 
         const gerber = path.join(directory, 'gerber');
         run('export', document, '--format', 'gbr', '--out', gerber);
-        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'B_SilkS.gbr', 'F_Mask.gbr', 'B_Mask.gbr', 'Edge_Cuts.gbr']) {
+        for (const name of ['F_Cu.gbr', 'B_Cu.gbr', 'F_SilkS.gbr', 'B_SilkS.gbr', 'F_Mask.gbr', 'B_Mask.gbr', 'F_Paste.gbr', 'B_Paste.gbr', 'Edge_Cuts.gbr']) {
             const content = fs.readFileSync(path.join(gerber, name), 'utf8');
             assert.match(content, /%FSLAX46Y46\*%/, `${name} declares the coordinate format`);
             assert.match(content, /M02\*/, `${name} ends with M02`);

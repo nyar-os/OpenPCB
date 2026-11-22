@@ -24,6 +24,7 @@ import type {
     AddNetOptions,
     AddPadInput,
     AddSlotOptions,
+    AddTextOptions,
     AddTrackOptions,
     AddViaOptions,
     AddWaiverOptions,
@@ -67,9 +68,11 @@ import type {
     SetStackupOptions,
     SetViaBackDrillOptions,
     StitchViasOptions,
+    TextListReport,
     UpdateFootprintOptions,
     UpdateLayerOptions,
     UpdatePadInput,
+    UpdateTextOptions,
     UpdateTrackOptions,
     UpdateViaOptions,
 } from './types.js';
@@ -483,6 +486,22 @@ function attach(
         async deleteZone(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteZone(current, id));
+        },
+        async addText(options: AddTextOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addText(current, options));
+        },
+        async updateText(options: UpdateTextOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.updateText(current, options));
+        },
+        async deleteText(id: string): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deleteText(current, id));
+        },
+        async listTexts(): Promise<TextListReport> {
+            ensure();
+            return service.listTexts(handle);
         },
         async addKeepout(options: AddKeepoutOptions): Promise<BoardEditResult> {
             ensure();

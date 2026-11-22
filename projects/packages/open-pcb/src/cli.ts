@@ -1015,6 +1015,139 @@ zone
         return 0;
     });
 
+const textItem = cli.command('text', 'cli.cmd.text');
+textItem
+    .command('add', 'cli.cmd.text-add')
+    .option('--text <text>', 'cli.opt.text')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .option('--at <x,y>', 'cli.opt.at')
+    .option('--rotation <deg>', 'cli.opt.rotation')
+    .option('--size <mm>', 'cli.opt.text-size')
+    .option('--thickness <mm>', 'cli.opt.text-thickness')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const content = text(options, 'text');
+        const layer = text(options, 'layer');
+        const at = pair(text(options, 'at'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (content === undefined || content.length === 0) {
+            ctx.fail('open-pcb.cli.text-required', { message: '`--text <text>` is required' });
+            return 2;
+        }
+        if (layer === undefined || layer.length === 0) {
+            ctx.fail('open-pcb.cli.layer-required', { message: '`--layer <layer>` is required' });
+            return 2;
+        }
+        if (at === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--at` needs an `x,y` position' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addText({
+                text: content,
+                layer,
+                at,
+                rotation: numberOption(text(options, 'rotation')),
+                size: numberOption(text(options, 'size')),
+                thickness: numberOption(text(options, 'thickness')),
+            });
+            ctx.emitResult(result, `added ${result.object?.id ?? 'text'} on ${layer}`);
+            return 0;
+        });
+        return 0;
+    });
+
+textItem
+    .command('update', 'cli.cmd.text-update')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--text <text>', 'cli.opt.text')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .option('--at <x,y>', 'cli.opt.at')
+    .option('--rotation <deg>', 'cli.opt.rotation')
+    .option('--size <mm>', 'cli.opt.text-size')
+    .option('--thickness <mm>', 'cli.opt.text-thickness')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        const update = {
+            id,
+            text: text(options, 'text'),
+            layer: text(options, 'layer'),
+            at: pair(text(options, 'at')),
+            rotation: numberOption(text(options, 'rotation')),
+            size: numberOption(text(options, 'size')),
+            thickness: numberOption(text(options, 'thickness')),
+        };
+        if (
+            update.text === undefined
+            && update.layer === undefined
+            && update.at === undefined
+            && update.rotation === undefined
+            && update.size === undefined
+            && update.thickness === undefined
+        ) {
+            ctx.fail('open-pcb.cli.text-update-empty', {
+                message: 'a text update needs `--text`, `--layer`, `--at`, `--rotation`, `--size` or `--thickness`',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.updateText(update);
+            ctx.emitResult(result, `updated ${result.object?.id ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+textItem
+    .command('delete', 'cli.cmd.text-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteText(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+textItem
+    .command('list', 'cli.cmd.text-list')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.listTexts();
+            ctx.emitResult(report, `texts=${report.count}`);
+            return 0;
+        });
+        return 0;
+    });
+
 const keepout = cli.command('keepout', 'cli.cmd.keepout');
 keepout
     .command('add', 'cli.cmd.keepout-add')
