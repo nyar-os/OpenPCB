@@ -1156,6 +1156,47 @@ fn drawing_bounds(board: &Board) -> ([f64; 2], [f64; 2]) {
     (min, max)
 }
 
+/// Pixels per board millimetre used as the root size of the exported SVG.
+const SVG_PREVIEW_PX_PER_MM: f64 = 10.0;
+
+/// Rewrites the root `width` and `height` so a standalone file opens at a
+/// legible size while the `viewBox` keeps board units.
+fn scale_svg_root(content: &str, factor: f64) -> String {
+    let Some(start) = content.find("<svg")
+    else {
+        return content.to_string();
+    };
+    let Some(offset) = content[start..].find('>')
+    else {
+        return content.to_string();
+    };
+    let end = start + offset;
+    let mut root = content[start..=end].to_string();
+    for attribute in ["width", "height"] {
+        root = scale_svg_attribute(&root, attribute, factor);
+    }
+    format!("{}{}{}", &content[..start], root, &content[end + 1..])
+}
+
+fn scale_svg_attribute(tag: &str, attribute: &str, factor: f64) -> String {
+    let needle = format!("{attribute}=\"");
+    let Some(start) = tag.find(&needle)
+    else {
+        return tag.to_string();
+    };
+    let value_start = start + needle.len();
+    let Some(offset) = tag[value_start..].find('"')
+    else {
+        return tag.to_string();
+    };
+    let value_end = value_start + offset;
+    let Ok(value) = tag[value_start..value_end].parse::<f64>()
+    else {
+        return tag.to_string();
+    };
+    format!("{}{:.0}{}", &tag[..value_start], value * factor, &tag[value_end..])
+}
+
 /// Renders the composite and reports the canvas size the same viewBox used.
 pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceError> {
     let scale = board.millimetres();
@@ -1183,6 +1224,7 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
     let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: min[1] - margin, width, height, y_up: false };
     let drawing = build_drawing(board, &layout, Some(Color::rgb(14, 26, 20)), false);
     let mut content = drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the SVG preview: {error}")))?;
+    content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
     if !board.texts.is_empty()
         && let Some(index) = content.rfind("</svg>")
     {
