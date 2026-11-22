@@ -73,10 +73,13 @@ Implemented:
   unsupported.
 - Checks: `drc`, `connectivity`, `clearance`, `annular_rings`, `annular-ring`,
   `track-width`, `unrouted`, `stackup`, `outline`, `silkscreen`, `courtyard`,
-  `netlist`, `hole-to-hole`, `copper-to-edge`, `edge-clearance`,
-  `silkscreen-over-pad`, `diffpair`, `dangling-copper`, `netclass`, `keepout`,
-  `via-in-pad`, `pad-overlap`, `testpoints`. The `via-in-pad` check warns about
-  vias whose centre lands inside a pad they share copper with; `pad-overlap`
+  `netlist`, `hole-to-hole`, `hole-to-track`, `copper-to-edge`,
+  `edge-clearance`, `silkscreen-over-pad`, `diffpair`, `dangling-copper`,
+  `netclass`, `keepout`, `via-in-pad`, `pad-overlap`, `testpoints`. The
+  `hole-to-track` check errors when a drill hole is closer than the clearance
+  rule to a track on another net, measured from the nearest point of the
+  segment; `via-in-pad` warns about vias whose centre lands inside a pad they
+  share copper with; `pad-overlap`
   errors when two nets' rotated pads share copper on one layer;
   `silkscreen-over-pad` errors when a same-side silkscreen track or text box
   overlaps a pad, while tangent legend stays clean; `testpoints`
@@ -233,7 +236,7 @@ mutating command also records the previous document for CLI undo/redo.
 
 1. `open-pcb list <file>` and record the revision under review.
 2. Run `open-pcb inspect <file> --checks <list>` with
-   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper,netclass,keepout,via-in-pad,pad-overlap,testpoints`.
+   `drc,connectivity,clearance,annular-ring,track-width,unrouted,stackup,outline,silkscreen,courtyard,netlist,hole-to-hole,hole-to-track,copper-to-edge,edge-clearance,silkscreen-over-pad,diffpair,dangling-copper,netclass,keepout,via-in-pad,pad-overlap,testpoints`.
 3. Report each finding with its code, layer and object. `passed` is false when
    any non-waived error-severity issue remains; `active` and `waived` count the
    findings after policy is applied. A waived issue stays in `issues` with
@@ -245,7 +248,10 @@ mutating command also records the previous document for CLI undo/redo.
    rectangular outline using `componentToEdge` and `holeToEdge`;
    `dangling-copper` warns about track ends that reach no pad, via or same-net
    track; `hole-to-hole` errors when a via or drilled-pad hole sits closer than
-   `holeClearance` to a hole on another net, naming both objects; `via-in-pad`
+   `holeClearance` to a hole on another net, naming both objects; `hole-to-track`
+   errors when a drill hole sits closer than the clearance rule to a track on
+   another net, using the nearest point of the segment, naming both objects;
+   `via-in-pad`
    warns about vias whose centre lands inside a pad on a
    layer the via reaches, naming both objects; `testpoints` warns
    `testpoints/net-not-covered` for a connectable net without a declared test

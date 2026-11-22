@@ -54,12 +54,19 @@ them.
 drc              connectivity       clearance          annular_rings
 annular-ring     track-width        unrouted           stackup
 outline          silkscreen         courtyard          netlist
-hole-to-hole     copper-to-edge     edge-clearance     silkscreen-over-pad
-diffpair         dangling-copper    netclass           keepout
-via-in-pad       pad-overlap        testpoints
+hole-to-hole     hole-to-track      copper-to-edge     edge-clearance
+silkscreen-over-pad diffpair        dangling-copper    netclass
+keepout          via-in-pad         pad-overlap        testpoints
 ```
 
 `annular_rings` and `annular-ring` are both accepted spellings.
+
+`hole-to-track` measures every drill hole (a via or a drilled pad) against each
+track of a different net. It uses the nearest point on the track segment and the
+strictest clearance of the two nets, including net-class clearance. Every track
+is compared regardless of the layers the track or the hole spans, so a blind or
+buried via is treated as a through-hole feature and there is no per-layer
+filtering.
 
 `diffpair` compares declared pairs against their width, gap and skew targets and
 also infers pairs from net names for nets that no declared pair covers. Two nets
@@ -228,7 +235,8 @@ being approximated.
   the pad's short side; a violating drill is rejected with `pad/invalid-drill`.
   `annular-ring` evaluates vias and drilled pads with the same minimum ring rule,
   and `hole-to-hole` compares every via and drilled-pad hole by net, so a pad
-  without a drill contributes to neither check. The Excellon file and drill map
+  without a drill contributes to neither check. `hole-to-track` measures those
+  same holes against every track of another net. The Excellon file and drill map
   list via, pad and routed-slot holes; a pad without a drill contributes nothing
   to those files.
 - A micro via is a typed via, not a smaller drill: it must bridge two adjacent

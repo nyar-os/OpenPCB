@@ -74,6 +74,7 @@ export type InspectCheck =
     | 'courtyard'
     | 'netlist'
     | 'hole-to-hole'
+    | 'hole-to-track'
     | 'copper-to-edge'
     | 'edge-clearance'
     | 'silkscreen-over-pad'

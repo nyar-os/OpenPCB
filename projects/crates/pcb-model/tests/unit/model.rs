@@ -235,6 +235,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         "courtyard",
         "netlist",
         "hole-to-hole",
+        "hole-to-track",
         "copper-to-edge",
         "edge-clearance",
         "silkscreen-over-pad",
@@ -4145,6 +4146,317 @@ fn hole_to_hole_orders_vias_before_pads() {
         .filter_map(|issue| issue["objectId"].as_str())
         .collect();
     assert_eq!(objects, ["via-1+via-2", "fp-1.1+fp-1.2"], "holes keep via and pad document order");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_track_flags_a_via_near_a_track_of_another_net() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("B".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [10.25, 8.0],
+            to: [10.25, 12.0],
+        },
+    )
+    .expect("the track is routed");
+
+    let report = inspect(handle, Some(vec!["hole-to-track".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/hole-to-track"]);
+    assert_eq!(report["passed"], false);
+    let issue = &report["issues"][0];
+    assert_eq!(issue["objectId"], "via-1+track-1");
+    assert_eq!(issue["layerId"], "F.Cu");
+    let message = issue["message"].as_str().expect("a message");
+    assert!(message.contains("drill hole `via-1`") && message.contains("track `track-1`"), "{message}");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_track_flags_a_rotated_drilled_pad_near_a_track() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("J1".to_string()),
+            x: Some(10.0),
+            y: Some(10.0),
+            rotation: Some(90.0),
+            ..Default::default()
+        },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 1.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("A".to_string()),
+            drill: Some(0.3),
+        },
+    )
+    .expect("the drilled pad is added");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("B".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [8.0, 11.25],
+            to: [12.0, 11.25],
+        },
+    )
+    .expect("the track is routed");
+
+    let report = inspect(handle, Some(vec!["hole-to-track".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/hole-to-track"]);
+    assert_eq!(
+        report["issues"][0]["objectId"], "fp-1.1+track-1",
+        "a rotated pad uses its world position and its hole id is the footprint and pad number"
+    );
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_track_skips_same_net_and_unassigned_pairs() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "A".to_string() }).expect("the net is declared");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the same-net via is placed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("A".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [10.25, 8.0],
+            to: [10.25, 12.0],
+        },
+    )
+    .expect("the same-net track is routed");
+    add_via(handle, AddViaRequest { net: None, at: [20.0, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the unassigned via is placed");
+    add_track(
+        handle,
+        AddTrackRequest { net: None, layer: "B.Cu".to_string(), width: 0.25, from: [20.25, 18.0], to: [20.25, 22.0] },
+    )
+    .expect("the unassigned track is routed");
+
+    let report = inspect(handle, Some(vec!["hole-to-track".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "same-net and unassigned holes and tracks are not compared");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_track_accepts_a_gap_exactly_at_the_rule() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_net_class(handle, AddNetClassRequest { name: "PWR".to_string(), clearance: Some(0.5), ..Default::default() })
+        .expect("the clearance class is declared");
+    for net in ["A", "B"] {
+        assign_net_class(handle, AssignNetClassRequest { net: net.to_string(), class: "PWR".to_string() })
+            .expect("the net joins the class");
+    }
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.8, drill: 0.5, ..Default::default() },
+    )
+    .expect("the via is placed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("B".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.5,
+            from: [11.0, 8.0],
+            to: [11.0, 12.0],
+        },
+    )
+    .expect("the track is routed");
+
+    let report = inspect(handle, Some(vec!["hole-to-track".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "a gap exactly at the rule passes");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_track_ignores_pads_without_a_drill() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J1".to_string()), x: Some(10.0), y: Some(10.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("A".to_string()),
+            drill: None,
+        },
+    )
+    .expect("the plain pad is added");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("B".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [10.0, 8.0],
+            to: [10.0, 12.0],
+        },
+    )
+    .expect("the track crosses the pad centre");
+
+    let report = inspect(handle, Some(vec!["hole-to-track".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "a pad without a drill is not a hole");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_track_measures_the_segment_not_its_infinite_line() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("B".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [20.0, 10.1],
+            to: [30.0, 10.1],
+        },
+    )
+    .expect("the track is routed");
+
+    let report = inspect(handle, Some(vec!["hole-to-track".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "the nearest point of the segment is far from the hole");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_track_orders_holes_before_tracks() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    for at in [[10.0, 10.0], [30.0, 30.0]] {
+        add_via(handle, AddViaRequest { net: Some("A".to_string()), at, diameter: 0.6, drill: 0.3, ..Default::default() })
+            .expect("the via is placed");
+    }
+    for (from, to) in [([10.25, 8.0], [10.25, 12.0]), ([9.75, 8.0], [9.75, 12.0]), ([30.25, 28.0], [30.25, 32.0])] {
+        add_track(handle, AddTrackRequest { net: Some("B".to_string()), layer: "F.Cu".to_string(), width: 0.25, from, to })
+            .expect("the track is routed");
+    }
+
+    let report = inspect(handle, Some(vec!["hole-to-track".to_string()])).expect("the check runs");
+    let objects: Vec<&str> = report["issues"]
+        .as_array()
+        .expect("issues is an array")
+        .iter()
+        .filter_map(|issue| issue["objectId"].as_str())
+        .collect();
+    assert_eq!(
+        objects,
+        ["via-1+track-1", "via-1+track-2", "via-2+track-3"],
+        "holes follow document order and each hole visits tracks in document order"
+    );
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn inspect_runs_hole_to_track_without_an_explicit_list() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("B".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [10.25, 8.0],
+            to: [10.25, 12.0],
+        },
+    )
+    .expect("the track is routed");
+
+    let report = inspect(handle, None).expect("the checks run");
+    assert!(codes(&report).contains(&"drc/hole-to-track"), "an explicit-free run includes hole-to-track: {report}");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn explicit_check_lists_still_filter_hole_to_track() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("B".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [10.25, 8.0],
+            to: [10.25, 12.0],
+        },
+    )
+    .expect("the track is routed");
+
+    let only_holes = inspect(handle, Some(vec!["hole-to-hole".to_string()])).expect("the check runs");
+    assert_eq!(codes(&only_holes), Vec::<&str>::new(), "a check outside the list does not run");
+    let only_track = inspect(handle, Some(vec!["hole-to-track".to_string()])).expect("the check runs");
+    assert_eq!(codes(&only_track), ["drc/hole-to-track"]);
     close(handle).expect("the board closes");
 }
 
