@@ -1015,6 +1015,63 @@ zone
         return 0;
     });
 
+zone
+    .command('update', 'cli.cmd.zone-update')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .option('--net <name>', 'cli.opt.net')
+    .option('--points <list>', 'cli.opt.points')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        const layer = text(options, 'layer');
+        const net = text(options, 'net');
+        const points = polygon(text(options, 'points'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        if (layer === undefined && net === undefined && text(options, 'points') === undefined) {
+            ctx.fail('open-pcb.cli.zone-update-empty', {
+                message: 'a zone update needs `--layer`, `--net` or `--points`',
+            });
+            return 2;
+        }
+        if (text(options, 'points') !== undefined && points === undefined) {
+            ctx.fail('open-pcb.cli.point-required', {
+                message: '`--points` needs at least three `x,y` points separated by spaces or semicolons',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.updateZone({ id, layer, net, points });
+            ctx.emitResult(result, `updated ${result.object?.id ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+zone
+    .command('list', 'cli.cmd.zone-list')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.zoneReport();
+            const layers = report.layers.map((entry) => `${entry.layer}=${entry.area}mm2`).join(' ') || 'none';
+            ctx.emitResult(report, `zones=${report.count} total=${report.totalArea}mm2 ${layers}`);
+            return 0;
+        });
+        return 0;
+    });
+
 const textItem = cli.command('text', 'cli.cmd.text');
 textItem
     .command('add', 'cli.cmd.text-add')

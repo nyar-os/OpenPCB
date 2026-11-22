@@ -1670,6 +1670,61 @@ impl Board {
         Ok(object)
     }
 
+    /// Updates the layer, net or polygon of one copper pour region.
+    ///
+    /// The zone keeps its id, so existing references and reports stay valid.
+    pub(crate) fn update_zone(&mut self, request: UpdateZoneRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .zones
+            .iter()
+            .position(|zone| zone.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no zone with id `{}`", request.id)))?;
+        self.editable_layer(&self.zones[index].layer)?;
+        let layer = match request.layer {
+            Some(layer) => {
+                let layer = layer.trim().to_string();
+                if layer.is_empty() {
+                    return Err(crate::argument("a zone needs a non-empty `layer`"));
+                }
+                self.editable_layer(&layer)?;
+                if self.layer(&layer).is_none_or(|entry| entry.kind != LayerKind::Copper) {
+                    return Err(crate::argument(format!("`{layer}` is not a copper layer; zones need copper")));
+                }
+                Some(layer)
+            }
+            None => None,
+        };
+        if layer.is_none() && request.net.is_none() && request.points.is_none() {
+            return Err(crate::argument("a zone update needs `layer`, `net` or `points`"));
+        }
+        let net = self.declared_net(request.net.as_deref())?;
+        let points = match request.points {
+            Some(points) => {
+                if points.len() < 3 {
+                    return Err(crate::argument("a zone needs at least three points"));
+                }
+                let points = points.into_iter().map(|point| finite_pair(point, "points")).collect::<Result<Vec<_>, _>>()?;
+                if polygon_area(&points) <= 1e-9 {
+                    return Err(crate::argument("a zone polygon must enclose a non-zero area"));
+                }
+                Some(points)
+            }
+            None => None,
+        };
+        let zone = &mut self.zones[index];
+        if let Some(layer) = layer {
+            zone.layer = layer;
+        }
+        if net.is_some() {
+            zone.net = net;
+        }
+        if let Some(points) = points {
+            zone.points = points;
+        }
+        self.revision += 1;
+        Ok(json!(self.zones[index]))
+    }
+
     /// Removes one copper pour region by id and returns the removed id.
     pub(crate) fn delete_zone(&mut self, id: &str) -> Result<String, ServiceError> {
         let index = self
@@ -3021,6 +3076,23 @@ pub struct UpdateTextRequest {
     /// New stroke thickness in board units.
     #[serde(default)]
     pub thickness: Option<f64>,
+}
+
+/// Request of [`crate::update_zone`]. At least one field is required.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateZoneRequest {
+    /// Copper pour id to update.
+    pub id: String,
+    /// New copper layer id.
+    #[serde(default)]
+    pub layer: Option<String>,
+    /// New declared net name.
+    #[serde(default)]
+    pub net: Option<String>,
+    /// New polygon vertices in board units.
+    #[serde(default)]
+    pub points: Option<Vec<[f64; 2]>>,
 }
 
 /// Request of [`crate::add_keepout`].

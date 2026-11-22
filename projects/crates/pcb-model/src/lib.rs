@@ -47,7 +47,7 @@ pub use board::{
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest,
     ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
     SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    UpdatePadRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, WidthRequest,
+    UpdatePadRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 pub use outline::OutlineGeometryRequest;
@@ -212,6 +212,7 @@ pub fn capabilities() -> Value {
         "viaStitching": "supported",
         "slots": "supported",
         "copperBalance": "supported",
+        "zoneReport": "supported",
         "panelization": "supported",
         "polygonOutline": "supported",
         "netClasses": "supported",
@@ -549,6 +550,16 @@ pub fn add_zone(handle: u64, request: AddZoneRequest) -> Result<Value, ServiceEr
     let mut object = Value::Null;
     store::mutate(handle, |board| {
         object = board.add_zone(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Updates the layer, net or polygon of one copper pour region.
+pub fn update_zone(handle: u64, request: UpdateZoneRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.update_zone(request)?;
         Ok(())
     })?;
     edit_result(handle, Some(object), None)
@@ -930,6 +941,11 @@ pub fn delete_severity(handle: u64, code: &str) -> Result<Value, ServiceError> {
 /// rectangular outline.
 pub fn copper_balance(handle: u64) -> Result<Value, ServiceError> {
     store::read(handle, copper::report)
+}
+
+/// Reports the area and perimeter of every copper pour region.
+pub fn zone_report(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, copper::zones)
 }
 
 /// Builds the panelization report of one open board.

@@ -63,6 +63,8 @@ import type {
     UpdateTextOptions,
     UpdateTrackOptions,
     UpdateViaOptions,
+    UpdateZoneOptions,
+    ZoneAreaReport,
 } from './types.js';
 
 /** Result of creating or opening a board. */
@@ -244,6 +246,16 @@ export function addZone(handle: number, options: AddZoneOptions): BoardEditResul
 /** Deletes one copper pour region from an open board. */
 export function deleteZone(handle: number, id: string): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.deleteZone').board_delete_zone(handle, id));
+}
+
+/** Updates the layer, net or polygon of one copper pour region. */
+export function updateZone(handle: number, options: UpdateZoneOptions): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.updateZone').board_update_zone(handle, JSON.stringify(options)));
+}
+
+/** Reports the area and perimeter of every copper pour region. */
+export function zoneReport(handle: number): ZoneAreaReport {
+    return decode<ZoneAreaReport>(() => binding('board.zoneReport').board_zone_report(handle));
 }
 
 /** Adds one silkscreen text item to an open board. */

@@ -319,6 +319,25 @@ fn board_delete_zone(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Updates one copper pour region on an open board.
+#[function]
+fn board_update_zone(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::UpdateZoneRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::update_zone(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Reports the area and perimeter of every copper pour region.
+#[function]
+fn board_zone_report(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::zone_report(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds one silkscreen text item to an open board.
 #[function]
 fn board_add_text(ctx: CallContext) -> Result<JsValue> {
@@ -891,6 +910,12 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
             let id = rpc_text(value, "id")?;
             open_pcb_model::delete_zone(handle, id)
         }
+        "board.updateZone" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::UpdateZoneRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::update_zone(handle, request)
+        }
         "board.addText" => {
             let handle = rpc_handle(value)?;
             let request: open_pcb_model::AddTextRequest = serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
@@ -1079,6 +1104,10 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
         "board.copperBalance" => {
             let handle = rpc_handle(value)?;
             open_pcb_model::copper_balance(handle)
+        }
+        "board.zoneReport" => {
+            let handle = rpc_handle(value)?;
+            open_pcb_model::zone_report(handle)
         }
         "board.list" => {
             let handle = rpc_handle(value)?;
@@ -1389,6 +1418,8 @@ register_module![
     board_set_via_back_drill,
     board_add_zone,
     board_delete_zone,
+    board_update_zone,
+    board_zone_report,
     board_add_text,
     board_update_text,
     board_delete_text,

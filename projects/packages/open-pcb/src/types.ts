@@ -236,6 +236,36 @@ export interface CopperBalanceReport {
     readonly imbalancePercent: number | null;
 }
 
+/** One copper pour area entry of a layer. */
+export interface ZoneAreaLayer {
+    readonly layer: LayerId;
+    readonly zones: number;
+    /** Enclosed pour area, in square millimetres. */
+    readonly area: number;
+}
+
+/** One copper pour region with its measured geometry. */
+export interface ZoneAreaEntry {
+    readonly id: ObjectId;
+    readonly layer: LayerId;
+    readonly net: string | null;
+    readonly vertices: number;
+    /** Enclosed pour area, in square millimetres. */
+    readonly area: number;
+    /** Polygon perimeter, in millimetres. */
+    readonly perimeter: number;
+}
+
+/** Result of `board.zoneReport()`. */
+export interface ZoneAreaReport {
+    readonly revision: number;
+    readonly units: 'mm2';
+    readonly count: number;
+    readonly totalArea: number;
+    readonly layers: readonly ZoneAreaLayer[];
+    readonly zones: readonly ZoneAreaEntry[];
+}
+
 /** Tab style used between adjacent boards in a panel. */
 export type PanelTabStyle = 'v-cut' | 'mouse-bite' | 'none';
 
@@ -377,6 +407,7 @@ export interface BoardCapabilities {
     /** Whether silkscreen text items can be declared and written to KiCad and the preview. */
     readonly texts: SupportLevel;
     /** Whether a copper pour area and perimeter report can be produced. */
+    readonly zoneReport: SupportLevel;
     /** Whether a drill tool and hole report can be produced. */
     /** Whether copper keepout regions can be declared and checked. */
     readonly keepouts: SupportLevel;
@@ -721,6 +752,17 @@ export interface AddZoneOptions {
     readonly net?: string;
     /** Closed polygon in board units, in drawing order; at least three points. */
     readonly points: readonly (readonly [number, number])[];
+}
+
+/** Options of `board.updateZone()`. At least one field is required. */
+export interface UpdateZoneOptions {
+    readonly id: ObjectId;
+    /** New copper layer id. */
+    readonly layer?: string;
+    /** New declared net name. */
+    readonly net?: string;
+    /** New closed polygon in board units; at least three points. */
+    readonly points?: readonly (readonly [number, number])[];
 }
 
 /** One silkscreen text item. */
@@ -1108,7 +1150,9 @@ export interface Board {
     stitchVias(options: StitchViasOptions): Promise<BoardEditResult>;
     deleteVia(id: ObjectId): Promise<BoardEditResult>;
     addZone(options: AddZoneOptions): Promise<BoardEditResult>;
+    updateZone(options: UpdateZoneOptions): Promise<BoardEditResult>;
     deleteZone(id: ObjectId): Promise<BoardEditResult>;
+    zoneReport(): Promise<ZoneAreaReport>;
     addText(options: AddTextOptions): Promise<BoardEditResult>;
     updateText(options: UpdateTextOptions): Promise<BoardEditResult>;
     deleteText(id: ObjectId): Promise<BoardEditResult>;

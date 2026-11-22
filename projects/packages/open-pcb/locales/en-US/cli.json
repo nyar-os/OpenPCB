@@ -33,6 +33,8 @@
             "slot-delete": "Delete a slot by id and write the document back in place",
             "zone": "Edit the copper pour regions of a board document",
             "zone-add": "Add a copper pour polygon and write the document back in place",
+            "zone-update": "Resize or re-layer a copper pour region in place",
+            "zone-list": "Print the area and perimeter of every copper pour region",
             "zone-delete": "Delete a copper pour region by id and write the document back in place",
             "text": "Edit the silkscreen text items of a board document",
             "text-add": "Add a silkscreen legend and write the document back in place",

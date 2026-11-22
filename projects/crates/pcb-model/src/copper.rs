@@ -15,6 +15,58 @@ use crate::{
     round6,
 };
 
+/// Builds the copper pour area report of one board.
+///
+/// Every zone contributes its enclosed polygon area in square millimetres and
+/// its perimeter in millimetres. Layers are listed in stack order; the report
+/// carries the same total the balance report sees for zones.
+pub(crate) fn zones(board: &Board) -> Value {
+    let scale = board.millimetres();
+    let factor = scale * scale;
+    let mut per_layer: Vec<Value> = Vec::new();
+    let mut total = 0.0;
+    for layer in board.layers.iter().filter(|layer| layer.kind == LayerKind::Copper) {
+        let entries: Vec<&crate::board::Zone> = board.zones.iter().filter(|zone| zone.layer == layer.id).collect();
+        if entries.is_empty() {
+            continue;
+        }
+        let area = round6(entries.iter().map(|zone| polygon_area(&zone.points).abs() * factor).sum());
+        total += area;
+        per_layer.push(json!({ "layer": layer.id, "zones": entries.len(), "area": area }));
+    }
+    let zones = board
+        .zones
+        .iter()
+        .map(|zone| {
+            let perimeter = zone
+                .points
+                .iter()
+                .enumerate()
+                .map(|(index, point)| {
+                    let next = zone.points[(index + 1) % zone.points.len()];
+                    (next[0] - point[0]).hypot(next[1] - point[1]) * scale
+                })
+                .sum::<f64>();
+            json!({
+                "id": zone.id,
+                "layer": zone.layer,
+                "net": zone.net,
+                "vertices": zone.points.len(),
+                "area": round6(polygon_area(&zone.points).abs() * factor),
+                "perimeter": round6(perimeter),
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "revision": board.revision,
+        "units": "mm2",
+        "count": zones.len(),
+        "totalArea": round6(total),
+        "layers": per_layer,
+        "zones": zones,
+    })
+}
+
 /// Builds the copper area and balance report of one board.
 pub(crate) fn report(board: &Board) -> Value {
     let scale = board.millimetres();

@@ -157,6 +157,7 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.drcPolicy, 'supported');
     assert.equal(matrix.routing, 'supported');
     assert.equal(matrix.texts, 'supported');
+    assert.equal(matrix.zoneReport, 'supported');
     assert.equal(matrix.exportTargets.drl, 'supported');
     assert.equal(matrix.exportTargets.gbr, 'supported');
     assert.equal(matrix.exportTargets.pdf, 'supported');
@@ -326,12 +327,39 @@ test('waivers and severity overrides change the inspection verdict', { skip: wit
     await pcb.dispose();
 });
 
-test('silkscreen text round trips through the SDK', { skip: withAddon }, async () => {
+test('zones, silkscreen text and drill reports round trip through the SDK', { skip: withAddon }, async () => {
     const pcb = new OpenPCB();
     const board = await pcb.create({ title: 'Reports' });
     await board.addNet({ name: 'VCC' });
     await board.addVia({ net: 'VCC', at: [10, 10], diameter: 0.6, drill: 0.3 });
     await board.addSlot({ net: 'VCC', from: [1, 1], to: [6, 1], width: 0.8 });
+    const zone = await board.addZone({
+        layer: 'F.Cu',
+        points: [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+            [0, 10],
+        ],
+    });
+    assert.equal(zone.object?.id, 'zone-1');
+
+    const resized = await board.updateZone({
+        id: 'zone-1',
+        points: [
+            [0, 0],
+            [20, 0],
+            [20, 10],
+            [0, 10],
+        ],
+    });
+    assert.equal(resized.object?.id, 'zone-1');
+    const zones = await board.zoneReport();
+    assert.equal(zones.count, 1);
+    assert.equal(zones.totalArea, 200);
+    assert.equal(zones.zones[0].perimeter, 60);
+    assert.equal(zones.layers[0].layer, 'F.Cu');
+
     const legend = await board.addText({ text: 'REV A', layer: 'F.SilkS', at: [5, 75], size: 2, thickness: 0.2 });
     assert.equal(legend.object?.id, 'text-1');
     assert.equal(board.summary.counts.texts, 1);
@@ -343,6 +371,7 @@ test('silkscreen text round trips through the SDK', { skip: withAddon }, async (
     assert.deepEqual(legends.items[0].at, [5, 75]);
 
     assert.equal((await board.deleteText('text-1')).deleted, 'text-1');
+    assert.equal((await board.deleteZone('zone-1')).deleted, 'zone-1');
     assert.equal((await board.listTexts()).count, 0);
     await board.close();
     await pcb.dispose();
@@ -531,6 +560,9 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         );
         run('track', 'add', document, '--net', 'VCC', '--layer', 'F.Cu', '--from', '10,10', '--to', '30,10', '--width', '0.25');
         run('via', 'add', document, '--net', 'VCC', '--at', '20,20', '--diameter', '0.6', '--drill', '0.3');
+        run('zone', 'add', document, '--layer', 'F.Cu', '--points', '0,0 10,0 10,10 0,10');
+        run('zone', 'update', document, '--id', 'zone-1', '--points', '0,0 20,0 20,10 0,10');
+        assert.match(run('zone', 'list', document), /zones=1 total=200mm2 F\.Cu=200mm2/);
         run('text', 'add', document, '--text', 'REV A', '--layer', 'F.SilkS', '--at', '5,75', '--size', '2');
         run('text', 'update', document, '--id', 'text-1', '--text', 'REV B');
         assert.match(run('text', 'list', document), /texts=1/);

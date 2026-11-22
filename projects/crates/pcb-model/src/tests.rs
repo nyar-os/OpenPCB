@@ -17,15 +17,15 @@ use crate::{
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
     ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, SetOutlineRequest,
     SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout,
-    add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via,
-    add_waiver, add_zone, assign_net_class,
+    UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair,
+    add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text,
+    add_track, add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
     delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver, delete_zone, export,
     impedance_table, import, inspect, list_texts, move_footprint, open, outline_geometry, panelize, redo, route, save,
     set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance, stackup_width, stitch_vias,
-    store, summary, undo, update_footprint, update_layer, update_text, update_track, update_via,
+    store, summary, undo, update_footprint, update_layer, update_text, update_track, update_via, update_zone, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -481,6 +481,61 @@ fn silkscreen_text_items_edit_persist_and_reach_kicad_and_svg() {
     .expect("the matching legend is added");
     let after = inspect(reopened, Some(vec!["silkscreen".to_string()])).expect("silkscreen runs");
     assert!(!codes(&after).contains(&"silkscreen/no-reference-text"), "a matching legend satisfies the check");
+}
+
+#[test]
+fn copper_zones_resize_in_place_and_report_area_and_perimeter() {
+    let handle = created();
+    let added = add_zone(
+        handle,
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: None,
+            points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+        },
+    )
+    .expect("the zone is added");
+    assert_eq!(added["object"]["id"], "zone-1");
+
+    let updated = update_zone(
+        handle,
+        UpdateZoneRequest {
+            id: "zone-1".to_string(),
+            points: Some(vec![[0.0, 0.0], [20.0, 0.0], [20.0, 10.0], [0.0, 10.0]]),
+            ..Default::default()
+        },
+    )
+    .expect("the zone is resized");
+    assert_eq!(updated["object"]["id"], "zone-1");
+    assert_eq!(updated["object"]["points"].as_array().expect("points is an array").len(), 4);
+
+    let report = zone_report(handle).expect("the zone report is built");
+    assert_eq!(report["units"], "mm2");
+    assert_eq!(report["count"], 1);
+    assert_eq!(report["totalArea"], 200.0);
+    assert_eq!(report["zones"][0]["vertices"], 4);
+    assert_eq!(report["zones"][0]["area"], 200.0);
+    assert_eq!(report["zones"][0]["perimeter"], 60.0);
+    assert_eq!(report["layers"][0]["layer"], "F.Cu");
+    assert_eq!(report["layers"][0]["area"], 200.0);
+
+    update_zone(handle, UpdateZoneRequest { id: "zone-1".to_string(), layer: Some("B.Cu".to_string()), ..Default::default() })
+        .expect("the zone moves to the other copper layer");
+    let report = zone_report(handle).expect("the zone report is rebuilt");
+    assert_eq!(report["layers"][0]["layer"], "B.Cu");
+
+    update_zone(
+        handle,
+        UpdateZoneRequest { id: "zone-1".to_string(), points: Some(vec![[0.0, 0.0], [1.0, 1.0]]), ..Default::default() },
+    )
+    .expect_err("a zone needs three points");
+    update_zone(
+        handle,
+        UpdateZoneRequest { id: "zone-1".to_string(), layer: Some("F.SilkS".to_string()), ..Default::default() },
+    )
+    .expect_err("a zone needs a copper layer");
+    update_zone(handle, UpdateZoneRequest { id: "zone-404".to_string(), net: Some("GND".to_string()), ..Default::default() })
+        .expect_err("an unknown zone is rejected");
 }
 
 #[test]

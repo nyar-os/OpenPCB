@@ -75,6 +75,8 @@ import type {
     UpdateTextOptions,
     UpdateTrackOptions,
     UpdateViaOptions,
+    UpdateZoneOptions,
+    ZoneAreaReport,
 } from './types.js';
 
 /** Sidecar surface consumed by a board; provided only in `history: 'sidecar'` sessions. */
@@ -483,9 +485,17 @@ function attach(
             ensure();
             return commit((current) => service.addZone(current, options));
         },
+        async updateZone(options: UpdateZoneOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.updateZone(current, options));
+        },
         async deleteZone(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteZone(current, id));
+        },
+        async zoneReport(): Promise<ZoneAreaReport> {
+            ensure();
+            return service.zoneReport(handle);
         },
         async addText(options: AddTextOptions): Promise<BoardEditResult> {
             ensure();
