@@ -1,133 +1,93 @@
 # @wae/open-pcb
 
-TypeScript authoring surface for OpenPCB: one editable board document behind PCB
-layout, inspection, fabrication and assembly. The session entry point is
-`new OpenPCB(options?)`.
+Typed session for editing one OpenPCB board document, with every check, report
+and export driven by the same engine as the `open-pcb` command.
 
-## Status
+## Install
 
-The TypeScript surface is wired to the shared native model. `new
-OpenPCB(options?)` creates a session; `create` and `open` return an editable
-`Board` with `inspect`, `save`, `export`, `close`, `undo`, `redo`,
-`addFootprint`, `moveFootprint`, `updateFootprint`, `deleteFootprint`,
-`addPad`, `updatePad`, `deletePad`,
-`addTrack`, `deleteTrack`, `addVia`, `deleteVia`, `addZone`, `deleteZone`,
-`addNetClass`, `deleteNetClass`, `assignNetClass`, `addTestPoint`,
-`deleteTestPoint`, `addNet`, `route`, `addLayer`,
-`updateLayer`, `setOutline`, `setRules`, `addWaiver`, `deleteWaiver`,
-`setSeverity`, `deleteSeverity` and `list`. `importBoard` reads a KiCad PCB or
-IPC-2581 file, and `importKicadPcb` stays as the KiCad-only spelling of the same
-operation. Each summary exposes `canUndo`, `canRedo`, the design rules, the
-waivers and the severity overrides.
+```bash
+pnpm add @wae/open-pcb
+```
 
-Implemented outputs are Gerber RS-274X, drill, drill map SVG, BOM,
-pick-and-place, placement JSON, test point CSV, SVG, vector PDF, 1024x768 RGB
-PNG, KiCad PCB and IPC-2581. Implemented checks are DRC, connectivity, clearance,
-annular rings, annular-ring, track-width, unrouted, stackup, outline, silkscreen,
-courtyard, netlist, hole-to-hole, copper-to-edge, edge-clearance,
-silkscreen-over-pad, diffpair, dangling-copper and netclass. STEP export stays
-unsupported and rejects with `capability/not-implemented`.
+Node.js 18 or newer is required.
 
-Classification is not a support claim: reads, writes and exports are reported by
-`capabilities()`, never inferred from an extension or a method name.
-
-## Example
+## Quick start
 
 ```ts
 import { OpenPCB } from '@wae/open-pcb';
 
 const pcb = new OpenPCB();
-const board = await pcb.create({ title: 'Blinker' });
+const board = await pcb.create({ title: 'Sensor Node' });
 await board.addNet({ name: 'VCC' });
 await board.addFootprint({ reference: 'U1', value: 'MCU', footprint: 'QFN32', x: 30, y: 20, layer: 'F.Cu' });
-await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], to: [30, 10] });
-await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
-await board.setOutline({ from: [0, 0], to: [100, 80] });
-await board.addZone({ layer: 'F.Cu', net: 'VCC', points: [[5, 5], [40, 5], [40, 30], [5, 30]] });
-await board.addNetClass({ name: 'Power', width: 0.5, clearance: 0.6 });
-await board.assignNetClass({ net: 'VCC', class: 'Power' });
-await board.addTestPoint({ target: 'fp-1:1' });
-await board.setRules({ holeClearance: 0.3, solderMaskExpansion: 0.1 });
-await board.route({ width: 0.25, clearance: 0.2, net: 'VCC' });
-await board.addLayer({ name: 'Inner1', kind: 'copper' });
-await board.moveFootprint({ id: 'fp-1', x: 40, y: 25, rotation: 90 });
-await board.undo();
-await board.redo();
-
-const report = await board.inspect();
-await board.save({ target: 'blinker.opcb' });
-await board.export({ format: 'drl', target: 'blinker.drl' });
-await board.export({ format: 'drill_map', target: 'blinker.drill-map.svg' });
-await board.export({ format: 'placement', target: 'blinker.placement.json' });
-await board.export({ format: 'pdf', target: 'blinker.pdf' });
-await board.export({ format: 'png', target: 'blinker.png' });
-await board.export({ format: 'kicad_pcb', target: 'blinker.kicad_pcb' });
-await board.export({ format: 'ipc2581', target: 'blinker.ipc2581' });
-const gerber = await board.export({ format: 'gbr', target: 'gerber' });
-console.log(gerber.artifacts?.length); // 9
-
-const imported = await pcb.importBoard({ path: 'blinker.ipc2581' });
-console.log(imported.format, imported.losses.length);
-await imported.board.close();
-
-await board.close();
+await board.addTrack({ net: 'VCC', layer: 'F.Cu', from: [10, 10], to: [30, 10], width: 0.25 });
+await board.setOutline({ from: [0, 0], to: [60, 40] });
+await board.route();
+console.log((await board.inspect()).passed);
+await board.save({ target: 'sensor-node.opcb' });
 await pcb.dispose();
 ```
 
-## Boundaries
+`dispose()` closes every board the session opened. A board's `close()` releases
+just that document.
 
-- Board semantics, persistence, history and the writers live in
-  `open-pcb-model`; this package maps values, typed arguments and stable error
-  codes.
-- Undo and redo are per handle: `open` and `create` start with empty history,
-  and `save` does not add a step. `board/history-empty` reports an exhausted
-  direction.
-- Gerber export writes a directory of nine files (`F_Cu`, `B_Cu`, `F_SilkS`,
-  `B_SilkS`, `F_Mask`, `B_Mask`, `F_Paste`, `B_Paste`, `Edge_Cuts`) and needs a
-  board outline. The two
-  silkscreen files carry the legend tracks the document holds; they are valid
-  empty layers when the board has no silkscreen geometry. The mask files open
-  every pad on their copper side by `solderMaskExpansion` per side (0.05 mm
-  default); vias stay tented and inner-layer pads open no mask. The paste files
-  open a stencil window exactly the pad size on their copper side, with no
-  expansion. Copper pour
-  regions are written as `G36`/`G37` regions in the Gerber file of their layer;
-  the SVG and PDF previews draw them, while KiCad PCB and IPC-2581 exchange do
-  not carry them and the PNG raster omits the pour fill.
-- The design rules are readable from every `BoardSummary` (`rules`) and editable
-  with `board.setRules()`; values are millimetres, a partial update keeps the
-  other rules, and a negative value is rejected.
-- `board.setSeverity()` overrides a finding code's level and `board.addWaiver()`
-  silences one code, optionally narrowed to one object id. Waived issues stay in
-  the report with `waived: true`, `waiverId` and `waiverReason`; `passed` ignores
-  waived errors, and the report adds `active`/`waived` counts. Waivers and
-  overrides are stored in `.opcb` and survive a save/reopen.
-- PDF export is a single-page vector document sized to A4 landscape or to the
-  board. KiCad PCB and IPC-2581 exports are deterministic projections of the
-  native document; no net names are invented for KiCad.
-- `importBoard` detects the format from the content and reports it. KiCad PCB
-  and IPC-2581 imports keep every construct the document can hold and return a
-  loss ledger for the rest; `importKicadPcb` is the KiCad-only spelling.
-- `board.route()` is a deterministic two-layer orthogonal router. It returns
-  `{ routed, unrouted, tracks, vias }`; an edge it cannot place is reported, not
-  approximated, and it never invents connectivity.
-- `annular-ring` evaluates vias only because the document model has no pad
-  drill. `track-width` errors below 0.1 mm and warns below 0.15 mm. `unrouted`
-  warns with the number of disconnected pad groups per net. `edge-clearance`
-  measures a component pad bounding box (or placement point) and every via drill
-  against the rectangular outline; it uses the document rules
-  `componentToEdge` (0.25 mm default) and `holeToEdge` (0.3 mm default).
-- The `silkscreen` check reports `silkscreen/no-reference-text` as a warning
-  because the model stores no silkscreen text, and still errors when a pad is
-  not fully inside the outline. The `courtyard` check expands each footprint's
-  pad bounding box by 0.25 mm and reports overlaps as errors.
-- No second board model: the CLI, the SDK and the studio consume one revision.
-- Native access goes through the Node-API binding.
+## Session
 
-## Scripts
+- `new OpenPCB({ locale?, history? })` opens nothing; `history` is `memory` by
+  default or `sidecar` for file-backed undo.
+- `create(options)` starts a board from the `blank` template.
+- `open({ path })` opens a native `.opcb` document.
+- `importBoard({ path, target? })` reads KiCad PCB or IPC-2581 and reports the
+  format, counts and loss ledger.
+- `inspect(input, options?)` checks a document without keeping a handle.
+- `capabilities()` returns the support matrix of the installed build.
+- `dispose()` releases the session and all handles.
 
-```bash
-pnpm --filter @wae/open-pcb run typecheck
-pnpm --filter @wae/open-pcb run build
-pnpm --filter @wae/open-pcb run test
-```
+## Board handle
+
+Every board exposes `id`, `revision`, `summary`, `canUndo` and `canRedo`, plus:
+
+- **Document:** `save`, `export`, `inspect`, `list`, `close`, `undo`, `redo`.
+- **Layers and outline:** `addLayer`, `updateLayer`, `setOutline`.
+- **Footprints and pads:** `addFootprint`, `updateFootprint`, `moveFootprint`,
+  `deleteFootprint`, `addPad`, `updatePad`, `deletePad`.
+- **Nets and classes:** `addNet`, `addNetClass`, `assignNetClass`,
+  `deleteNetClass`, `addDifferentialPair`, `deleteDifferentialPair`.
+- **Copper edits:** `addTrack`, `updateTrack`, `splitTrack`, `deleteTrack`,
+  `addVia`, `updateVia`, `deleteVia`, `setViaBackDrill`, `addSlot`,
+  `updateSlot`, `deleteSlot`, `addZone`, `updateZone`, `deleteZone`,
+  `addKeepout`, `updateKeepout`, `deleteKeepout`, `addText`, `updateText`,
+  `deleteText`, `listTexts`, `addTeardrops`, `stitchVias`.
+- **Routing:** `route(options?)`.
+- **Reports:** `zoneReport`, `keepoutReport`, `drillReport`, `copperBalance`.
+- **Rules, stackup and impedance:** `setRules`, `setStackup`, `impedance`,
+  `impedanceWidth`, `impedanceTable`.
+- **Test points and policy:** `addTestPoint`, `deleteTestPoint`, `addWaiver`,
+  `deleteWaiver`, `setSeverity`, `deleteSeverity`.
+- **SDK-only geometry:** `panelize(options)`, `outlineGeometry(options)`.
+
+## Errors and formats
+
+`OpenPCBError` carries a stable `code`; compare codes, never messages.
+`NotImplementedError`, `errorCodes` and `isOpenPCBError` are exported for the
+same purpose. `boardFormats`, `formatRegistry`, `formatInfo`, `formatFromPath`
+and `defaultIntentFor` classify paths and formats.
+
+## Constraints
+
+- The package is ESM-only and exports a single entry point, `@wae/open-pcb`.
+- The engine is a native addon resolved from
+  `@wae/open-pcb-<platform>-<arch>`. Do not import a platform package directly;
+  set `OPEN_PCB_NATIVE` to a built `.node` file to override resolution.
+- Without an addon, calls reject with `capability/not-implemented` instead of
+  returning an empty board.
+- `history: 'sidecar'` keeps up to 32 snapshots in `<file>.history.json` beside
+  the target; the default memory session writes no sidecar.
+- Saving over an existing path needs `overwrite: true`.
+- Read `capabilities()` before assuming a format, check or export target works.
+
+## Links
+
+- [OpenPCB README](../../../README.md)
+- [Capabilities](../../../documentation/capabilities.md)
+- [CLI reference](../../../documentation/cli.md)

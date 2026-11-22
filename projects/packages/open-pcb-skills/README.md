@@ -1,31 +1,34 @@
 # @wae/open-pcb-skills
 
-Agent skills for OpenPCB. The package ships skill documents only; it is not a
-runtime library and contains no board layout, routing, DRC or fabrication
-algorithms.
+Agent instructions for OpenPCB: the command surface, the preflight steps and the
+evidence rules an assistant needs to build and review a board without inventing
+a capability.
 
-## Status
+## Install
 
-Executable. `skills/open-pcb/SKILL.md` records the commands, workflows and
-evidence rules for board creation, editing, DRC review and fabrication or
-assembly delivery. The skill covers only the implemented surface: document core,
-undo and redo, layer and outline edits, the implemented checks, KiCad PCB and
-IPC-2581 import, and the Gerber, drill, BOM, position, SVG, PDF, PNG, KiCad and
-IPC-2581 writers. STEP export and the interactive viewport remain explicitly
-unsupported.
-
-## Layout
-
-```text
-packages/open-pcb-skills/
-├── package.json
-├── README.md
-└── skills/
-    └── open-pcb/
-        └── SKILL.md
+```bash
+pnpm add @wae/open-pcb-skills
 ```
 
-The skill must never claim methods, commands or flags that the installed
-SDK/CLI does not expose. Read `open-pcb capabilities` before promising a format,
-check or target.
+Point your agent at the skill file:
 
+```text
+node_modules/@wae/open-pcb-skills/skills/open-pcb/SKILL.md
+```
+
+## Example prompt
+
+> Create a 60 mm × 40 mm two-layer board called Sensor Node. Add `VCC` and
+> `GND` nets, place a QFN32 MCU at 30,20, route every two-pad net, run DRC, and
+> export Gerber, Excellon drill and a BOM to `./out`.
+
+The skill tells the agent to read `open-pcb capabilities` first, to report the
+commands it actually ran, and to state which checks passed, failed or were
+waived.
+
+## Links
+
+- [OpenPCB skill](./skills/open-pcb/SKILL.md)
+- [OpenPCB README](../../../README.md)
+- [CLI reference](../../../documentation/cli.md)
+- [Capabilities](../../../documentation/capabilities.md)
