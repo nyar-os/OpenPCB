@@ -3970,6 +3970,185 @@ fn hole_to_hole_flags_close_drills_of_different_nets_only() {
 }
 
 #[test]
+fn hole_to_hole_flags_drilled_pads_of_different_nets() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J1".to_string()), x: Some(10.0), y: Some(10.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    for (number, x, net) in [("1", 0.0, "A"), ("2", 0.4, "B")] {
+        add_pad(
+            handle,
+            AddPadRequest {
+                footprint: "fp-1".to_string(),
+                number: number.to_string(),
+                x,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+                net: Some(net.to_string()),
+                drill: Some(0.3),
+            },
+        )
+        .expect("the drilled pad is added");
+    }
+
+    let report = inspect(handle, Some(vec!["hole-to-hole".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/hole-to-hole"]);
+    assert_eq!(report["passed"], false);
+    let issue = &report["issues"][0];
+    assert_eq!(issue["objectId"], "fp-1.1+fp-1.2", "a pad hole id is the footprint id and pad number");
+    assert!(issue["message"].as_str().expect("a message").contains("0.1 mm"));
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_hole_compares_drilled_pads_with_vias() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [20.0, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J1".to_string()), x: Some(20.4), y: Some(20.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("B".to_string()),
+            drill: Some(0.3),
+        },
+    )
+    .expect("the drilled pad is added");
+
+    let report = inspect(handle, Some(vec!["hole-to-hole".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/hole-to-hole"]);
+    let issue = &report["issues"][0];
+    assert_eq!(issue["objectId"], "via-1+fp-1.1", "vias come before pads in the report");
+    assert!(issue["message"].as_str().expect("a message").contains("0.1 mm"));
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_hole_ignores_same_net_unassigned_plain_and_exact_gap_pads() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    for (reference, id, x, first, second) in [
+        ("J1", "fp-1", 10.0, (Some("A"), 0.0, 0.3), (Some("A"), 0.4, 0.3)),
+        ("J2", "fp-2", 30.0, (None, 0.0, 0.3), (None, 0.4, 0.3)),
+        ("J3", "fp-3", 50.0, (Some("A"), 0.0, 0.75), (Some("B"), 1.0, 0.75)),
+    ] {
+        add_footprint(
+            handle,
+            AddFootprintRequest { reference: Some(reference.to_string()), x: Some(x), y: Some(x), ..Default::default() },
+        )
+        .expect("the footprint is placed");
+        for (number, (net, pad_x, drill)) in [("1", first), ("2", second)] {
+            add_pad(
+                handle,
+                AddPadRequest {
+                    footprint: id.to_string(),
+                    number: number.to_string(),
+                    x: pad_x,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 1.0,
+                    net: net.map(str::to_string),
+                    drill: Some(drill),
+                },
+            )
+            .expect("the drilled pad is added");
+        }
+    }
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J4".to_string()), x: Some(70.0), y: Some(70.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    for (number, net) in [("1", "A"), ("2", "B")] {
+        add_pad(
+            handle,
+            AddPadRequest {
+                footprint: "fp-4".to_string(),
+                number: number.to_string(),
+                x: if number == "1" { 0.0 } else { 0.1 },
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+                net: Some(net.to_string()),
+                drill: None,
+            },
+        )
+        .expect("the plain pad is added");
+    }
+
+    let report = inspect(handle, Some(vec!["hole-to-hole".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "same-net, unassigned, plain and exactly-at-rule pads are not violations");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_hole_orders_vias_before_pads() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    for (at, net) in [([10.0, 10.0], "A"), ([10.4, 10.0], "B")] {
+        add_via(handle, AddViaRequest { net: Some(net.to_string()), at, diameter: 0.6, drill: 0.3, ..Default::default() })
+            .expect("the via is placed");
+    }
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J1".to_string()), x: Some(20.0), y: Some(20.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    for (number, x, net) in [("1", 0.0, "A"), ("2", 0.4, "B")] {
+        add_pad(
+            handle,
+            AddPadRequest {
+                footprint: "fp-1".to_string(),
+                number: number.to_string(),
+                x,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+                net: Some(net.to_string()),
+                drill: Some(0.3),
+            },
+        )
+        .expect("the drilled pad is added");
+    }
+
+    let report = inspect(handle, Some(vec!["hole-to-hole".to_string()])).expect("the check runs");
+    let objects: Vec<&str> = report["issues"]
+        .as_array()
+        .expect("issues is an array")
+        .iter()
+        .filter_map(|issue| issue["objectId"].as_str())
+        .collect();
+    assert_eq!(objects, ["via-1+via-2", "fp-1.1+fp-1.2"], "holes keep via and pad document order");
+    close(handle).expect("the board closes");
+}
+
+#[test]
 fn edge_clearance_flags_components_and_drills_near_the_border() {
     let handle = created();
     add_net(handle, AddNetRequest { name: "A".to_string() }).expect("the net is declared");

@@ -227,8 +227,10 @@ being approximated.
 - Pad drills are stored as one circular diameter per pad and must be smaller than
   the pad's short side; a violating drill is rejected with `pad/invalid-drill`.
   `annular-ring` evaluates vias and drilled pads with the same minimum ring rule,
-  and the Excellon file and drill map list via, pad and routed-slot holes. A pad
-  without a drill contributes nothing to those files.
+  and `hole-to-hole` compares every via and drilled-pad hole by net, so a pad
+  without a drill contributes to neither check. The Excellon file and drill map
+  list via, pad and routed-slot holes; a pad without a drill contributes nothing
+  to those files.
 - A micro via is a typed via, not a smaller drill: it must bridge two adjacent
   copper layers and at least one end must be `F.Cu` or `B.Cu`. Other spans are
   rejected with `via/micro-span`, and the drill report, Excellon file and drill

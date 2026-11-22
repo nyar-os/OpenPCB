@@ -1296,15 +1296,49 @@ fn netlist(board: &Board, issues: &mut CheckReport) {
     }
 }
 
+/// One physical drill hole: a via or a drilled pad, in document order.
+struct HoleSite {
+    /// Via id, or `{footprint.id}.{pad.number}` for a drilled pad.
+    id: String,
+    /// Declared net name, when assigned.
+    net: Option<String>,
+    /// Hole centre in board coordinates.
+    at: [f64; 2],
+    /// Finished drill diameter in board units.
+    drill: f64,
+}
+
 /// Checks the gap between drill holes of different nets.
 ///
-/// The document model only carries drills on vias, so pads cannot contribute a
-/// hole yet; those pairs are outside this check instead of being guessed.
+/// Holes are collected in document order: every via first, then every pad with
+/// a finite positive drill. A pad without a drill is not a hole. A pad hole id
+/// is `{footprint.id}.{pad.number}`.
 fn hole_to_hole(board: &Board, issues: &mut CheckReport) {
     let scale = board.millimetres();
     let rule = board.rules.hole_clearance;
-    for (index, first) in board.vias.iter().enumerate() {
-        for second in board.vias.iter().skip(index + 1) {
+    let mut holes: Vec<HoleSite> = board
+        .vias
+        .iter()
+        .map(|via| HoleSite { id: via.id.clone(), net: via.net.clone(), at: via.at, drill: via.drill })
+        .collect();
+    let placed = board.placed_pads();
+    for footprint in &board.footprints {
+        for pad in &footprint.pads {
+            let Some(drill) = pad.drill.filter(|drill| drill.is_finite() && *drill > 0.0)
+            else {
+                continue;
+            };
+            let key = format!("{}:{}", footprint.id, pad.number);
+            let Some(site) = placed.iter().find(|site| site.key == key)
+            else {
+                continue;
+            };
+            holes.push(HoleSite { id: format!("{}.{}", footprint.id, pad.number), net: pad.net.clone(), at: site.at, drill });
+        }
+    }
+
+    for (index, first) in holes.iter().enumerate() {
+        for second in holes.iter().skip(index + 1) {
             if first.net == second.net {
                 continue;
             }

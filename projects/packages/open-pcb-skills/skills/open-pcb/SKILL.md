@@ -243,7 +243,9 @@ mutating command also records the previous document for CLI undo/redo.
    targets; `edge-clearance` measures component bodies and via drills against the
    rectangular outline using `componentToEdge` and `holeToEdge`;
    `dangling-copper` warns about track ends that reach no pad, via or same-net
-   track; `via-in-pad` warns about vias whose centre lands inside a pad on a
+   track; `hole-to-hole` errors when a via or drilled-pad hole sits closer than
+   `holeClearance` to a hole on another net, naming both objects; `via-in-pad`
+   warns about vias whose centre lands inside a pad on a
    layer the via reaches, naming both objects; `testpoints` warns
    `testpoints/net-not-covered` for a connectable net without a declared test
    point and errors `testpoints/net-unconnected` for a net with no pad or via.
