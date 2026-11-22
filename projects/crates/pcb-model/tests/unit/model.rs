@@ -111,6 +111,65 @@ fn crafted() -> Board {
     Board::new("board-test".to_string(), None, None).expect("a blank board is built")
 }
 
+fn place_footprint(handle: u64, reference: &str, layer: &str, rotation: f64, x: f64, y: f64) {
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some(reference.to_string()),
+            value: Some("0402".to_string()),
+            footprint: Some("R".to_string()),
+            x: Some(x),
+            y: Some(y),
+            rotation: Some(rotation),
+            layer: Some(layer.to_string()),
+        },
+    )
+    .expect("the footprint is placed");
+}
+
+fn add_net_pad(handle: u64, footprint: &str, number: &str, at: [f64; 2], size: [f64; 2], net: &str) {
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: footprint.to_string(),
+            number: number.to_string(),
+            x: at[0],
+            y: at[1],
+            w: size[0],
+            h: size[1],
+            net: Some(net.to_string()),
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+}
+
+fn overlapping_board(first: &str, second: &str) -> u64 {
+    let mut board = crafted();
+    for id in [first, second] {
+        board.footprints.push(Footprint {
+            id: id.to_string(),
+            ref_: id.to_uppercase(),
+            value: String::new(),
+            footprint: String::new(),
+            x: 0.0,
+            y: 0.0,
+            rotation: 0.0,
+            layer: "F.Cu".to_string(),
+            pads: vec![Pad {
+                number: "1".to_string(),
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+                net: Some(format!("net-{id}")),
+                drill: None,
+            }],
+        });
+    }
+    store::insert(board)
+}
+
 #[test]
 fn capability_matrix_matches_the_implemented_pack() {
     let matrix = capabilities();
@@ -184,6 +243,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         "netclass",
         "keepout",
         "via-in-pad",
+        "pad-overlap",
         "testpoints",
     ] {
         assert_eq!(matrix["checks"][check], "supported", "{check} check");
@@ -674,6 +734,112 @@ fn via_in_pad_flags_a_via_whose_centre_lands_inside_a_pad() {
     assert_eq!(codes(&clean), ["via-in-pad/via-in-pad"], "only the on-pad via is flagged");
     assert_eq!(clean["issues"].as_array().expect("issues is an array").len(), 1);
     close(handle).expect("the board closes");
+}
+
+#[test]
+fn pad_overlap_flags_two_nets_sharing_copper() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    place_footprint(handle, "U1", "F.Cu", 0.0, 10.0, 10.0);
+    place_footprint(handle, "U2", "F.Cu", 0.0, 10.0, 10.0);
+    add_net_pad(handle, "fp-1", "1", [0.0, 0.0], [1.0, 1.0], "VCC");
+    add_net_pad(handle, "fp-2", "1", [0.5, 0.0], [1.0, 1.0], "GND");
+
+    let revision = summary(handle).expect("the board is listed")["revision"].clone();
+    let report = inspect(handle, Some(vec!["pad-overlap".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/pad-overlap"]);
+    assert_eq!(report["issues"][0]["severity"], "error");
+    assert_eq!(report["issues"][0]["layerId"], "F.Cu");
+    assert_eq!(report["issues"][0]["objectId"], "fp-1:1+fp-2:1");
+    let message = report["issues"][0]["message"].as_str().expect("the issue carries a message");
+    assert!(message.contains("pad `1` of `U1`"), "the message names the first pad; got {message}");
+    assert!(message.contains("pad `1` of `U2`"), "the message names the second pad; got {message}");
+    assert_eq!(report["passed"], false);
+    assert_eq!(report["revision"], revision);
+    assert_eq!(summary(handle).expect("the board is listed")["revision"], revision, "inspection never bumps the revision");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn pad_overlap_ignores_touching_pads() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    place_footprint(handle, "U1", "F.Cu", 0.0, 0.0, 0.0);
+    add_net_pad(handle, "fp-1", "1", [0.0, 0.0], [1.0, 1.0], "VCC");
+    add_net_pad(handle, "fp-1", "2", [1.0, 0.0], [1.0, 1.0], "GND");
+
+    let clean = inspect(handle, Some(vec!["pad-overlap".to_string()])).expect("the check runs");
+    assert!(codes(&clean).is_empty(), "a shared edge is contact, not overlap");
+
+    update_pad(
+        handle,
+        UpdatePadRequest { footprint: "fp-1".to_string(), number: "2".to_string(), x: Some(0.9), ..Default::default() },
+    )
+    .expect("the pad moves into its neighbour");
+    let report = inspect(handle, Some(vec!["pad-overlap".to_string()])).expect("the check runs again");
+    assert_eq!(codes(&report), ["drc/pad-overlap"], "moving the pad into its neighbour overlaps");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn pad_overlap_ignores_pads_on_different_layers_and_nets() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    place_footprint(handle, "U1", "F.Cu", 0.0, 10.0, 10.0);
+    place_footprint(handle, "U2", "B.Cu", 0.0, 10.0, 10.0);
+    add_net_pad(handle, "fp-1", "1", [0.0, 0.0], [1.0, 1.0], "VCC");
+    add_net_pad(handle, "fp-2", "1", [0.0, 0.0], [1.0, 1.0], "GND");
+
+    let layers = inspect(handle, Some(vec!["pad-overlap".to_string()])).expect("the check runs");
+    assert!(codes(&layers).is_empty(), "copper on different layers does not collide");
+
+    place_footprint(handle, "U3", "F.Cu", 0.0, 20.0, 20.0);
+    place_footprint(handle, "U4", "F.Cu", 0.0, 20.0, 20.0);
+    add_net_pad(handle, "fp-3", "1", [0.0, 0.0], [1.0, 1.0], "VCC");
+    add_net_pad(handle, "fp-4", "1", [0.0, 0.0], [1.0, 1.0], "VCC");
+    let nets = inspect(handle, Some(vec!["pad-overlap".to_string()])).expect("the check runs again");
+    assert!(codes(&nets).is_empty(), "pads on one net are connected, not an overlap");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn pad_overlap_follows_footprint_rotation() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    place_footprint(handle, "U1", "F.Cu", 0.0, 0.0, 0.0);
+    add_net_pad(handle, "fp-1", "1", [0.0, 0.0], [4.0, 0.4], "VCC");
+    // A quarter turn makes the second pad vertical, so it crosses the first.
+    place_footprint(handle, "U2", "F.Cu", 90.0, 0.0, 2.0);
+    add_net_pad(handle, "fp-2", "1", [0.0, 0.0], [4.0, 0.4], "GND");
+
+    let report = inspect(handle, Some(vec!["pad-overlap".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/pad-overlap"], "a rotated pad is compared by its true corners");
+    assert_eq!(report["issues"][0]["objectId"], "fp-1:1+fp-2:1");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn pad_overlap_reports_each_pair_once_in_a_stable_order() {
+    let forward = overlapping_board("fp-a", "fp-b");
+    let reverse = overlapping_board("fp-b", "fp-a");
+    let check = || Some(vec!["pad-overlap".to_string()]);
+    let first = inspect(forward, check()).expect("the check runs");
+    let second = inspect(reverse, check()).expect("the check runs on the reversed board");
+    let again = inspect(forward, check()).expect("the check runs a second time");
+
+    assert_eq!(codes(&first), ["drc/pad-overlap"]);
+    assert_eq!(first["issues"][0]["objectId"], "fp-a:1+fp-b:1", "the pair is ordered by footprint id");
+    assert_eq!(first["issues"], second["issues"], "insertion order does not change the report");
+    assert_eq!(first["issues"], again["issues"], "repeated runs are identical");
+
+    let revision = summary(forward).expect("the board is listed")["revision"].clone();
+    assert_eq!(first["revision"], revision, "inspection leaves the revision alone");
+    close(forward).expect("the board closes");
+    close(reverse).expect("the board closes");
 }
 
 #[test]

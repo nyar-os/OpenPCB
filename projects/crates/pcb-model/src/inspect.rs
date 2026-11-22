@@ -15,7 +15,8 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     ServiceError,
-    board::{Board, Footprint, LayerKind},
+    board::{Board, Footprint, LayerKind, Pad},
+    export::pad_corners,
 };
 
 /// Minimum copper width in millimetres.
@@ -61,6 +62,7 @@ pub(crate) const CHECKS: &[&str] = &[
     "netclass",
     "keepout",
     "via-in-pad",
+    "pad-overlap",
     "testpoints",
 ];
 
@@ -87,6 +89,7 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "netclass",
     "keepout",
     "via-in-pad",
+    "pad-overlap",
     "testpoints",
 ];
 
@@ -126,6 +129,7 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "netclass" => netclass(board, &mut report),
             "keepout" => keepout(board, &mut report),
             "via-in-pad" => via_in_pad(board, &mut report),
+            "pad-overlap" => pad_overlap(board, &mut report),
             "testpoints" => testpoints(board, &mut report),
             other => report.push(finding(
                 "check/unsupported",
@@ -527,6 +531,73 @@ fn via_in_pad(board: &Board, issues: &mut CheckReport) {
             issues.push(issue);
         }
     }
+}
+
+/// Checks that pads of different nets do not overlap on one layer.
+///
+/// Two pads on the same layer overlap when their rotated rectangles share
+/// copper, not when they merely touch: a fine-pitch land pattern keeps adjacent
+/// pads tangent and stays clean. Each pair is reported once, in footprint-id and
+/// pad-number order, so the same board always lists the same findings. A pad
+/// without a net and a pad with one count as different nets.
+fn pad_overlap(board: &Board, issues: &mut CheckReport) {
+    let mut pads: Vec<(&Footprint, &Pad)> =
+        board.footprints.iter().flat_map(|footprint| footprint.pads.iter().map(move |pad| (footprint, pad))).collect();
+    pads.sort_by(|(left, left_pad), (right, right_pad)| {
+        left.id.cmp(&right.id).then_with(|| left_pad.number.cmp(&right_pad.number))
+    });
+    for (index, (footprint, pad)) in pads.iter().enumerate() {
+        for (other_footprint, other_pad) in pads.iter().skip(index + 1) {
+            if footprint.layer != other_footprint.layer || pad.net == other_pad.net {
+                continue;
+            }
+            if !convex_overlap(&pad_corners(footprint, pad), &pad_corners(other_footprint, other_pad)) {
+                continue;
+            }
+            let object = format!("{}:{}+{}:{}", footprint.id, pad.number, other_footprint.id, other_pad.number);
+            issues.push(finding(
+                "drc/pad-overlap",
+                Severity::Error,
+                board,
+                Some(&footprint.layer),
+                Some(&object),
+                format!(
+                    "pad `{}` of `{}` overlaps pad `{}` of `{}` on {}",
+                    pad.number, footprint.ref_, other_pad.number, other_footprint.ref_, footprint.layer
+                ),
+            ));
+        }
+    }
+}
+
+/// Whether two convex polygons share a positive area, using the separating-axis test.
+///
+/// A projection that only meets at an endpoint means the shapes touch without
+/// overlapping, which is not a pad overlap.
+fn convex_overlap(left: &[[f64; 2]], right: &[[f64; 2]]) -> bool {
+    for polygon in [left, right] {
+        for (start, end) in polygon_edges(polygon) {
+            let axis = [start[1] - end[1], end[0] - start[0]];
+            let (left_min, left_max) = projection(left, axis);
+            let (right_min, right_max) = projection(right, axis);
+            if left_max.min(right_max) - left_min.max(right_min) <= 1e-9 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Signed extent of one polygon along a separating axis.
+fn projection(polygon: &[[f64; 2]], axis: [f64; 2]) -> (f64, f64) {
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    for point in polygon {
+        let value = point[0] * axis[0] + point[1] * axis[1];
+        min = min.min(value);
+        max = max.max(value);
+    }
+    (min, max)
 }
 
 /// Checks that every declared net offers a declared probe point.

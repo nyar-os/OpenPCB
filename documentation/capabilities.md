@@ -56,7 +56,7 @@ annular-ring     track-width        unrouted           stackup
 outline          silkscreen         courtyard          netlist
 hole-to-hole     copper-to-edge     edge-clearance     silkscreen-over-pad
 diffpair         dangling-copper    netclass           keepout
-via-in-pad       testpoints
+via-in-pad       pad-overlap        testpoints
 ```
 
 `annular_rings` and `annular-ring` are both accepted spellings.
@@ -251,6 +251,10 @@ being approximated.
 ### Checks and policy
 
 - `via-in-pad` is a manufacturability warning, not an electrical error.
+- `pad-overlap` compares rotated pad rectangles on one layer. Two pads of
+  different nets that share copper report `drc/pad-overlap`; a shared edge is
+  contact, not overlap, so tangent pads in one footprint stay clean. A pad with
+  no net and a pad with one count as different nets.
 - `diffpair` infers pairs from net naming only: one shared base name with `_P`
   and `_N` (or `+` and `-`). Length is the sum of straight track segments, so
   via barrels and copper inside pads are not counted. An inferred pair uses the

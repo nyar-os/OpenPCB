@@ -1082,7 +1082,7 @@ fn silk_layer(layer: &str) -> &'static str {
 }
 
 /// Returns the four rotated corners of one pad in board units.
-fn pad_corners(footprint: &crate::board::Footprint, pad: &crate::board::Pad) -> [[f64; 2]; 4] {
+pub(crate) fn pad_corners(footprint: &crate::board::Footprint, pad: &crate::board::Pad) -> [[f64; 2]; 4] {
     let angle = footprint.rotation.to_radians();
     let (sin, cos) = (angle.sin(), angle.cos());
     let center_x = footprint.x + pad.x * cos - pad.y * sin;
