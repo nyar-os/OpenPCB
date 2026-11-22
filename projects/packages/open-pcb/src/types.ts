@@ -551,6 +551,8 @@ export interface BoardCapabilities {
     readonly netClasses: SupportLevel;
     /** Whether `board.route()` can follow per-net class width, clearance and via targets. */
     readonly routingNetClasses: SupportLevel;
+    /** Which path styles `board.route()` can produce. */
+    readonly routingStyles: Readonly<Record<RouteStyle, SupportLevel>>;
     /** Whether declared test points can be reported. */
     readonly testPoints: SupportLevel;
     /** Whether a physical stackup can be declared and read. */
@@ -1062,6 +1064,15 @@ export interface AddDifferentialPairOptions {
 }
 
 /**
+ * Path style of `board.route()`.
+ *
+ * `orthogonal` emits axis-aligned L paths only and is the default. `chamfer45`
+ * joins two axis-aligned segments with a 45-degree diagonal and falls back to
+ * an orthogonal path for an edge when no clear diagonal fits.
+ */
+export type RouteStyle = 'orthogonal' | 'chamfer45';
+
+/**
  * Options of `board.route()`.
  *
  * Lengths are in board units. The router is deterministic: the same board and
@@ -1080,6 +1091,8 @@ export interface RouteOptions {
     readonly viaDrill?: number;
     /** Route only this declared net. */
     readonly net?: string;
+    /** Path style; defaults to `orthogonal`. */
+    readonly style?: RouteStyle;
     /**
      * Use each net's declared class for width, clearance and via values.
      * Defaults to false; a class value wins per field, then the argument, then
@@ -1100,12 +1113,43 @@ export interface UnroutedConnection {
     readonly widthSource?: 'netclass' | 'argument' | 'default';
 }
 
+/** One straight copper segment of a routed spanning edge. */
+export interface RouteSegment {
+    readonly from: readonly [number, number];
+    readonly to: readonly [number, number];
+    readonly layer: LayerId;
+    readonly width: number;
+    /** Style this segment belongs to; `chamfer45` marks the diagonal and its axis neighbours. */
+    readonly style: RouteStyle | null;
+}
+
+/** One spanning edge of the `chamfer45` report. */
+export interface RouteEdge {
+    readonly net: string;
+    /** Stable pad key `footprint-id:pad-number`. */
+    readonly from: string;
+    /** Stable pad key `footprint-id:pad-number`. */
+    readonly to: string;
+    readonly routed: boolean;
+    /** Style actually used; `null` when the edge stayed unrouted. */
+    readonly style: RouteStyle | null;
+    /** Why an orthogonal path replaced the diagonal; `null` when a diagonal was used. */
+    readonly fallback: string | null;
+    /** Reason the edge stayed unrouted; `null` when it was routed. */
+    readonly reason: string | null;
+    readonly segments: readonly RouteSegment[];
+}
+
 /** Result of `board.route()`. `tracks` and `vias` count appended objects. */
 export interface RouteReport {
     readonly routed: number;
     readonly unrouted: readonly UnroutedConnection[];
     readonly tracks: number;
     readonly vias: number;
+    /** Present only for a `chamfer45` run; the default report omits it. */
+    readonly style?: RouteStyle;
+    /** Present only for a `chamfer45` run; one entry per spanning edge. */
+    readonly edges?: readonly RouteEdge[];
 }
 
 /** Options of `board.moveFootprint()`. At least one field is required. */

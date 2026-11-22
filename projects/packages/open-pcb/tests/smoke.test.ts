@@ -39,6 +39,17 @@ async function routingBoard(pcb: OpenPCB) {
     return board;
 }
 
+/** A two-pad `PWR` net whose edge has room for an exact 45-degree diagonal. */
+async function chamferBoard(pcb: OpenPCB) {
+    const board = await pcb.create();
+    await board.addNet({ name: 'PWR' });
+    await board.addFootprint({ reference: 'U1', x: 0, y: 0 });
+    await board.addPad({ footprint: 'fp-1', number: '1', x: 10, y: 10, w: 0.5, h: 0.5, net: 'PWR' });
+    await board.addPad({ footprint: 'fp-1', number: '2', x: 28, y: 22, w: 0.5, h: 0.5, net: 'PWR' });
+    await board.setOutline({ from: [0, 0], to: [50, 40] });
+    return board;
+}
+
 test('session construction is synchronous and side-effect free', async () => {
     const pcb = new OpenPCB();
     assert.equal(pcb.locale, 'en');
@@ -168,6 +179,7 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.drcPolicy, 'supported');
     assert.equal(matrix.routing, 'supported');
     assert.equal(matrix.routingNetClasses, 'supported');
+    assert.deepEqual(matrix.routingStyles, { orthogonal: 'supported', chamfer45: 'supported' });
     assert.equal(matrix.texts, 'supported');
     assert.equal(matrix.zoneReport, 'supported');
     assert.equal(matrix.netLengths, 'supported');
@@ -454,6 +466,67 @@ test('net-class routing falls back per field and stays off by default', { skip: 
     await legacy.close();
     await fallback.close();
     await wall.close();
+    await pcb.dispose();
+});
+
+test('routing emits an exact 45-degree diagonal and is deterministic', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+    const first = await chamferBoard(pcb);
+    const report = await first.route({ style: 'chamfer45' });
+    assert.equal(report.style, 'chamfer45');
+    assert.equal(report.routed, 1);
+    assert.equal(report.tracks, 3, 'the edge is an axis segment, a diagonal and an axis segment');
+
+    const edge = report.edges?.[0];
+    assert.ok(edge, 'the chamfer report lists every spanning edge');
+    assert.equal(edge.style, 'chamfer45');
+    assert.equal(edge.fallback, null);
+    assert.equal(edge.segments.length, 3);
+    assert.equal(edge.segments[0].to[1], edge.segments[0].from[1], 'the first segment is axis aligned');
+    assert.equal(edge.segments[2].to[0], edge.segments[2].from[0], 'the last segment is axis aligned');
+    assert.deepEqual(edge.segments[0].to, edge.segments[1].from, 'the segments form one chain');
+    assert.deepEqual(edge.segments[1].to, edge.segments[2].from);
+    const dx = edge.segments[1].to[0] - edge.segments[1].from[0];
+    const dy = edge.segments[1].to[1] - edge.segments[1].from[1];
+    assert.ok(Math.abs(dx) > 0, 'the diagonal has length');
+    assert.ok(Math.abs(Math.abs(dx) - Math.abs(dy)) < 1e-9, `the diagonal is exactly 45 degrees: ${dx},${dy}`);
+    for (const segment of edge.segments) {
+        assert.equal(segment.style, 'chamfer45');
+        assert.equal(segment.layer, 'F.Cu');
+        assert.ok(segment.width > 0);
+    }
+
+    const inspection = await first.inspect({ checks: ['drc', 'clearance'] });
+    assert.equal(inspection.passed, true, JSON.stringify(inspection.issues));
+
+    const second = await chamferBoard(pcb);
+    const repeat = await second.route({ style: 'chamfer45' });
+    assert.deepEqual(repeat, report, 'the same board and options produce the same report');
+
+    await first.close();
+    await second.close();
+    await pcb.dispose();
+});
+
+test('chamfer45 falls back per edge and the default report keeps its shape', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+
+    const legacy = await routingBoard(pcb);
+    const report = await legacy.route();
+    assert.equal('style' in report, false, 'the default report adds no style field');
+    assert.equal('edges' in report, false, 'the default report adds no edges field');
+
+    const aligned = await routingBoard(pcb);
+    const chamfer = await aligned.route({ style: 'chamfer45' });
+    const edge = chamfer.edges?.[0];
+    assert.ok(edge);
+    assert.equal(edge.style, 'orthogonal', 'an axis-aligned edge has no room for a diagonal');
+    assert.equal(edge.fallback, 'diagonal-length-zero');
+    assert.equal(edge.segments[0].style, 'orthogonal');
+    assert.equal(chamfer.tracks, 1);
+
+    await legacy.close();
+    await aligned.close();
     await pcb.dispose();
 });
 

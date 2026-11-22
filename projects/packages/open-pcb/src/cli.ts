@@ -27,6 +27,7 @@ import type {
     InspectCheck,
     InspectReport,
     LayerKind,
+    RouteStyle,
     Severity,
 } from './types.js';
 
@@ -1738,6 +1739,7 @@ cli
     .option('--via <mm>', 'cli.opt.via')
     .option('--net <name>', 'cli.opt.net')
     .option('--netclass', 'cli.opt.netclass')
+    .option('--style <style>', 'cli.opt.style')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         if (file === undefined) {
@@ -1759,12 +1761,18 @@ cli
             ctx.fail('open-pcb.cli.via-required', { message: '`--via <mm>` must be greater than zero' });
             return 2;
         }
+        const style = text(options, 'style') as RouteStyle | undefined;
+        if (style !== undefined && style !== 'orthogonal' && style !== 'chamfer45') {
+            ctx.fail('open-pcb.cli.style-invalid', { message: '`--style` must be orthogonal or chamfer45' });
+            return 2;
+        }
         await withBoard(file, async (board) => {
             const report = await board.route({
                 width,
                 clearance,
                 viaDiameter,
                 net: text(options, 'net'),
+                style,
                 useNetClasses: flag(options, 'netclass'),
             });
             ctx.emitResult(

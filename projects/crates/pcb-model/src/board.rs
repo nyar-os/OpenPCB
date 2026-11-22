@@ -3688,6 +3688,19 @@ pub struct ImpedanceTableRequest {
     pub copper_thickness: Option<f64>,
 }
 
+/// Path style the router uses for one two-point edge.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RouteStyle {
+    /// Axis-aligned L-shaped paths only; the default and historical behavior.
+    #[default]
+    Orthogonal,
+    /// Two axis-aligned segments joined by a 45-degree diagonal.
+    ///
+    /// An edge falls back to an orthogonal path when no clear diagonal fits.
+    Chamfer45,
+}
+
 /// Request of [`crate::route`].
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -3713,6 +3726,9 @@ pub struct RouteOptions {
     /// Rip-up and retry rounds after the first pass; defaults to 2, capped at 8.
     #[serde(default)]
     pub retries: Option<u32>,
+    /// Rust-style name of the routing style: `orthogonal` by default.
+    #[serde(default)]
+    pub style: RouteStyle,
     /// Use each net's declared class for width, clearance and via values.
     ///
     /// Defaults to false, so the same options keep producing the explicit

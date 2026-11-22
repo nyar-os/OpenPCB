@@ -15,11 +15,12 @@ use crate::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTextRequest,
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
-    ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, SetOutlineRequest,
-    SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest,
-    UpdateKeepoutRequest, UpdateLayerRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest,
-    UpdateZoneRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class,
-    add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via, add_waiver, add_zone, assign_net_class,
+    ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, RouteStyle,
+    SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest,
+    UpdateFootprintRequest, UpdateKeepoutRequest, UpdateLayerRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest,
+    UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net,
+    add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via, add_waiver, add_zone,
+    assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
     delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver, delete_zone,
@@ -3457,6 +3458,139 @@ fn router_still_reports_unrouted_edges_with_net_classes() {
     assert_eq!(unrouted[0]["widthSource"], "netclass");
     assert!(unrouted[0]["reason"].as_str().is_some_and(|reason| !reason.is_empty()));
     close(handle).expect("the board closes");
+}
+
+#[test]
+fn router_chamfer45_connects_with_an_exact_diagonal() {
+    let handle = created();
+    two_pad_net(handle, [10.0, 10.0], [28.0, 22.0]);
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+
+    let report = route(handle, RouteOptions { style: RouteStyle::Chamfer45, ..Default::default() }).expect("routing runs");
+    assert_eq!(report["style"], "chamfer45");
+    assert_eq!(report["routed"], 1);
+    assert_eq!(report["tracks"], 3, "the edge is an axis segment, a diagonal and an axis segment");
+
+    let edges = report["edges"].as_array().expect("edges is an array");
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0]["style"], "chamfer45");
+    assert!(edges[0]["fallback"].is_null());
+    let segments = edges[0]["segments"].as_array().expect("segments is an array");
+    assert_eq!(segments.len(), 3);
+    assert_eq!(segments[0]["from"][1], segments[0]["to"][1], "the first segment is axis aligned");
+    assert_eq!(segments[2]["from"][0], segments[2]["to"][0], "the last segment is axis aligned");
+    assert_eq!(segments[0]["to"], segments[1]["from"], "the segments form one chain");
+    assert_eq!(segments[1]["to"], segments[2]["from"]);
+    let dx = segments[1]["to"][0].as_f64().expect("a diagonal x") - segments[1]["from"][0].as_f64().expect("a diagonal x");
+    let dy = segments[1]["to"][1].as_f64().expect("a diagonal y") - segments[1]["from"][1].as_f64().expect("a diagonal y");
+    assert!(dx.abs() > 0.0, "the diagonal has length");
+    assert!((dx.abs() - dy.abs()).abs() < 1e-9, "the diagonal is exactly 45 degrees: dx={dx} dy={dy}");
+
+    let tracks = store::read(handle, |board| board.tracks.clone()).expect("the board is open");
+    let routed = tracks.iter().filter(|track| track.net.as_deref() == Some("N1")).collect::<Vec<_>>();
+    assert_eq!(routed.len(), 3);
+    assert_eq!(routed[0].from, [10.0, 10.0]);
+    assert_eq!(routed[routed.len() - 1].to, [28.0, 22.0]);
+
+    let inspection = inspect(handle, Some(vec!["drc".to_string(), "clearance".to_string()])).expect("the board is inspected");
+    assert_eq!(inspection["passed"], true, "a chamfered edge still passes DRC and clearance: {inspection}");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn router_chamfer45_falls_back_when_an_edge_has_no_diagonal_room() {
+    let handle = created();
+    two_pad_net(handle, [10.0, 10.0], [20.0, 10.0]);
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+
+    let report = route(handle, RouteOptions { style: RouteStyle::Chamfer45, ..Default::default() }).expect("routing runs");
+    assert_eq!(report["routed"], 1);
+    assert_eq!(report["tracks"], 1);
+    let edges = report["edges"].as_array().expect("edges is an array");
+    assert_eq!(edges[0]["style"], "orthogonal");
+    assert_eq!(edges[0]["fallback"], "diagonal-length-zero");
+    let segments = edges[0]["segments"].as_array().expect("segments is an array");
+    assert_eq!(segments[0]["style"], "orthogonal");
+    assert_eq!(segments[0]["from"][1], segments[0]["to"][1], "the fallback stays an axis-aligned L path");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn router_chamfer45_falls_back_when_no_diagonal_is_clear() {
+    let handle = created();
+    two_pad_net(handle, [10.0, 10.0], [30.0, 20.0]);
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+    add_keepout(
+        handle,
+        AddKeepoutRequest { layer: None, points: vec![[11.0, 10.5], [29.0, 10.5], [29.0, 19.5], [11.0, 19.5]] },
+    )
+    .expect("the central keepout is added");
+
+    let report = route(handle, RouteOptions { style: RouteStyle::Chamfer45, ..Default::default() }).expect("routing runs");
+    assert_eq!(report["routed"], 1, "the orthogonal L path avoids the keepout");
+    let edges = report["edges"].as_array().expect("edges is an array");
+    assert_eq!(edges[0]["style"], "orthogonal");
+    assert_eq!(edges[0]["fallback"], "chamfer-clearance", "every diagonal variant crosses the keepout");
+
+    let tracks = store::read(handle, |board| board.tracks.clone()).expect("the board is open");
+    let routed = tracks.iter().filter(|track| track.net.as_deref() == Some("N1")).collect::<Vec<_>>();
+    assert_eq!(routed.len(), 2, "the fallback is the historical two-segment L path");
+    let inspection = inspect(handle, Some(vec!["drc".to_string(), "clearance".to_string(), "keepout".to_string()]))
+        .expect("the board is inspected");
+    assert_eq!(inspection["passed"], true, "the fallback keeps copper out of the keepout: {inspection}");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn router_default_style_keeps_the_historical_report() {
+    let handle = created();
+    two_pad_net(handle, [10.0, 10.0], [20.0, 10.0]);
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+
+    let report = route(handle, RouteOptions::default()).expect("routing runs");
+    assert_eq!(
+        report,
+        json!({
+            "routed": 1,
+            "unrouted": [],
+            "tracks": 1,
+            "vias": 0,
+            "retries": 0,
+            "nets": [{
+                "net": "N1",
+                "status": "routed",
+                "edges": 1,
+                "routed": 1,
+                "unrouted": 0,
+                "retries": 0,
+            }],
+        }),
+        "orthogonal routing keeps every field and adds none"
+    );
+    assert!(report.get("style").is_none());
+    assert!(report.get("edges").is_none());
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn router_chamfer45_is_deterministic() {
+    let run = || {
+        let handle = created();
+        two_pad_net(handle, [10.0, 10.0], [28.0, 22.0]);
+        set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+        let report = route(handle, RouteOptions { style: RouteStyle::Chamfer45, ..Default::default() }).expect("routing runs");
+        let tracks = store::read(handle, |board| {
+            board.tracks.iter().map(|track| (track.layer.clone(), track.from, track.to)).collect::<Vec<_>>()
+        })
+        .expect("the board is open");
+        close(handle).expect("the board closes");
+        (report, tracks)
+    };
+
+    let first = run();
+    let second = run();
+    assert_eq!(first.0, second.0, "the same board and options produce the same report");
+    assert_eq!(first.1, second.1, "the same board and options produce the same copper");
 }
 
 #[test]

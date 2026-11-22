@@ -47,8 +47,8 @@ pub use board::{
     AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTextRequest,
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest,
-    ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
-    SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest,
+    ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, RouteStyle, SetOutlineRequest,
+    SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest,
     UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest,
     UpdateViaRequest, UpdateZoneRequest, WidthRequest,
 };
@@ -210,6 +210,10 @@ pub fn capabilities() -> Value {
         "drcPolicy": "supported",
         "routing": "supported",
         "routingNetClasses": "supported",
+        "routingStyles": {
+            "orthogonal": "supported",
+            "chamfer45": "supported",
+        },
         "zones": "supported",
         "texts": "supported",
         "keepouts": "supported",
@@ -709,7 +713,9 @@ pub fn set_via_back_drill(handle: u64, request: SetViaBackDrillRequest) -> Resul
 /// are reported in `unrouted` instead of being approximated. With
 /// `useNetClasses` a net's declared class supplies the track width, clearance
 /// and via values per field, falling back to the explicit arguments and then to
-/// the built-in defaults.
+/// the built-in defaults. `style` selects orthogonal L paths or `chamfer45`
+/// paths that insert a 45-degree diagonal and fall back per edge when no clear
+/// diagonal fits.
 pub fn route(handle: u64, options: RouteOptions) -> Result<Value, ServiceError> {
     let mut report = Value::Null;
     store::mutate_if_changed(handle, |board| {

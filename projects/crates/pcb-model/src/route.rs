@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 use crate::{
     ServiceError, argument,
-    board::{Board, LayerKind, RouteOptions, Track, Via},
+    board::{Board, LayerKind, RouteOptions, RouteStyle, Track, Via},
 };
 
 const DEFAULT_WIDTH: f64 = 0.25;
@@ -66,6 +66,7 @@ struct Settings {
     via_drill: Option<f64>,
     net: Option<String>,
     retries: u32,
+    style: RouteStyle,
     use_net_classes: bool,
 }
 
@@ -96,10 +97,12 @@ struct AcceptedVia {
     drill: f64,
 }
 
+#[derive(Debug, Clone)]
 struct Candidate {
     layer: String,
     segments: Vec<([f64; 2], [f64; 2])>,
     vias: Vec<[f64; 2]>,
+    style: RouteStyle,
 }
 
 /// One net's pads and the spanning edges the router will try.
@@ -117,12 +120,26 @@ struct EdgeResult {
     routed: bool,
 }
 
+/// One spanning edge's geometry, retained only for the `chamfer45` report.
+#[derive(Debug, Clone)]
+struct EdgeDetail {
+    net: String,
+    from: String,
+    to: String,
+    routed: bool,
+    style: Option<RouteStyle>,
+    fallback: Option<&'static str>,
+    segments: Vec<Accepted>,
+    reason: Option<String>,
+}
+
 /// A complete routing attempt; retries replace one attempt with the next.
 #[derive(Debug, Clone, Default)]
 struct Attempt {
     segments: Vec<Accepted>,
     vias: Vec<AcceptedVia>,
     edges: Vec<EdgeResult>,
+    details: Vec<EdgeDetail>,
     unrouted: Vec<Value>,
     routed: usize,
 }
@@ -306,7 +323,7 @@ pub(crate) fn run(board: &mut Board, options: RouteOptions) -> Result<(Value, bo
         })
         .collect::<Vec<_>>();
 
-    let report = json!({
+    let mut report = json!({
         "routed": best.routed,
         "unrouted": best.unrouted,
         "tracks": added_tracks,
@@ -314,7 +331,40 @@ pub(crate) fn run(board: &mut Board, options: RouteOptions) -> Result<(Value, bo
         "retries": rounds,
         "nets": nets,
     });
+    // The default report keeps its historical shape; `chamfer45` adds the
+    // style and one entry per spanning edge with its segments.
+    if settings.style == RouteStyle::Chamfer45 {
+        report["style"] = json!(style_name(settings.style));
+        report["edges"] = Value::Array(best.details.iter().map(edge_detail).collect());
+    }
     Ok((report, changed))
+}
+
+/// JSON entry of one spanning edge in the `chamfer45` report.
+fn edge_detail(detail: &EdgeDetail) -> Value {
+    let segments = detail
+        .segments
+        .iter()
+        .map(|segment| {
+            json!({
+                "from": segment.from,
+                "to": segment.to,
+                "layer": segment.layer,
+                "width": segment.width,
+                "style": detail.style.map(style_name),
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "net": detail.net,
+        "from": detail.from,
+        "to": detail.to,
+        "routed": detail.routed,
+        "style": detail.style.map(style_name),
+        "fallback": detail.fallback,
+        "reason": detail.reason,
+        "segments": segments,
+    })
 }
 
 /// Runs one full routing pass and returns what it managed to place.
@@ -340,22 +390,23 @@ fn attempt(
         for &(from, to) in &plan.edges {
             let pad_a = &plan.pads[from];
             let pad_b = &plan.pads[to];
-            let chosen = candidates(settings, pad_a.at, pad_b.at, flip).into_iter().find(|candidate| {
-                candidate_clear(
-                    board,
-                    &edge,
-                    candidate,
-                    &plan.name,
-                    &pad_a.key,
-                    &pad_b.key,
-                    &tracks,
-                    &vias,
-                    pads,
-                    &result.segments,
-                    outline,
-                )
-            });
-            let Some(candidate) = chosen
+            let chosen = choose_candidate(
+                board,
+                settings,
+                &edge,
+                &plan.name,
+                &pad_a.key,
+                &pad_b.key,
+                pad_a.at,
+                pad_b.at,
+                flip,
+                &tracks,
+                &vias,
+                pads,
+                &result.segments,
+                outline,
+            );
+            let Some((candidate, fallback)) = chosen
             else {
                 let mut entry = json!({
                     "net": plan.name,
@@ -368,9 +419,20 @@ fn attempt(
                 }
                 result.unrouted.push(entry);
                 result.edges.push(EdgeResult { net: plan.name.clone(), routed: false });
+                result.details.push(EdgeDetail {
+                    net: plan.name.clone(),
+                    from: pad_a.key.clone(),
+                    to: pad_b.key.clone(),
+                    routed: false,
+                    style: None,
+                    fallback: None,
+                    segments: Vec::new(),
+                    reason: Some(UNROUTED_REASON.to_string()),
+                });
                 continue;
             };
             result.routed += 1;
+            let mut edge_segments = Vec::with_capacity(candidate.segments.len());
             for (segment_from, segment_to) in &candidate.segments {
                 tracks.push(TrackObstacle {
                     net: Some(plan.name.clone()),
@@ -379,13 +441,15 @@ fn attempt(
                     from: *segment_from,
                     to: *segment_to,
                 });
-                result.segments.push(Accepted {
+                let accepted = Accepted {
                     net: plan.name.clone(),
                     layer: candidate.layer.clone(),
                     from: *segment_from,
                     to: *segment_to,
                     width: edge.width,
-                });
+                };
+                result.segments.push(accepted.clone());
+                edge_segments.push(accepted);
             }
             for at in &candidate.vias {
                 vias.push(ViaObstacle { net: Some(plan.name.clone()), at: *at, diameter: edge.via_diameter });
@@ -397,6 +461,16 @@ fn attempt(
                 });
             }
             result.edges.push(EdgeResult { net: plan.name.clone(), routed: true });
+            result.details.push(EdgeDetail {
+                net: plan.name.clone(),
+                from: pad_a.key.clone(),
+                to: pad_b.key.clone(),
+                routed: true,
+                style: Some(candidate.style),
+                fallback,
+                segments: edge_segments,
+                reason: None,
+            });
         }
     }
     result
@@ -451,6 +525,7 @@ fn resolve(options: &RouteOptions) -> Result<Settings, ServiceError> {
         via_drill,
         net: options.net.clone(),
         retries: options.retries.unwrap_or(DEFAULT_RETRIES).min(MAX_RETRIES),
+        style: options.style,
         use_net_classes: options.use_net_classes,
     })
 }
@@ -567,10 +642,123 @@ fn candidates(settings: &Settings, from: [f64; 2], to: [f64; 2], flip: bool) -> 
                 layer: settings.layers[index].clone(),
                 segments: segments(&points),
                 vias: if index == 0 { Vec::new() } else { vec![from, to] },
+                style: RouteStyle::Orthogonal,
             });
         }
     }
     candidates
+}
+
+/// Chamfer candidates for one edge: an axis-aligned segment, a 45-degree
+/// diagonal and another axis-aligned segment.
+///
+/// The diagonal keeps the direction of the edge on both axes, so its slope is
+/// always 45 degrees. Two orientations and three diagonal shares are tried per
+/// layer, which lets a blocked chamfer slide along the edge instead of growing
+/// beyond the pair's shorter extent. An edge with no extent on either axis has
+/// no room for a diagonal and returns no candidate.
+fn chamfer_candidates(settings: &Settings, from: [f64; 2], to: [f64; 2], flip: bool) -> Vec<Candidate> {
+    let dx = to[0] - from[0];
+    let dy = to[1] - from[1];
+    let span = dx.abs().min(dy.abs());
+    if span <= EPSILON {
+        return Vec::new();
+    }
+    let sx = if dx >= 0.0 { 1.0 } else { -1.0 };
+    let sy = if dy >= 0.0 { 1.0 } else { -1.0 };
+    let horizontal = dx.abs() >= dy.abs();
+    let mut candidates = Vec::new();
+    for index in layer_order(settings.layers.len(), horizontal, flip) {
+        for share in [0.5, 0.25, 0.75] {
+            let diagonal = span * share;
+            if diagonal <= EPSILON {
+                continue;
+            }
+            for horizontal_first in [true, false] {
+                let points = if horizontal_first {
+                    vec![from, [to[0] - sx * diagonal, from[1]], [to[0], from[1] + sy * diagonal], to]
+                }
+                else {
+                    vec![from, [from[0], to[1] - sy * diagonal], [from[0] + sx * diagonal, to[1]], to]
+                };
+                candidates.push(Candidate {
+                    layer: settings.layers[index].clone(),
+                    segments: segments(&points),
+                    vias: if index == 0 { Vec::new() } else { vec![from, to] },
+                    style: RouteStyle::Chamfer45,
+                });
+            }
+        }
+    }
+    candidates
+}
+
+/// Picks the first clear candidate and reports whether a chamfer fell back.
+///
+/// In `chamfer45` style every layer is tried with a diagonal before the
+/// orthogonal paths are tried, so a clear diagonal on the secondary layer wins
+/// over a fallback on the preferred one. The fallback reason is only attached
+/// when an orthogonal path actually replaces the chamfer.
+#[allow(clippy::too_many_arguments)]
+fn choose_candidate(
+    board: &Board,
+    settings: &Settings,
+    edge: &EdgeSettings,
+    net: &str,
+    from_key: &str,
+    to_key: &str,
+    from: [f64; 2],
+    to: [f64; 2],
+    flip: bool,
+    tracks: &[TrackObstacle],
+    vias: &[ViaObstacle],
+    pads: &[Pad],
+    accepted: &[Accepted],
+    outline: Option<([f64; 2], [f64; 2])>,
+) -> Option<(Candidate, Option<&'static str>)> {
+    let clear = |candidate: &Candidate| {
+        candidate_clear(board, edge, candidate, net, from_key, to_key, tracks, vias, pads, accepted, outline)
+    };
+    if settings.style == RouteStyle::Orthogonal {
+        return candidates(settings, from, to, flip)
+            .into_iter()
+            .find(|candidate| clear(candidate))
+            .map(|candidate| (candidate, None));
+    }
+    let chamfers = chamfer_candidates(settings, from, to, flip);
+    if let Some(candidate) = chamfers.iter().find(|candidate| clear(candidate)) {
+        return Some((candidate.clone(), None));
+    }
+    let fallback = chamfer_fallback_reason(&chamfers, edge, outline);
+    candidates(settings, from, to, flip)
+        .into_iter()
+        .find(|candidate| clear(candidate))
+        .map(|candidate| (candidate, Some(fallback)))
+}
+
+/// Stable reason a `chamfer45` edge did not use a diagonal.
+fn chamfer_fallback_reason(chamfers: &[Candidate], edge: &EdgeSettings, outline: Option<([f64; 2], [f64; 2])>) -> &'static str {
+    if chamfers.is_empty() {
+        return "diagonal-length-zero";
+    }
+    if let Some((min, max)) = outline {
+        let radius = edge.width / 2.0;
+        let outside = chamfers.iter().all(|candidate| {
+            candidate.segments.iter().any(|(start, end)| !inside(*start, min, max, radius) || !inside(*end, min, max, radius))
+        });
+        if outside {
+            return "diagonal-outside-outline";
+        }
+    }
+    "chamfer-clearance"
+}
+
+/// Wire name of a routing style.
+fn style_name(style: RouteStyle) -> &'static str {
+    match style {
+        RouteStyle::Orthogonal => "orthogonal",
+        RouteStyle::Chamfer45 => "chamfer45",
+    }
 }
 
 /// Horizontal edges prefer the first configured layer, vertical edges the
