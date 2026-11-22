@@ -1186,20 +1186,20 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
     if !board.texts.is_empty()
         && let Some(index) = content.rfind("</svg>")
     {
-        let mut group = String::from("<g class=\"board-text\">");
+        let mut group = String::from("    <g class=\"board-text\">\n");
         for text in &board.texts {
             let x = (text.at[0] * scale - layout.origin_x) * layout.scale;
             let y = (text.at[1] * scale - layout.origin_y) * layout.scale;
-            let _ = write!(
+            let _ = writeln!(
                 group,
-                "<text x=\"{x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"{:.3}\" fill=\"{}\" transform=\"rotate({:.3} {x:.3} {y:.3})\">{}</text>",
+                "      <text x=\"{x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"{:.3}\" fill=\"{}\" transform=\"rotate({:.3} {x:.3} {y:.3})\">{}</text>",
                 text.size * scale * layout.scale,
                 layer_color(board, &text.layer),
                 -text.rotation,
                 xml(&text.text)
             );
         }
-        group.push_str("</g>");
+        group.push_str("    </g>\n");
         content.insert_str(index, &group);
     }
     Ok((content, width, height))

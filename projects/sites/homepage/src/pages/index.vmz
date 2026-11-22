@@ -30,47 +30,63 @@
                 <div class="sheet__draw">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 82 62" role="img" aria-label="Exported OpenPCB board">
                         <rect x="0" y="0" width="82" height="62" fill="#0e1a14"></rect>
-                        <path d="M5 57 L77 57 L77 5 L5 5 Z" fill="none" stroke="#d9b44a" stroke-width="0.15"></path>
-                        <line x1="37.4" y1="32.2" x2="15.4" y2="17" stroke="#c87533" stroke-width="0.5"></line>
-                        <line x1="44.6" y1="29.8" x2="59.4" y2="17" stroke="#c87533" stroke-width="0.5"></line>
-                        <line x1="44.6" y1="32.2" x2="61.4" y2="45" stroke="#2f6fb0" stroke-width="0.5"></line>
-                        <line x1="37.4" y1="29.8" x2="22.6" y2="45" stroke="#2f6fb0" stroke-width="0.5"></line>
-                        <line x1="19.4" y1="17" x2="31" y2="9" stroke="#c87533" stroke-width="0.5"></line>
-                        <line x1="31" y1="9" x2="61" y2="9" stroke="#c87533" stroke-width="0.5"></line>
-                        <line x1="61" y1="9" x2="64.6" y2="17" stroke="#c87533" stroke-width="0.5"></line>
-                        <line x1="17.4" y1="45" x2="17.4" y2="9" stroke="#2f6fb0" stroke-width="0.5"></line>
-                        <path d="M36.65 32.7 L38.15 32.7 L38.15 31.7 L36.65 31.7 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M39.05 32.7 L40.55 32.7 L40.55 31.7 L39.05 31.7 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M41.45 32.7 L42.95 32.7 L42.95 31.7 L41.45 31.7 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M43.85 32.7 L45.35 32.7 L45.35 31.7 L43.85 31.7 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M36.65 30.3 L38.15 30.3 L38.15 29.3 L36.65 29.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M39.05 30.3 L40.55 30.3 L40.55 29.3 L39.05 29.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M41.45 30.3 L42.95 30.3 L42.95 29.3 L41.45 29.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M43.85 30.3 L45.35 30.3 L45.35 29.3 L43.85 29.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M14.8 17.7 L16 17.7 L16 16.3 L14.8 16.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M18 17.7 L19.2 17.7 L19.2 16.3 L18 16.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M60.8 45.7 L62 45.7 L62 44.3 L60.8 44.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M64 45.7 L65.2 45.7 L65.2 44.3 L64 44.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M58.8 17.7 L60 17.7 L60 16.3 L58.8 16.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M62 17.7 L63.2 17.7 L63.2 16.3 L62 16.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M18.8 45.7 L20 45.7 L20 44.3 L18.8 44.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <path d="M22 45.7 L23.2 45.7 L23.2 44.3 L22 44.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
-                        <ellipse cx="31" cy="41" rx="0.7" ry="0.7" fill="#c87533" stroke="#000000" stroke-width="1"></ellipse>
-                        <ellipse cx="51" cy="41" rx="0.7" ry="0.7" fill="#c87533" stroke="#000000" stroke-width="1"></ellipse>
-                        <ellipse cx="51" cy="21" rx="0.7" ry="0.7" fill="#c87533" stroke="#000000" stroke-width="1"></ellipse>
-                        <ellipse cx="27" cy="21" rx="0.7" ry="0.7" fill="#c87533" stroke="#000000" stroke-width="1"></ellipse>
-                        <g class="board-text" fill="#e6e6e6" font-family="monospace" font-size="2">
-                            <text x="38" y="26">U1</text>
-                            <text x="15" y="20.5">R1</text>
-                            <text x="61" y="41">R2</text>
-                            <text x="59" y="20.5">C1</text>
-                            <text x="19" y="41">D1</text>
-                        </g>
+                        <path d="M5 5 L77 5 L77 57 L5 57 Z" fill="none" stroke="#d9b44a" stroke-width="0.15"></path>
+                        <line x1="37.4" y1="29.8" x2="37.4" y2="45" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="37.4" y1="45" x2="59.4" y2="45" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="37.4" y1="32.2" x2="19.4" y2="32.2" stroke="#2f6fb0" stroke-width="0.5"></line>
+                        <line x1="19.4" y1="32.2" x2="19.4" y2="17" stroke="#2f6fb0" stroke-width="0.5"></line>
+                        <line x1="62.6" y1="45" x2="67" y2="45" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="67" y1="45" x2="67" y2="41" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="67" y1="41" x2="51" y2="41" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="40" y1="29.8" x2="40" y2="26" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="40" y1="26" x2="15.4" y2="26" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="15.4" y1="26" x2="15.4" y2="45" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="44.8" y1="29.8" x2="61.4" y2="29.8" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="61.4" y1="29.8" x2="61.4" y2="17" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="42.4" y1="32.2" x2="42.4" y2="41" stroke="#2f6fb0" stroke-width="0.5"></line>
+                        <line x1="42.4" y1="41" x2="27" y2="41" stroke="#2f6fb0" stroke-width="0.5"></line>
+                        <path d="M36.65 29.3 L38.15 29.3 L38.15 30.3 L36.65 30.3 Z" fill="#c87533"></path>
+                        <path d="M39.05 29.3 L40.55 29.3 L40.55 30.3 L39.05 30.3 Z" fill="#c87533"></path>
+                        <path d="M41.45 29.3 L42.95 29.3 L42.95 30.3 L41.45 30.3 Z" fill="#c87533"></path>
+                        <path d="M43.85 29.3 L45.35 29.3 L45.35 30.3 L43.85 30.3 Z" fill="#c87533"></path>
+                        <path d="M36.65 31.7 L38.15 31.7 L38.15 32.7 L36.65 32.7 Z" fill="#c87533"></path>
+                        <path d="M39.05 31.7 L40.55 31.7 L40.55 32.7 L39.05 32.7 Z" fill="#c87533"></path>
+                        <path d="M41.45 31.7 L42.95 31.7 L42.95 32.7 L41.45 32.7 Z" fill="#c87533"></path>
+                        <path d="M43.85 31.7 L45.35 31.7 L45.35 32.7 L43.85 32.7 Z" fill="#c87533"></path>
+                        <path d="M35.85 28.5 L46.15 28.5 L46.15 33.5 L35.85 33.5 Z" fill="none" stroke="#e6e6e6" stroke-width="0.15"></path>
+                        <text x="35.85" y="27.9" font-size="1.6" text-anchor="start" fill="#e6e6e6">U1</text>
+                        <path d="M14.8 44.3 L16 44.3 L16 45.7 L14.8 45.7 Z" fill="#c87533"></path>
+                        <path d="M18 44.3 L19.2 44.3 L19.2 45.7 L18 45.7 Z" fill="#c87533"></path>
+                        <path d="M14 43.5 L20 43.5 L20 46.5 L14 46.5 Z" fill="none" stroke="#e6e6e6" stroke-width="0.15"></path>
+                        <text x="14" y="42.9" font-size="1.6" text-anchor="start" fill="#e6e6e6">R1</text>
+                        <path d="M60.8 16.3 L62 16.3 L62 17.7 L60.8 17.7 Z" fill="#c87533"></path>
+                        <path d="M64 16.3 L65.2 16.3 L65.2 17.7 L64 17.7 Z" fill="#c87533"></path>
+                        <path d="M60 15.5 L66 15.5 L66 18.5 L60 18.5 Z" fill="none" stroke="#e6e6e6" stroke-width="0.15"></path>
+                        <text x="60" y="14.9" font-size="1.6" text-anchor="start" fill="#e6e6e6">R2</text>
+                        <path d="M58.8 44.3 L60 44.3 L60 45.7 L58.8 45.7 Z" fill="#c87533"></path>
+                        <path d="M62 44.3 L63.2 44.3 L63.2 45.7 L62 45.7 Z" fill="#c87533"></path>
+                        <path d="M58 43.5 L64 43.5 L64 46.5 L58 46.5 Z" fill="none" stroke="#e6e6e6" stroke-width="0.15"></path>
+                        <text x="58" y="42.9" font-size="1.6" text-anchor="start" fill="#e6e6e6">C1</text>
+                        <path d="M18.8 16.3 L20 16.3 L20 17.7 L18.8 17.7 Z" fill="#c87533"></path>
+                        <path d="M22 16.3 L23.2 16.3 L23.2 17.7 L22 17.7 Z" fill="#c87533"></path>
+                        <path d="M18 15.5 L24 15.5 L24 18.5 L18 18.5 Z" fill="none" stroke="#e6e6e6" stroke-width="0.15"></path>
+                        <text x="18" y="14.9" font-size="1.6" text-anchor="start" fill="#e6e6e6">D1</text>
+                        <ellipse cx="27" cy="41" rx="0.7" ry="0.7" fill="#c87533"></ellipse>
+                        <ellipse cx="27" cy="41" rx="0.35" ry="0.35" fill="#0c1410"></ellipse>
+                        <ellipse cx="51" cy="41" rx="0.7" ry="0.7" fill="#c87533"></ellipse>
+                        <ellipse cx="51" cy="41" rx="0.35" ry="0.35" fill="#0c1410"></ellipse>
+                          <g class="board-text">
+                            <text x="38.000" y="36.000" font-family="monospace" font-size="2.000" fill="#e6e6e6" transform="rotate(-0.000 38.000 36.000)">MCU</text>
+                            <text x="13.000" y="48.800" font-family="monospace" font-size="2.000" fill="#e6e6e6" transform="rotate(-0.000 13.000 48.800)">10k</text>
+                            <text x="61.000" y="21.800" font-family="monospace" font-size="2.000" fill="#e6e6e6" transform="rotate(-0.000 61.000 21.800)">1k</text>
+                            <text x="57.000" y="48.800" font-family="monospace" font-size="2.000" fill="#e6e6e6" transform="rotate(-0.000 57.000 48.800)">100n</text>
+                            <text x="18.000" y="21.800" font-family="monospace" font-size="2.000" fill="#e6e6e6" transform="rotate(-0.000 18.000 21.800)">LED</text>
+                          </g>
                     </svg>
                 </div>
                 <div class="sheet__foot">
                     <span>open-pcb export demo.opcb --format svg</span>
-                    <span>5 footprints · 8 tracks · 4 vias</span>
+                    <span>5 footprints · 13 tracks · 2 vias</span>
                 </div>
             </div>
         </section>
