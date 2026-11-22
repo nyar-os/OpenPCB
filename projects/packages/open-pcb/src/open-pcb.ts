@@ -51,6 +51,7 @@ import type {
     ImpedanceWidthReport,
     InspectOptions,
     InspectReport,
+    KeepoutAreaReport,
     KicadImportOptions,
     KicadImportResult,
     MoveFootprintOptions,
@@ -71,6 +72,7 @@ import type {
     StitchViasOptions,
     TextListReport,
     UpdateFootprintOptions,
+    UpdateKeepoutOptions,
     UpdateLayerOptions,
     UpdatePadInput,
     UpdateTextOptions,
@@ -522,9 +524,17 @@ function attach(
             ensure();
             return commit((current) => service.addKeepout(current, options));
         },
+        async updateKeepout(options: UpdateKeepoutOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.updateKeepout(current, options));
+        },
         async deleteKeepout(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteKeepout(current, id));
+        },
+        async keepoutReport(): Promise<KeepoutAreaReport> {
+            ensure();
+            return service.keepoutReport(handle);
         },
         async addNetClass(options: AddNetClassOptions): Promise<BoardEditResult> {
             ensure();

@@ -43,6 +43,7 @@ import type {
     ImpedanceWidthReport,
     InspectCheck,
     InspectReport,
+    KeepoutAreaReport,
     MoveFootprintOptions,
     OutlineGeometryOptions,
     OutlineGeometryReport,
@@ -59,6 +60,7 @@ import type {
     SetViaBackDrillOptions,
     TextListReport,
     UpdateFootprintOptions,
+    UpdateKeepoutOptions,
     UpdateLayerOptions,
     UpdatePadInput,
     UpdateTextOptions,
@@ -291,9 +293,21 @@ export function addKeepout(handle: number, options: AddKeepoutOptions): BoardEdi
     );
 }
 
+/** Updates the layer or polygon of one keepout region. */
+export function updateKeepout(handle: number, options: UpdateKeepoutOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.updateKeepout').board_update_keepout(handle, JSON.stringify(options)),
+    );
+}
+
 /** Deletes one keepout region from an open board. */
 export function deleteKeepout(handle: number, id: string): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.deleteKeepout').board_delete_keepout(handle, id));
+}
+
+/** Reports the area and perimeter of every keepout region. */
+export function keepoutReport(handle: number): KeepoutAreaReport {
+    return decode<KeepoutAreaReport>(() => binding('board.keepoutReport').board_keepout_report(handle));
 }
 
 /** Declares one net class on an open board. */

@@ -1881,6 +1881,99 @@ impl Board {
         Ok(removed.id)
     }
 
+    /// Updates the layer or polygon of one keepout region.
+    ///
+    /// The region keeps its id, so existing checks and reports stay valid.
+    pub(crate) fn update_keepout(&mut self, request: UpdateKeepoutRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .keepouts
+            .iter()
+            .position(|keepout| keepout.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no keepout with id `{}`", request.id)))?;
+        if self.keepouts[index].layer != "*" {
+            self.editable_layer(&self.keepouts[index].layer)?;
+        }
+        let layer = match request.layer {
+            Some(layer) => {
+                let layer = layer.trim().to_string();
+                if layer.is_empty() {
+                    return Err(crate::argument("a keepout needs a non-empty `layer`"));
+                }
+                if layer != "*" {
+                    self.editable_layer(&layer)?;
+                    if self.layer(&layer).is_none_or(|entry| entry.kind != LayerKind::Copper) {
+                        return Err(crate::argument(format!("`{layer}` is not a copper layer; keepouts need copper")));
+                    }
+                }
+                Some(layer)
+            }
+            None => None,
+        };
+        if layer.is_none() && request.points.is_none() {
+            return Err(crate::argument("a keepout update needs `layer` or `points`"));
+        }
+        let points = match request.points {
+            Some(points) => {
+                if points.len() < 3 {
+                    return Err(crate::argument("a keepout needs at least three points"));
+                }
+                let points = points.into_iter().map(|point| finite_pair(point, "points")).collect::<Result<Vec<_>, _>>()?;
+                if polygon_area(&points) <= 1e-9 {
+                    return Err(crate::argument("a keepout polygon must enclose a non-zero area"));
+                }
+                Some(points)
+            }
+            None => None,
+        };
+        let keepout = &mut self.keepouts[index];
+        if let Some(layer) = layer {
+            keepout.layer = layer;
+        }
+        if let Some(points) = points {
+            keepout.points = points;
+        }
+        self.revision += 1;
+        Ok(json!(self.keepouts[index]))
+    }
+
+    /// Builds the keepout region report of one board.
+    ///
+    /// Every region reports its layer, vertex count, enclosed area in square
+    /// millimetres and perimeter in millimetres.
+    pub(crate) fn keepout_report(&self) -> Value {
+        let scale = self.millimetres();
+        let total = self.keepouts.iter().map(|keepout| polygon_area(&keepout.points)).sum::<f64>() * scale * scale;
+        let items = self
+            .keepouts
+            .iter()
+            .map(|keepout| {
+                let perimeter = keepout
+                    .points
+                    .iter()
+                    .enumerate()
+                    .map(|(index, point)| {
+                        let next = keepout.points[(index + 1) % keepout.points.len()];
+                        (next[0] - point[0]).hypot(next[1] - point[1]) * scale
+                    })
+                    .sum::<f64>();
+                json!({
+                    "id": keepout.id,
+                    "layer": keepout.layer,
+                    "vertices": keepout.points.len(),
+                    "area": crate::round6(polygon_area(&keepout.points) * scale * scale),
+                    "perimeter": crate::round6(perimeter),
+                })
+            })
+            .collect::<Vec<_>>();
+        json!({
+            "revision": self.revision,
+            "units": "mm2",
+            "count": items.len(),
+            "totalArea": crate::round6(total),
+            "items": items,
+        })
+    }
+
     /// Whether one keepout rejects copper on a layer.
     pub(crate) fn keepout_covers(&self, keepout: &Keepout, layer: &str) -> bool {
         keepout.layer == "*" || keepout.layer == layer
@@ -3104,6 +3197,20 @@ pub struct AddKeepoutRequest {
     pub layer: Option<String>,
     /// Polygon vertices in board units, in drawing order.
     pub points: Vec<[f64; 2]>,
+}
+
+/// Request of [`crate::update_keepout`]. At least one field is required.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateKeepoutRequest {
+    /// Keepout id to update.
+    pub id: String,
+    /// New copper layer id, or `*` for every copper layer.
+    #[serde(default)]
+    pub layer: Option<String>,
+    /// New polygon vertices in board units.
+    #[serde(default)]
+    pub points: Option<Vec<[f64; 2]>>,
 }
 
 /// Request of [`crate::add_track`].

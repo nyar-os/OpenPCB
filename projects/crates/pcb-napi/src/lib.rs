@@ -405,6 +405,25 @@ fn board_delete_keepout(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Updates the layer or polygon of one keepout region.
+#[function]
+fn board_update_keepout(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::UpdateKeepoutRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::update_keepout(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Reports the area and perimeter of every keepout region on an open board.
+#[function]
+fn board_keepout_report(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::keepout_report(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds linear teardrop copper at every pad-track junction.
 #[function]
 fn board_add_teardrops(ctx: CallContext) -> Result<JsValue> {
@@ -1438,7 +1457,9 @@ register_module![
     board_delete_text,
     board_list_texts,
     board_add_keepout,
+    board_update_keepout,
     board_delete_keepout,
+    board_keepout_report,
     board_add_net_class,
     board_delete_net_class,
     board_assign_net_class,

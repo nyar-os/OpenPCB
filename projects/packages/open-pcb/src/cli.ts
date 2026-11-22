@@ -1273,6 +1273,60 @@ keepout
         return 0;
     });
 
+keepout
+    .command('update', 'cli.cmd.keepout-update')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .option('--points <list>', 'cli.opt.points')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        const layer = text(options, 'layer');
+        const points = polygon(text(options, 'points'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        if (layer === undefined && text(options, 'points') === undefined) {
+            ctx.fail('open-pcb.cli.keepout-update-empty', {
+                message: 'a keepout update needs `--layer` or `--points`',
+            });
+            return 2;
+        }
+        if (text(options, 'points') !== undefined && points === undefined) {
+            ctx.fail('open-pcb.cli.point-required', {
+                message: '`--points` needs at least three `x,y` points separated by spaces or semicolons',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.updateKeepout({ id, layer, points });
+            ctx.emitResult(result, `updated ${result.object?.id ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+keepout
+    .command('list', 'cli.cmd.keepout-list')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.keepoutReport();
+            ctx.emitResult(report, `keepouts=${report.count} total=${report.totalArea}mm2`);
+            return 0;
+        });
+        return 0;
+    });
+
 const netclass = cli.command('netclass', 'cli.cmd.netclass');
 netclass
     .command('add', 'cli.cmd.netclass-add')

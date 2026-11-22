@@ -47,8 +47,9 @@ pub use board::{
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTextRequest,
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest,
     ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
-    SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    UpdatePadRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest,
+    SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateKeepoutRequest,
+    UpdateLayerRequest, UpdatePadRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest,
+    WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 pub use outline::OutlineGeometryRequest;
@@ -629,6 +630,16 @@ pub fn add_keepout(handle: u64, request: AddKeepoutRequest) -> Result<Value, Ser
     edit_result(handle, Some(object), None)
 }
 
+/// Updates the layer or polygon of one keepout region.
+pub fn update_keepout(handle: u64, request: UpdateKeepoutRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.update_keepout(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
 /// Deletes one keepout region from an open board.
 pub fn delete_keepout(handle: u64, id: &str) -> Result<Value, ServiceError> {
     let mut deleted = String::new();
@@ -637,6 +648,11 @@ pub fn delete_keepout(handle: u64, id: &str) -> Result<Value, ServiceError> {
         Ok(())
     })?;
     edit_result(handle, None, Some(deleted))
+}
+
+/// Reports the area and perimeter of every copper keepout region.
+pub fn keepout_report(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, |board| board.keepout_report())
 }
 
 /// Adds linear teardrop copper at every pad-track junction.

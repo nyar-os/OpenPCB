@@ -16,17 +16,17 @@ use crate::{
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTextRequest,
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
     ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, SetOutlineRequest,
-    SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair,
-    add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text,
-    add_track, add_via, add_waiver, add_zone, assign_net_class,
+    SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest,
+    UpdateKeepoutRequest, UpdateLayerRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest,
+    WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot,
+    add_teardrops, add_test_point, add_text, add_track, add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
     delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver, delete_zone,
-    drill_report, export, impedance_table, import, inspect, list_texts, move_footprint, open, outline_geometry, panelize, redo,
-    route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance, stackup_width,
-    stitch_vias, store, summary, undo, update_footprint, update_layer, update_text, update_track, update_via, update_zone,
-    zone_report,
+    drill_report, export, impedance_table, import, inspect, keepout_report, list_texts, move_footprint, open, outline_geometry,
+    panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance,
+    stackup_width, stitch_vias, store, summary, undo, update_footprint, update_keepout, update_layer, update_text,
+    update_track, update_via, update_zone, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1079,6 +1079,32 @@ fn keepouts_reject_copper_on_their_layer() {
         issues.iter().filter_map(|issue| issue["objectId"].as_str()).filter(|id| id.starts_with("track-")).collect();
     assert!(tracks.contains(&"track-1"), "the front track enters the keepout; got {tracks:?}");
     assert!(!tracks.contains(&"track-2"), "a keepout on F.Cu ignores B.Cu copper; got {tracks:?}");
+
+    let resized = update_keepout(
+        handle,
+        UpdateKeepoutRequest {
+            id: "keepout-1".to_string(),
+            layer: Some("*".to_string()),
+            points: Some(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]),
+        },
+    )
+    .expect("the keepout is resized");
+    assert_eq!(resized["object"]["layer"], "*");
+    let empty = update_keepout(handle, UpdateKeepoutRequest { id: "keepout-1".to_string(), ..Default::default() })
+        .expect_err("an update needs a field");
+    assert_eq!(empty.code, "session/argument-invalid");
+    let unknown = update_keepout(
+        handle,
+        UpdateKeepoutRequest { id: "keepout-9".to_string(), layer: Some("*".to_string()), ..Default::default() },
+    )
+    .expect_err("an unknown keepout is rejected");
+    assert_eq!(unknown.code, "object/not-found");
+    let keepouts = keepout_report(handle).expect("the keepout report is built");
+    assert_eq!(keepouts["count"], 1);
+    assert_eq!(keepouts["totalArea"], 100.0);
+    assert_eq!(keepouts["items"][0]["vertices"], 4);
+    assert_eq!(keepouts["items"][0]["perimeter"], 40.0);
+    assert_eq!(keepouts["items"][0]["layer"], "*");
 
     save(handle, &path, false).expect("the board saves");
     close(handle).expect("the board closes");

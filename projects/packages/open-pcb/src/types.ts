@@ -266,6 +266,27 @@ export interface ZoneAreaReport {
     readonly zones: readonly ZoneAreaEntry[];
 }
 
+/** One keepout region with its measured geometry. */
+export interface KeepoutAreaEntry {
+    readonly id: ObjectId;
+    /** Copper layer id, or `*` for every copper layer. */
+    readonly layer: string;
+    readonly vertices: number;
+    /** Enclosed keepout area, in square millimetres. */
+    readonly area: number;
+    /** Polygon perimeter, in millimetres. */
+    readonly perimeter: number;
+}
+
+/** Result of `board.keepoutReport()`. */
+export interface KeepoutAreaReport {
+    readonly revision: number;
+    readonly units: 'mm2';
+    readonly count: number;
+    readonly totalArea: number;
+    readonly items: readonly KeepoutAreaEntry[];
+}
+
 /** One drill tool and the hits it drives. */
 export interface DrillTool {
     /** Stable tool number, ordered by ascending diameter. */
@@ -877,6 +898,16 @@ export interface AddKeepoutOptions {
     readonly points: readonly (readonly [number, number])[];
 }
 
+/** Options of `board.updateKeepout()`. At least one field is required. */
+export interface UpdateKeepoutOptions {
+    /** Keepout id to update. */
+    readonly id: ObjectId;
+    /** New copper layer id, or `*` for every copper layer. */
+    readonly layer?: string;
+    /** New closed polygon in board units, in drawing order; at least three points. */
+    readonly points?: readonly (readonly [number, number])[];
+}
+
 /** Options of `board.addNetClass()`. */
 export interface AddNetClassOptions {
     /** Class name, unique on the board. */
@@ -1213,7 +1244,9 @@ export interface Board {
     listTexts(): Promise<TextListReport>;
     drillReport(): Promise<DrillReport>;
     addKeepout(options: AddKeepoutOptions): Promise<BoardEditResult>;
+    updateKeepout(options: UpdateKeepoutOptions): Promise<BoardEditResult>;
     deleteKeepout(id: ObjectId): Promise<BoardEditResult>;
+    keepoutReport(): Promise<KeepoutAreaReport>;
     addNetClass(options: AddNetClassOptions): Promise<BoardEditResult>;
     deleteNetClass(id: ObjectId): Promise<BoardEditResult>;
     assignNetClass(options: AssignNetClassOptions): Promise<BoardEditResult>;

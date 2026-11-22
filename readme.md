@@ -33,7 +33,9 @@ SDK and studio shell share one native model:
   writer emits each one as a `G36`/`G37` region and the SVG and PDF previews
   draw the pour.
 - Declare copper keepout regions on one copper layer or on `*` for the whole
-  stack; the `keepout` check flags any track, via, pad or pour that enters one.
+  stack; update their layer or polygon in place, report each one's area and
+  perimeter, and let the `keepout` check flag any track, via, pad or pour that
+  enters one.
 - Generate a stitching via fence on a declared net around the inset board
   outline; the ring is evenly spaced, deterministic, and skips positions that
   already hold a via.
@@ -158,8 +160,10 @@ open-pcb layer lock blinker.opcb --id Inner2 --locked true
 open-pcb zone add blinker.opcb --layer F.Cu --net VCC --points "5,5 40,5 40,30 5,30"
 open-pcb zone delete blinker.opcb --id zone-1
 
-# Add a copper keepout region and delete it by id
+# Add a copper keepout region, resize and re-layer it, then report its area
 open-pcb keepout add blinker.opcb --layer F.Cu --points "45,5 60,5 60,20 45,20"
+open-pcb keepout update blinker.opcb --id keepout-1 --layer "*" --points "45,5 60,5 60,20 45,20"
+open-pcb keepout list blinker.opcb
 open-pcb keepout delete blinker.opcb --id keepout-1
 
 # Declare a net class and move nets into it
@@ -351,7 +355,8 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   infer probes from nets or create panel or fixture geometry.
 - Keepout regions are design intent: the `keepout` check reads them, but they are
   not written to Gerber, drill data, IPC-2581 or KiCad output, and the router
-  does not yet avoid them.
+  does not yet avoid them. The area and perimeter report measures the declared
+  polygons, not the copper actually excluded.
 - Via stitching follows the rectangular outline only, places through vias and
   skips positions that already hold a via. It does not test the new vias against
   existing copper, use a polygon outline or choose a net by itself.
