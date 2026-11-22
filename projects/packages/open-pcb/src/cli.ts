@@ -508,6 +508,7 @@ pad.command('add', 'cli.cmd.footprint-pad-add')
     .option('--w <mm>', 'cli.opt.w')
     .option('--h <mm>', 'cli.opt.h')
     .option('--net <name>', 'cli.opt.net')
+    .option('--drill <mm>', 'cli.opt.pad-drill')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         const footprintId = text(options, 'footprint');
@@ -528,6 +529,7 @@ pad.command('add', 'cli.cmd.footprint-pad-add')
         const y = numberOption(text(options, 'y'));
         const w = numberOption(text(options, 'w'));
         const h = numberOption(text(options, 'h'));
+        const drill = numberOption(text(options, 'drill'));
         if (x === undefined) {
             ctx.fail('open-pcb.cli.number-invalid', { message: '`--x <mm>` must be a finite number' });
             return 2;
@@ -544,6 +546,10 @@ pad.command('add', 'cli.cmd.footprint-pad-add')
             ctx.fail('open-pcb.cli.number-invalid', { message: '`--h <mm>` must be a finite number' });
             return 2;
         }
+        if (text(options, 'drill') !== undefined && drill === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--drill <mm>` must be a finite number' });
+            return 2;
+        }
         await withBoard(file, async (board) => {
             const result = await board.addPad({
                 footprint: footprintId,
@@ -553,6 +559,7 @@ pad.command('add', 'cli.cmd.footprint-pad-add')
                 w,
                 h,
                 net: text(options, 'net'),
+                drill,
             });
             ctx.emitResult(result, `added pad ${footprintId}:${padNumber}`);
             return 0;
@@ -568,6 +575,7 @@ pad.command('update', 'cli.cmd.footprint-pad-update')
     .option('--w <mm>', 'cli.opt.w')
     .option('--h <mm>', 'cli.opt.h')
     .option('--net <name>', 'cli.opt.net')
+    .option('--drill <mm>', 'cli.opt.pad-drill')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         const footprintId = text(options, 'footprint');
@@ -588,6 +596,7 @@ pad.command('update', 'cli.cmd.footprint-pad-update')
         const y = numberOption(text(options, 'y'));
         const w = numberOption(text(options, 'w'));
         const h = numberOption(text(options, 'h'));
+        const drill = numberOption(text(options, 'drill'));
         if (text(options, 'x') !== undefined && x === undefined) {
             ctx.fail('open-pcb.cli.number-invalid', { message: '`--x <mm>` must be a finite number' });
             return 2;
@@ -604,8 +613,19 @@ pad.command('update', 'cli.cmd.footprint-pad-update')
             ctx.fail('open-pcb.cli.number-invalid', { message: '`--h <mm>` must be a finite number' });
             return 2;
         }
-        if (x === undefined && y === undefined && w === undefined && h === undefined && text(options, 'net') === undefined) {
-            ctx.fail('open-pcb.cli.number-invalid', { message: 'an update needs `--x`, `--y`, `--w`, `--h` or `--net`' });
+        if (text(options, 'drill') !== undefined && drill === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--drill <mm>` must be a finite number' });
+            return 2;
+        }
+        if (
+            x === undefined &&
+            y === undefined &&
+            w === undefined &&
+            h === undefined &&
+            text(options, 'net') === undefined &&
+            drill === undefined
+        ) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: 'an update needs `--x`, `--y`, `--w`, `--h`, `--net` or `--drill`' });
             return 2;
         }
         await withBoard(file, async (board) => {
@@ -617,6 +637,7 @@ pad.command('update', 'cli.cmd.footprint-pad-update')
                 w,
                 h,
                 net: text(options, 'net'),
+                drill,
             });
             ctx.emitResult(result, `updated pad ${footprintId}:${padNumber}`);
             return 0;

@@ -120,6 +120,7 @@
             "at": "Via centre as x,y",
             "diameter": "Via copper diameter",
             "drill": "Via finished drill diameter",
+            "pad-drill": "Pad finished drill diameter",
             "slot-width": "Slot tool diameter, equal to the cut width, in mm",
             "from-layer": "Top copper layer of a blind or buried via",
             "to-layer": "Bottom copper layer of a blind or buried via",

@@ -419,7 +419,7 @@ fn pads_of(
             }
             None => None,
         };
-        pads.push(Pad { number, x: x * scale, y: y * scale, w: width * scale, h: height * scale, net });
+        pads.push(Pad { number, x: x * scale, y: y * scale, w: width * scale, h: height * scale, net, drill: None });
     }
     pads
 }

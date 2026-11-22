@@ -24,10 +24,7 @@ const MIN_TRACK_WIDTH_MM: f64 = 0.15;
 const MIN_CLEARANCE_MM: f64 = 0.2;
 /// Courtyard expansion around a footprint's pad bounding box, in millimetres.
 const COURTYARD_MARGIN_MM: f64 = 0.25;
-/// Minimum annular ring on a via, in millimetres.
-///
-/// The document model has no drill field on pads, so through-hole pads cannot
-/// exist yet; this check evaluates vias.
+/// Minimum annular ring on a via or a drilled pad, in millimetres.
 const MIN_ANNULAR_RING_MM: f64 = 0.05;
 /// Track width below which `track-width` reports an error, in millimetres.
 const TRACK_WIDTH_ERROR_MM: f64 = 0.1;
@@ -592,7 +589,8 @@ fn annular_rings(board: &Board, issues: &mut CheckReport) {
     }
 }
 
-/// Reports vias whose copper ring is thinner than [`MIN_ANNULAR_RING_MM`].
+/// Reports vias and drilled pads whose copper ring is thinner than
+/// [`MIN_ANNULAR_RING_MM`].
 fn annular_ring(board: &Board, issues: &mut CheckReport) {
     let scale = board.millimetres();
     for via in &board.vias {
@@ -609,6 +607,31 @@ fn annular_ring(board: &Board, issues: &mut CheckReport) {
                 Some(&via.id),
                 format!("via `{}` has an annular ring of {ring:.3} mm; the minimum is {MIN_ANNULAR_RING_MM} mm", via.id),
             ));
+        }
+    }
+    for footprint in &board.footprints {
+        for pad in &footprint.pads {
+            let Some(drill) = pad.drill
+            else {
+                continue;
+            };
+            if !drill.is_finite() || !pad.w.is_finite() || !pad.h.is_finite() {
+                continue;
+            }
+            let ring = (pad.w.min(pad.h) - drill) / 2.0 * scale;
+            if ring < MIN_ANNULAR_RING_MM {
+                issues.push(finding(
+                    "drc/annular-ring-too-small",
+                    Severity::Error,
+                    board,
+                    Some(&footprint.layer),
+                    Some(&footprint.id),
+                    format!(
+                        "pad `{}` of `{}` has an annular ring of {ring:.3} mm; the minimum is {MIN_ANNULAR_RING_MM} mm",
+                        pad.number, footprint.ref_
+                    ),
+                ));
+            }
         }
     }
 }

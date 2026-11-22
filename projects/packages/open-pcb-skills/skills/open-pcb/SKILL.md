@@ -89,9 +89,9 @@ Implemented:
   constructs; the CLI and SDK detect the format from the content.
 
 Not implemented: STEP export, the interactive viewport renderer, silkscreen
-text/shapes, pad drills (so `annular-ring`, the drill map and the Excellon file
-cover vias and routed slots only), diagonal or rip-up routing, and templates
-other than `blank`. Rectangular pad apertures are not rotated in Gerber output. Back-drill depth and
+text/shapes, oval or slotted pad drills (a single circular pad drill is stored
+and reaches KiCad PCB, `annular-ring`, the drill map and the Excellon file),
+diagonal or rip-up routing, and templates other than `blank`. Rectangular pad apertures are not rotated in Gerber output. Back-drill depth and
 stub live in `.opcb` and IPC-2581 and appear as `;Back drill` comments in the
 Excellon file and as dashed rings in the drill map; KiCad PCB exchange does not
 carry back drill. The outline is rectangular, so closure and self-intersection
@@ -148,8 +148,8 @@ a format, check or target.
 | `open-pcb footprint move <file.opcb> --id <id> -x <mm> -y <mm> --rotation <deg> --layer <layer>` | Move, rotate or re-layer a footprint in place. `-x` and `-y` also accept the `--x` and `--y` spelling; `--layer` is optional. |
 | `open-pcb footprint update <file.opcb> --id <id> --value <value> --footprint <package>` | Update the value or package of a footprint. |
 | `open-pcb footprint delete <file.opcb> --id <id>` | Delete a footprint by its stable id. |
-| `open-pcb footprint pad add <file.opcb> --footprint <id> --number <n> --x <mm> --y <mm> --w <mm> --h <mm> [--net <name>]` | Add a pad to a footprint. |
-| `open-pcb footprint pad update <file.opcb> --footprint <id> --number <n> [--x <mm>] [--y <mm>] [--w <mm>] [--h <mm>] [--net <name>]` | Update the geometry or net of a pad; at least one field is required. |
+| `open-pcb footprint pad add <file.opcb> --footprint <id> --number <n> --x <mm> --y <mm> --w <mm> --h <mm> [--net <name>] [--drill <mm>]` | Add a pad to a footprint, optionally with a circular drill smaller than its short side. |
+| `open-pcb footprint pad update <file.opcb> --footprint <id> --number <n> [--x <mm>] [--y <mm>] [--w <mm>] [--h <mm>] [--net <name>] [--drill <mm>]` | Update the geometry, net or drill of a pad; at least one field is required. |
 | `open-pcb footprint pad delete <file.opcb> --footprint <id> --number <n>` | Delete a pad from a footprint. |
 | `open-pcb track add <file.opcb> --net <name> --layer <layer> --from <x,y> --to <x,y> --width <mm>` | Route one track segment in place. |
 | `open-pcb track update <file.opcb> --id <id> [--net <name>] [--layer <layer>] [--width <mm>] [--from <x,y>] [--to <x,y>]` | Update a track in place; at least one field is required. |
@@ -231,7 +231,7 @@ mutating command also records the previous document for CLI undo/redo.
    any non-waived error-severity issue remains; `active` and `waived` count the
    findings after policy is applied. A waived issue stays in `issues` with
    `waived: true` and its `waiverId`, so never call it fixed. `annular-ring`
-   evaluates vias because the model has no pad drill; `track-width` errors below
+   evaluates vias and drilled pads with the same minimum ring rule; `track-width` errors below
    0.1mm and warns below 0.15mm; `unrouted` warns with the number of disconnected
    pad groups; `diffpair` compares routed length and spacing against the declared
    targets; `edge-clearance` measures component bodies and via drills against the

@@ -415,27 +415,43 @@ fn gerber_number(value: f64) -> i64 {
     if scaled.is_finite() { scaled as i64 } else { 0 }
 }
 
+/// Hits that share one Excellon tool diameter.
+#[derive(Default)]
+struct DrillTool<'a> {
+    vias: Vec<&'a crate::board::Via>,
+    slots: Vec<&'a crate::board::Slot>,
+    pads: Vec<[f64; 2]>,
+}
+
 /// Excellon drill file with one tool per distinct finished hole or slot width.
 fn drill(board: &Board) -> String {
     let scale = board.millimetres();
-    let mut tools: BTreeMap<String, (Vec<&crate::board::Via>, Vec<&crate::board::Slot>)> = BTreeMap::new();
+    let mut tools: BTreeMap<String, DrillTool<'_>> = BTreeMap::new();
     for via in &board.vias {
-        tools.entry(number(via.drill * scale)).or_default().0.push(via);
+        tools.entry(number(via.drill * scale)).or_default().vias.push(via);
     }
     for slot in &board.slots {
-        tools.entry(number(slot.width * scale)).or_default().1.push(slot);
+        tools.entry(number(slot.width * scale)).or_default().slots.push(slot);
+    }
+    for pad in board.placed_pads() {
+        if let Some(drill) = pad.drill {
+            tools.entry(number(drill * scale)).or_default().pads.push(pad.at);
+        }
     }
     let mut out = String::from("M48\n;OpenPCB drill file\n;Units: mm\nMETRIC,TZ\n");
     for (index, (size, _)) in tools.iter().enumerate() {
         let _ = writeln!(out, "T{}C{size}", index + 1);
     }
     out.push_str("%\nG90\nG05\n");
-    for (index, (_, (hits, slots))) in tools.iter().enumerate() {
+    for (index, tool) in tools.values().enumerate() {
         let _ = writeln!(out, "T{}", index + 1);
-        for via in hits {
+        for via in &tool.vias {
             let _ = writeln!(out, "X{}Y{}", number(via.at[0] * scale), number(via.at[1] * scale));
         }
-        for slot in slots {
+        for at in &tool.pads {
+            let _ = writeln!(out, "X{}Y{}", number(at[0] * scale), number(at[1] * scale));
+        }
+        for slot in &tool.slots {
             let _ = writeln!(
                 out,
                 "X{}Y{}G85X{}Y{}",
@@ -463,8 +479,8 @@ fn drill(board: &Board) -> String {
 
 /// Drill map with one circle per drilled hole, a tool legend and back-drill marks.
 ///
-/// The map is a standalone SVG in millimetres. Every via contributes one plated
-/// hole; the document stores no pad drills, so pads cannot contribute a hole.
+/// The map is a standalone SVG in millimetres. Every via and every drilled pad
+/// contributes one plated hole, and routed slots are drawn as lines.
 /// Back-drilled vias keep their hole and gain a dashed outer ring plus a legend
 /// line, so a reader can tell which hits are back drilled without re-reading the
 /// Excellon file.
@@ -527,6 +543,21 @@ fn drill_map(board: &Board) -> String {
                 radius + 0.5
             );
         }
+        tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0)).1 += 1;
+    }
+    for pad in board.placed_pads() {
+        let Some(drill) = pad.drill
+        else {
+            continue;
+        };
+        let diameter = drill * scale;
+        let radius = (diameter / 2.0).max(0.05);
+        let _ = writeln!(
+            out,
+            "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{radius:.3}\" fill=\"#111111\" stroke=\"#000000\" stroke-width=\"0.05\"/>",
+            map_x(pad.at[0] * scale),
+            map_y(pad.at[1] * scale)
+        );
         tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0)).1 += 1;
     }
     for slot in &board.slots {

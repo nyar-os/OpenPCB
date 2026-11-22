@@ -84,6 +84,9 @@ pub(crate) struct Pad {
     pub(crate) h: f64,
     /// Declared net name, when assigned.
     pub(crate) net: Option<String>,
+    /// Finished circular drill diameter, when the pad is drilled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) drill: Option<f64>,
 }
 
 /// One placed footprint.
@@ -162,6 +165,8 @@ pub(crate) struct PlacedPad<'a> {
     pub(crate) half: [f64; 2],
     /// Layer the owning footprint is placed on.
     pub(crate) layer: &'a str,
+    /// Finished circular drill diameter, when the pad is drilled.
+    pub(crate) drill: Option<f64>,
 }
 
 /// One via.
@@ -999,7 +1004,8 @@ impl Board {
         let w = positive(request.w, "w")?;
         let h = positive(request.h, "h")?;
         let net = self.pad_net(request.net.as_deref())?;
-        let pad = Pad { number: request.number, x, y, w, h, net };
+        let drill = request.drill.map(|value| pad_drill(value, w, h, &request.number)).transpose()?;
+        let pad = Pad { number: request.number, x, y, w, h, net, drill };
         let object = json!(pad);
         self.footprints[index].pads.push(pad);
         self.revision += 1;
@@ -1020,10 +1026,30 @@ impl Board {
                     format!("no pad `{}` on footprint `{}`", request.number, self.footprints[footprint_index].ref_),
                 )
             })?;
-        if request.x.is_none() && request.y.is_none() && request.w.is_none() && request.h.is_none() && request.net.is_none() {
-            return Err(crate::argument("a pad update needs `x`, `y`, `w`, `h` or `net`"));
+        if request.x.is_none()
+            && request.y.is_none()
+            && request.w.is_none()
+            && request.h.is_none()
+            && request.net.is_none()
+            && request.drill.is_none()
+        {
+            return Err(crate::argument("a pad update needs `x`, `y`, `w`, `h`, `net` or `drill`"));
         }
         let net = self.pad_net(request.net.as_deref())?;
+        let current = &self.footprints[footprint_index].pads[pad_index];
+        let w = match request.w {
+            Some(value) => positive(value, "w")?,
+            None => current.w,
+        };
+        let h = match request.h {
+            Some(value) => positive(value, "h")?,
+            None => current.h,
+        };
+        let drill = match (request.drill, current.drill) {
+            (Some(value), _) => Some(pad_drill(value, w, h, &request.number)?),
+            (None, Some(value)) => Some(pad_drill(value, w, h, &request.number)?),
+            (None, None) => None,
+        };
         let pad = &mut self.footprints[footprint_index].pads[pad_index];
         if let Some(x) = request.x {
             pad.x = finite(x, "x")?;
@@ -1031,12 +1057,9 @@ impl Board {
         if let Some(y) = request.y {
             pad.y = finite(y, "y")?;
         }
-        if let Some(w) = request.w {
-            pad.w = positive(w, "w")?;
-        }
-        if let Some(h) = request.h {
-            pad.h = positive(h, "h")?;
-        }
+        pad.w = w;
+        pad.h = h;
+        pad.drill = drill;
         if net.is_some() {
             pad.net = net;
         }
@@ -2499,6 +2522,7 @@ impl Board {
                     at: [footprint.x + pad.x * cos - pad.y * sin, footprint.y + pad.x * sin + pad.y * cos],
                     half: [(cos.abs() * pad.w + sin.abs() * pad.h) / 2.0, (sin.abs() * pad.w + cos.abs() * pad.h) / 2.0],
                     layer: &footprint.layer,
+                    drill: pad.drill,
                 });
             }
         }
@@ -2676,6 +2700,23 @@ fn positive(value: f64, field: &str) -> Result<f64, ServiceError> {
     if value > 0.0 { Ok(value) } else { Err(crate::argument(format!("`{field}` must be greater than zero"))) }
 }
 
+/// Rejects a pad drill that is not finite, positive and smaller than the pad's
+/// short side.
+fn pad_drill(value: f64, w: f64, h: f64, number: &str) -> Result<f64, ServiceError> {
+    let label = format!("pad `{number}` drill");
+    if !value.is_finite() || value <= 0.0 {
+        return Err(ServiceError::new("pad/invalid-drill", format!("`{label}` must be a finite number greater than zero")));
+    }
+    let short = w.min(h);
+    if value >= short {
+        return Err(ServiceError::new(
+            "pad/invalid-drill",
+            format!("`{label}` must be smaller than the pad's short side {short}"),
+        ));
+    }
+    Ok(value)
+}
+
 fn non_negative(value: f64, field: &str) -> Result<f64, ServiceError> {
     let value = finite(value, field)?;
     if value < 0.0 { Err(crate::argument(format!("`{field}` must not be negative"))) } else { Ok(value) }
@@ -2783,6 +2824,18 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
             checks(pad.y, &format!("pad `{}` of `{}` y", pad.number, footprint.ref_))?;
             sizes(pad.w, &format!("pad `{}` of `{}` width", pad.number, footprint.ref_))?;
             sizes(pad.h, &format!("pad `{}` of `{}` height", pad.number, footprint.ref_))?;
+            if let Some(drill) = pad.drill {
+                let short = pad.w.min(pad.h);
+                if !drill.is_finite() || drill <= 0.0 || drill >= short {
+                    return Err(ServiceError::new(
+                        "pad/invalid-drill",
+                        format!(
+                            "pad `{}` of `{}` has drill {drill}; it must be positive and smaller than the short side {short}",
+                            pad.number, footprint.ref_
+                        ),
+                    ));
+                }
+            }
             if let Some(net) = pad.net.as_deref()
                 && !net_names.contains(net)
             {
@@ -3214,6 +3267,9 @@ pub struct AddPadRequest {
     /// Declared net name, when assigned.
     #[serde(default)]
     pub net: Option<String>,
+    /// Finished circular drill diameter, when the pad is drilled.
+    #[serde(default)]
+    pub drill: Option<f64>,
 }
 
 /// Request of [`crate::update_pad`]. At least one field is required.
@@ -3234,6 +3290,8 @@ pub struct UpdatePadRequest {
     pub h: Option<f64>,
     /// New declared net name.
     pub net: Option<String>,
+    /// New finished circular drill diameter.
+    pub drill: Option<f64>,
 }
 
 /// Request of [`crate::delete_pad`].

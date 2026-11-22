@@ -424,9 +424,38 @@ fn pad(
     if kind != "smd" {
         loss(losses, "kicad/pad-type", format!("footprint `{reference}`: pad `{number}` type `{kind}` is not stored"));
     }
-    if child(values, "drill").is_some() {
-        loss(losses, "kicad/pad-drill", format!("footprint `{reference}`: pad `{number}` drill is not stored"));
-    }
+    let drill = match child(values, "drill") {
+        None => None,
+        Some(node) => {
+            let single = match body(node).unwrap_or_default() {
+                [item] => text(item).and_then(|value| value.parse::<f64>().ok()).filter(|value| *value > 0.0),
+                _ => None,
+            };
+            match single {
+                Some(value) if value < w.min(h) => Some(value),
+                Some(value) => {
+                    loss(
+                        losses,
+                        "kicad/pad-drill",
+                        format!(
+                            "footprint `{reference}`: pad `{number}` drill {value} is not smaller than its short side and is not stored"
+                        ),
+                    );
+                    None
+                }
+                None => {
+                    loss(
+                        losses,
+                        "kicad/pad-drill",
+                        format!(
+                            "footprint `{reference}`: pad `{number}` drill is not a single circular diameter and is not stored"
+                        ),
+                    );
+                    None
+                }
+            }
+        }
+    };
     if at[2].abs() > 0.000_001 {
         loss(losses, "kicad/pad-rotation", format!("footprint `{reference}`: pad `{number}` rotation is not stored"));
     }
@@ -470,7 +499,7 @@ fn pad(
         );
     }
 
-    Some(Pad { number, x: at[0], y: at[1], w, h, net })
+    Some(Pad { number, x: at[0], y: at[1], w, h, net, drill })
 }
 
 /// Parses one routed segment.

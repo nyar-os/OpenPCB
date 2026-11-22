@@ -219,6 +219,7 @@ pub fn capabilities() -> Value {
         "keepouts": "supported",
         "viaStitching": "supported",
         "slots": "supported",
+        "padDrills": "supported",
         "copperBalance": "supported",
         "netLengths": "supported",
         "zoneReport": "supported",

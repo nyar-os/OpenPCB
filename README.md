@@ -80,8 +80,8 @@ assuming a format, check or export target works.
 ## ✨ Highlights
 
 - **One editable board document.** Layers, stackup, footprints, pads, nets,
-  tracks, vias, slots, pours, keepouts, text items, net classes and test points
-  share one revision counter and one JSON document.
+  tracks, vias, pad drills, slots, pours, keepouts, text items, net classes and
+  test points share one revision counter and one JSON document.
 - **Vias for every span.** Through, blind and buried vias derive their span from
   the copper stack, and micro vias are a stored type that must bridge two
   adjacent layers with `F.Cu` or `B.Cu` at one end. KiCad PCB exchange keeps the
@@ -97,11 +97,12 @@ assuming a format, check or export target works.
   silkscreen over pads, differential pairs, dangling copper, net classes,
   keepouts and via-in-pad.
 - **Fabrication and assembly outputs.** Write Gerber RS-274X with X2 object
-  attributes, Excellon drill and drill maps, BOM, pick-and-place, placement JSON,
-  test-point CSV and IPC-D-356A netlists.
+  attributes, Excellon drill and drill maps that include via, pad and routed-slot
+  holes, BOM, pick-and-place, placement JSON, test-point CSV and IPC-D-356A
+  netlists.
 - **Exchange without a second model.** Import KiCad PCB or IPC-2581 into the same
-  document and export KiCad PCB or IPC-2581 back, with a stable loss ledger for
-  constructs the document cannot hold.
+  document and export KiCad PCB or IPC-2581 back, including a pad's circular
+  drill, with a stable loss ledger for constructs the document cannot hold.
 - **Controlled impedance.** Declare copper thickness, dielectric height and
   permittivity, then compute microstrip, stripline, edge-coupled differential
   microstrip or edge-coupled differential stripline impedance and convert a

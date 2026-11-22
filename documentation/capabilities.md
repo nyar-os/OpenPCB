@@ -27,8 +27,8 @@ direction.
 | `kicad_pcb` | `supported` | `supported` | Import reports a loss ledger. |
 | `ipc2581` | `supported` | `supported` | Import reports a loss ledger. |
 | `gbr` | `unsupported` | `supported` | Writes a directory of Gerber files. |
-| `drl` | `unsupported` | `supported` | Excellon drill file. |
-| `drill_map` | `unsupported` | `supported` | SVG hole map. |
+| `drl` | `unsupported` | `supported` | Excellon drill file with via, pad and routed-slot holes. |
+| `drill_map` | `unsupported` | `supported` | SVG hole map covering vias, pad drills and routed slots. |
 | `pos` | `unsupported` | `supported` | Pick-and-place CSV. |
 | `placement` | `unsupported` | `supported` | Millimetre JSON. |
 | `bom` | `unsupported` | `supported` | Bill of materials CSV. |
@@ -80,6 +80,7 @@ via-in-pad
 | Silkscreen text items | `supported` |
 | Keepouts and the keepout report | `supported` |
 | Via stitching | `supported` |
+| Pad drills (stored, circular only) and their fabrication output | `supported` |
 | Plated routed slots and the drill report | `supported` |
 | Copper area and balance report | `supported` |
 | Routed net-length report (`lengths`, `Board.netLengths`) | `supported` |
@@ -133,7 +134,9 @@ ipc2581/back-drill-invalid              ipc2581/units-unknown
 ```
 
 Both readers keep copper layers, nets, footprints and pads, tracks, through,
-blind and buried vias and a rectangular profile. KiCad also imports a micro via
+blind and buried vias and a rectangular profile. KiCad stores a pad's single
+circular `(drill d)`; an oval or slotted pad drill stays in the ledger under
+`kicad/pad-drill` instead of being approximated. KiCad also imports a micro via
 when its span bridges two adjacent copper layers and one end is an outer layer;
 any other micro span stays in the ledger under `kicad/via-layer-span` instead of
 being approximated.
@@ -214,8 +217,11 @@ being approximated.
   add the document's expansion per side. Vias stay tented and inner-layer pads
   open no mask. Solder-paste windows are rectangular and equal to the outer pad
   size; there is no paste expansion rule and mask-defined shapes are not written.
-- Pad drills are not stored. `annular-ring` evaluates vias only, and the drill
-  map and Excellon file list via drills and routed slots, never pad drills.
+- Pad drills are stored as one circular diameter per pad and must be smaller than
+  the pad's short side; a violating drill is rejected with `pad/invalid-drill`.
+  `annular-ring` evaluates vias and drilled pads with the same minimum ring rule,
+  and the Excellon file and drill map list via, pad and routed-slot holes. A pad
+  without a drill contributes nothing to those files.
 - A micro via is a typed via, not a smaller drill: it must bridge two adjacent
   copper layers and at least one end must be `F.Cu` or `B.Cu`. Other spans are
   rejected with `via/micro-span`, and the drill report, Excellon file and drill

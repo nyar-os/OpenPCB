@@ -2,8 +2,9 @@
 //!
 //! The report groups every drilled feature by finished tool diameter, so a
 //! fabrication quote can be checked against the Excellon file without parsing
-//! its tool table. Vias and plated routed slots share the grouping; the document
-//! stores no pad drills, so pads never contribute a hole.
+//! its tool table. Vias, drilled pads and plated routed slots share the tool
+//! grouping; `holes` still lists vias only, and pad drills are listed separately
+//! in `padHoles`.
 
 use std::collections::BTreeMap;
 
@@ -17,16 +18,26 @@ use crate::{
 /// Builds the drill tool, hole and slot report of one board.
 pub(crate) fn report(board: &Board) -> Value {
     let scale = board.millimetres();
-    let mut tools: BTreeMap<String, (f64, usize, usize)> = BTreeMap::new();
+    let mut tools: BTreeMap<String, (f64, usize, usize, usize)> = BTreeMap::new();
     for via in &board.vias {
         let diameter = round6(via.drill * scale);
-        let entry = tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0, 0));
+        let entry = tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0, 0, 0));
         entry.1 += 1;
     }
     for slot in &board.slots {
         let width = round6(slot.width * scale);
-        let entry = tools.entry(format!("{width:.3}")).or_insert((width, 0, 0));
+        let entry = tools.entry(format!("{width:.3}")).or_insert((width, 0, 0, 0));
         entry.2 += 1;
+    }
+    let pads = board.placed_pads();
+    for pad in &pads {
+        let Some(drill) = pad.drill
+        else {
+            continue;
+        };
+        let diameter = round6(drill * scale);
+        let entry = tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0, 0, 0));
+        entry.3 += 1;
     }
 
     let numbers: BTreeMap<String, u32> = tools.keys().enumerate().map(|(index, key)| (key.clone(), index as u32 + 1)).collect();
@@ -58,16 +69,39 @@ pub(crate) fn report(board: &Board) -> Value {
         slots.push(slot_value(slot, scale, width, tool_number(width)));
     }
 
+    let mut pad_holes = Vec::new();
+    for pad in &pads {
+        let Some(drill) = pad.drill
+        else {
+            continue;
+        };
+        let diameter = round6(drill * scale);
+        pad_holes.push(json!({
+            "id": pad.key,
+            "net": pad.net,
+            "tool": tool_number(diameter),
+            "at": [round6(pad.at[0] * scale), round6(pad.at[1] * scale)],
+            "diameter": diameter,
+            "plated": true,
+        }));
+    }
+
     let tools: Vec<Value> = tools
         .values()
         .enumerate()
-        .map(|(index, (diameter, hole_count, slot_count))| {
-            json!({
+        .map(|(index, (diameter, hole_count, slot_count, pad_count))| {
+            let mut value = json!({
                 "tool": index as u32 + 1,
                 "diameter": round6(*diameter),
                 "holes": hole_count,
                 "slots": slot_count,
-            })
+            });
+            if *pad_count > 0
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert("padHoles".to_string(), json!(pad_count));
+            }
+            value
         })
         .collect();
 
@@ -77,9 +111,11 @@ pub(crate) fn report(board: &Board) -> Value {
         "tools": tools,
         "holeCount": holes.len(),
         "slotCount": slots.len(),
+        "padHoleCount": pad_holes.len(),
         "backDrilled": back_drilled,
         "vias": { "through": through, "blind": blind, "buried": buried, "micro": micro },
         "holes": holes,
+        "padHoles": pad_holes,
         "slots": slots,
     })
 }

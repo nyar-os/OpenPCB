@@ -820,6 +820,8 @@ export interface AddPadInput {
     readonly h: number;
     /** Declared net name, when assigned. */
     readonly net?: string;
+    /** Finished circular drill diameter, in board units. */
+    readonly drill?: number;
 }
 
 /** Options of `board.addTrack()`. */
@@ -1190,6 +1192,8 @@ export interface UpdatePadInput {
     readonly h?: number;
     /** New declared net name. */
     readonly net?: string;
+    /** New finished circular drill diameter, in board units. */
+    readonly drill?: number;
 }
 
 /** Options of `board.updateTrack()`. At least one editable field is required. */

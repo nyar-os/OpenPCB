@@ -109,15 +109,20 @@ fn footprint_block(out: &mut String, footprint: &Footprint, board: &Board, scale
     out.push_str("  )\n");
 }
 
-/// Writes one surface-mount rectangular pad relative to its footprint.
+/// Writes one rectangular pad relative to its footprint, with a circular drill
+/// when the pad stores one.
 fn pad_block(out: &mut String, pad: &Pad, footprint_layer: &str, board: &Board, scale: f64) {
     let net = match pad.net.as_deref() {
         Some(name) => format!(" (net {} \"{}\")", net_number(board, Some(name)), sexpr(name)),
         None => String::new(),
     };
+    let drill = match pad.drill {
+        Some(diameter) => format!(" (drill {})", mm(diameter * scale)),
+        None => String::new(),
+    };
     let _ = writeln!(
         out,
-        "    (pad \"{}\" smd rect (at {}) (size {} {}) (layers {}){net})",
+        "    (pad \"{}\" smd rect (at {}) (size {} {}){drill} (layers {}){net})",
         sexpr(&pad.number),
         point([pad.x, pad.y], scale),
         mm(pad.w * scale),

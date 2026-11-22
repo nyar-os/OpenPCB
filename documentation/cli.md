@@ -142,21 +142,25 @@ needs `--value` or `--footprint`.
 
 ```bash
 open-pcb footprint pad add <file> --footprint <id> --number <n> --x <mm> --y <mm>
-    --w <mm> --h <mm> [--net <name>]
+    --w <mm> --h <mm> [--net <name>] [--drill <mm>]
 ```
 
 All of `--footprint`, `--number`, `--x`, `--y`, `--w` and `--h` are required.
-Pad positions are relative to the footprint origin.
+Pad positions are relative to the footprint origin. `--drill` stores one
+circular finished drill; it must be positive and smaller than the pad's short
+side, otherwise the edit fails with `pad/invalid-drill`.
 
 ### `footprint pad update`, `delete`
 
 ```bash
 open-pcb footprint pad update <file> --footprint <id> --number <n>
-    [--x <mm>] [--y <mm>] [--w <mm>] [--h <mm>] [--net <name>]
+    [--x <mm>] [--y <mm>] [--w <mm>] [--h <mm>] [--net <name>] [--drill <mm>]
 open-pcb footprint pad delete <file> --footprint <id> --number <n>
 ```
 
-An update needs at least one of `--x`, `--y`, `--w`, `--h` or `--net`.
+An update needs at least one of `--x`, `--y`, `--w`, `--h`, `--net` or
+`--drill`. A smaller `--w` or `--h` that would leave the stored drill equal to
+or larger than the short side is rejected.
 
 ## Tracks
 
@@ -302,7 +306,10 @@ clear diagonal fits, reporting the reason in the JSON `edges` array.
 `teardrop` implements `linear` only. `stitch` requires a net and a positive spacing and
 reports how many vias it placed and skipped. `copper balance` prints per-layer
 area, coverage when an outline exists, and the imbalance between copper sides.
-`drill report` prints hole count, slot count, tool count and back-drilled count.
+`drill report` prints hole count, pad hole count, slot count, tool count and
+back-drilled count. `holeCount` and `holes` keep their historical via-only
+meaning; `padHoleCount` and `padHoles` list drilled pads, and a tool entry gains
+`padHoles` when it also cuts pads.
 `lengths` prints one entry per declared net with its track count, summed track
 centreline length in document units and via count, plus the totals.
 

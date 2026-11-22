@@ -54,6 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 w: 1.5,
                 h: 1.0,
                 net: Some(if column == 0.0 { "VCC" } else { "SIG" }.into()),
+                drill: None,
             },
         )?;
     }
@@ -88,6 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     w: 1.2,
                     h: 1.4,
                     net: Some(net.into()),
+                    drill: None,
                 },
             )?;
         }

@@ -17,17 +17,17 @@ use crate::{
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
     ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, RouteStyle,
     SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest,
-    UpdateFootprintRequest, UpdateKeepoutRequest, UpdateLayerRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest,
-    UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net,
-    add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via, add_waiver, add_zone,
-    assign_net_class,
+    UpdateFootprintRequest, UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest,
+    UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout,
+    add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via,
+    add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
     delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver, delete_zone,
     drill_report, export, impedance_table, import, inspect, keepout_report, list_texts, move_footprint, net_lengths, open,
     outline_geometry, panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill,
     split_track, stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_keepout,
-    update_layer, update_slot, update_text, update_track, update_via, update_zone, zone_report,
+    update_layer, update_pad, update_slot, update_text, update_track, update_via, update_zone, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -646,6 +646,7 @@ fn via_in_pad_flags_a_via_whose_centre_lands_inside_a_pad() {
             w: 1.0,
             h: 1.0,
             net: Some("VCC".to_string()),
+            drill: None,
         },
     )
     .expect("the pad is added");
@@ -948,6 +949,7 @@ fn test_points_report_pad_and_via_probes() {
             w: 0.8,
             h: 0.8,
             net: Some("VCC".to_string()),
+            drill: None,
         },
     )
     .expect("the pad is added");
@@ -1010,6 +1012,7 @@ fn ipc_d_356_lists_pads_and_vias_in_fixed_width_records() {
             w: 0.8,
             h: 0.8,
             net: Some("VCC".to_string()),
+            drill: None,
         },
     )
     .expect("the pad is added");
@@ -1245,7 +1248,16 @@ fn design_rules_are_editable_persistent_and_drive_solder_mask() {
     .expect("the footprint is placed");
     add_pad(
         handle,
-        AddPadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), x: 0.0, y: 0.0, w: 1.0, h: 1.0, net: None },
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: None,
+            drill: None,
+        },
     )
     .expect("the pad is added");
     set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [40.0, 30.0] }).expect("the outline is set");
@@ -1679,6 +1691,7 @@ fn open_rejects_wrong_tag_version_and_broken_documents() {
         w: 0.5,
         h: 0.5,
         net: Some("GND".to_string()),
+        drill: None,
     });
     let missing_net_path = write("net.opcb", &Document::new(missing_net));
     assert_eq!(open(&missing_net_path).expect_err("an undeclared pad net is rejected").code, "format/invalid");
@@ -1811,7 +1824,7 @@ fn drc_flags_via_rules_and_netlist() {
         y: 0.0,
         rotation: 0.0,
         layer: "F.Cu".to_string(),
-        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 0.5, h: 0.5, net: Some("GND".to_string()) }],
+        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 0.5, h: 0.5, net: Some("GND".to_string()), drill: None }],
     });
     board.nets.push(Net { id: "net-1".to_string(), name: "VCC".to_string() });
     board.nets.push(Net { id: "net-1".to_string(), name: "VCC".to_string() });
@@ -1904,7 +1917,16 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
     .expect("the resistor is placed");
     add_pad(
         handle,
-        AddPadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), x: 0.0, y: 0.0, w: 0.5, h: 0.5, net: None },
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
     )
     .expect("the pad is added");
 
@@ -2103,6 +2125,7 @@ fn gerber_writes_x2_object_attributes_and_closes_each_block() {
             w: 0.5,
             h: 0.5,
             net: Some("VCC".to_string()),
+            drill: None,
         },
     )
     .expect("the pad is added");
@@ -2196,7 +2219,7 @@ fn gerber_flashes_rectangular_pads() {
         y: 10.0,
         rotation: 0.0,
         layer: "F.Cu".to_string(),
-        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 0.5, h: 0.25, net: None }],
+        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 0.5, h: 0.25, net: None, drill: None }],
     });
     board.outline = Some(crate::board::Outline { from: [0.0, 0.0], to: [50.0, 40.0] });
     let handle = store::insert(board);
@@ -2222,7 +2245,7 @@ fn silkscreen_flags_missing_text_and_pads_outside_the_outline() {
         y: 5.0,
         rotation: 0.0,
         layer: "F.Cu".to_string(),
-        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 1.0, h: 1.0, net: None }],
+        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 1.0, h: 1.0, net: None, drill: None }],
     });
     let handle = store::insert(board.clone());
     let report = inspect(handle, Some(vec!["silkscreen".to_string()])).expect("the silkscreen check runs");
@@ -2251,7 +2274,7 @@ fn silkscreen_flags_missing_text_and_pads_outside_the_outline() {
         y: 5.0,
         rotation: 0.0,
         layer: "F.Cu".to_string(),
-        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 1.0, h: 1.0, net: None }],
+        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 1.0, h: 1.0, net: None, drill: None }],
     });
     let handle = store::insert(bare);
     let report = inspect(handle, Some(vec!["silkscreen".to_string()])).expect("the silkscreen check runs");
@@ -2276,7 +2299,7 @@ fn courtyard_reports_overlap_and_out_of_board_warnings() {
             y: 10.0,
             rotation: 0.0,
             layer: "F.Cu".to_string(),
-            pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 2.0, h: 2.0, net: None }],
+            pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 2.0, h: 2.0, net: None, drill: None }],
         });
     }
     let handle = store::insert(board);
@@ -2297,7 +2320,7 @@ fn courtyard_reports_overlap_and_out_of_board_warnings() {
         y: 10.0,
         rotation: 0.0,
         layer: "F.Cu".to_string(),
-        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 2.0, h: 2.0, net: None }],
+        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 2.0, h: 2.0, net: None, drill: None }],
     });
     let handle = store::insert(board);
     let report = inspect(handle, Some(vec!["courtyard".to_string()])).expect("the courtyard check runs");
@@ -2315,7 +2338,7 @@ fn courtyard_reports_overlap_and_out_of_board_warnings() {
         y: 5.0,
         rotation: 0.0,
         layer: "F.Cu".to_string(),
-        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 1.0, h: 1.0, net: None }],
+        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 1.0, h: 1.0, net: None, drill: None }],
     });
     let handle = store::insert(bare);
     let report = inspect(handle, Some(vec!["courtyard".to_string()])).expect("the courtyard check runs");
@@ -2986,6 +3009,7 @@ fn kicad_import_round_trips_an_exported_board() {
             w: 0.6,
             h: 0.4,
             net: Some("VCC".to_string()),
+            drill: None,
         },
     )
     .expect("the pad is added");
@@ -3012,6 +3036,7 @@ fn kicad_import_round_trips_an_exported_board() {
             w: 0.5,
             h: 0.5,
             net: Some("GND".to_string()),
+            drill: None,
         },
     )
     .expect("the back pad is added");
@@ -3155,6 +3180,7 @@ fn two_pad_net(handle: u64, first: [f64; 2], second: [f64; 2]) {
                 w: 0.5,
                 h: 0.5,
                 net: Some("N1".to_string()),
+                drill: None,
             },
         )
         .expect("the pad is added");
@@ -3246,6 +3272,7 @@ fn crossed_nets(handle: u64) {
                 w: 0.2,
                 h: 0.2,
                 net: Some(name.to_string()),
+                drill: None,
             },
         )
         .expect("the pad is added");
@@ -3686,7 +3713,16 @@ fn edge_clearance_flags_components_and_drills_near_the_border() {
     .expect("the near footprint is placed");
     add_pad(
         handle,
-        AddPadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), x: 0.0, y: 0.0, w: 1.0, h: 1.0, net: None },
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: None,
+            drill: None,
+        },
     )
     .expect("the pad is added");
     add_via(
@@ -3771,7 +3807,16 @@ fn silkscreen_over_pad_flags_a_silk_track_crossing_a_pad_on_the_same_side() {
     .expect("the footprint is placed");
     add_pad(
         handle,
-        AddPadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), x: 0.0, y: 0.0, w: 0.5, h: 0.5, net: None },
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
     )
     .expect("the pad is added");
     add_track(
@@ -3795,7 +3840,16 @@ fn silkscreen_over_pad_flags_a_silk_track_crossing_a_pad_on_the_same_side() {
     .expect("the footprint is placed");
     add_pad(
         other_side,
-        AddPadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), x: 0.0, y: 0.0, w: 0.5, h: 0.5, net: None },
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
     )
     .expect("the pad is added");
     add_track(
@@ -3815,7 +3869,16 @@ fn silkscreen_over_pad_flags_a_silk_track_crossing_a_pad_on_the_same_side() {
     .expect("the footprint is placed");
     add_pad(
         clear,
-        AddPadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), x: 0.0, y: 0.0, w: 0.5, h: 0.5, net: None },
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
     )
     .expect("the pad is added");
     add_track(clear, AddTrackRequest { net: None, layer: "F.SilkS".to_string(), width: 0.2, from: [0.0, 0.0], to: [5.0, 0.0] })
@@ -4309,6 +4372,7 @@ fn unrouted_respects_the_via_layer_span() {
                 w: 0.5,
                 h: 0.5,
                 net: Some("N1".to_string()),
+                drill: None,
             },
         )
         .expect("the pad is added");
@@ -4582,6 +4646,7 @@ fn ipc2581_import_round_trips_an_exported_board() {
             w: 0.6,
             h: 0.4,
             net: Some("VCC".to_string()),
+            drill: None,
         },
     )
     .expect("the pad is added");
@@ -4608,6 +4673,7 @@ fn ipc2581_import_round_trips_an_exported_board() {
             w: 0.5,
             h: 0.5,
             net: Some("GND".to_string()),
+            drill: None,
         },
     )
     .expect("the back pad is added");
@@ -5105,6 +5171,7 @@ fn linear_teardrops_materialise_without_drc_false_positives() {
             w: 1.0,
             h: 1.0,
             net: Some("SIG".to_string()),
+            drill: None,
         },
     )
     .expect("the first pad is placed");
@@ -5129,6 +5196,7 @@ fn linear_teardrops_materialise_without_drc_false_positives() {
             w: 1.0,
             h: 1.0,
             net: Some("SIG".to_string()),
+            drill: None,
         },
     )
     .expect("the second pad is placed");
@@ -5235,5 +5303,367 @@ fn net_lengths_sum_track_segments_and_count_vias() {
     assert_eq!(report["totals"]["tracks"], 2);
     assert_eq!(report["totals"]["length"], 7.0);
     assert_eq!(report["totals"]["vias"], 1);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn pad_drills_validate_and_survive_save_and_reopen() {
+    let directory = TempDir::new();
+    let matrix = capabilities();
+    assert_eq!(matrix["padDrills"], "supported", "pad drills are a claimed capability");
+
+    let handle = created();
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("J1".to_string()),
+            x: Some(10.0),
+            y: Some(20.0),
+            layer: Some("F.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the footprint is placed");
+    let added = add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 0.8,
+            net: None,
+            drill: Some(0.4),
+        },
+    )
+    .expect("the drilled pad is added");
+    assert_eq!(added["object"]["drill"], 0.4);
+
+    for drill in [0.8, 0.0, -0.2, f64::INFINITY] {
+        let refused = add_pad(
+            handle,
+            AddPadRequest {
+                footprint: "fp-1".to_string(),
+                number: "2".to_string(),
+                x: 2.0,
+                y: 0.0,
+                w: 1.0,
+                h: 0.8,
+                net: None,
+                drill: Some(drill),
+            },
+        )
+        .expect_err("an invalid drill is rejected");
+        assert_eq!(refused.code, "pad/invalid-drill", "drill {drill} is rejected");
+    }
+
+    let updated = update_pad(
+        handle,
+        UpdatePadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), drill: Some(0.5), ..Default::default() },
+    )
+    .expect("the drill is updated");
+    assert_eq!(updated["object"]["drill"], 0.5);
+
+    let too_large = update_pad(
+        handle,
+        UpdatePadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), drill: Some(0.9), ..Default::default() },
+    )
+    .expect_err("a drill must be smaller than the short side");
+    assert_eq!(too_large.code, "pad/invalid-drill");
+    let thin = update_pad(
+        handle,
+        UpdatePadRequest { footprint: "fp-1".to_string(), number: "1".to_string(), w: Some(0.3), ..Default::default() },
+    )
+    .expect_err("shrinking the pad below the stored drill is rejected");
+    assert_eq!(thin.code, "pad/invalid-drill");
+
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "2".to_string(),
+            x: 2.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("a pad without a drill is added");
+
+    let path = directory.join("drills.opcb");
+    save(handle, &path, false).expect("the board saves");
+    let saved: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the document is readable")).expect("the document is JSON");
+    let pads = saved["document"]["footprints"][0]["pads"].as_array().expect("pads is an array");
+    assert_eq!(pads[0]["drill"], 0.5, "the stored drill is written");
+    assert!(pads[1].get("drill").is_none(), "a pad without a drill keeps the old document shape");
+
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    let drill = directory.join("drills.drl");
+    export(reopened, "drl", &drill).expect("the drill file writes");
+    let text = fs::read_to_string(&drill).expect("the drill file is readable");
+    assert!(text.contains("T1C0.500"), "the reopened pad keeps its drill; got {text}");
+    assert!(text.contains("X10.000Y20.000"), "the pad hole uses absolute coordinates; got {text}");
+    close(reopened).expect("the reopened board closes");
+}
+
+#[test]
+fn kicad_import_keeps_circular_pad_drills_and_reports_other_drills() {
+    let directory = TempDir::new();
+    let path = directory.join("drills.kicad_pcb");
+    let text = "(kicad_pcb (version 20221018) (generator open-pcb)\n\
+        (layers (0 \"F.Cu\" signal) (31 \"B.Cu\" signal))\n\
+        (net 0 \"\")\n\
+        (net 1 \"VCC\")\n\
+        (footprint \"THT\" (layer \"F.Cu\") (at 10 20)\n\
+            (property \"Reference\" \"J1\" (layer \"F.SilkS\"))\n\
+            (property \"Value\" \"Conn\" (layer \"F.Fab\"))\n\
+            (pad \"1\" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 0.8) (layers \"*.Cu\" \"*.Mask\") (net 1 \"VCC\")))\n\
+        (footprint \"OVAL\" (layer \"F.Cu\") (at 30 20)\n\
+            (property \"Reference\" \"J2\" (layer \"F.SilkS\"))\n\
+            (pad \"1\" thru_hole oval (at 0 0) (size 2 1) (drill oval 0.5 1.0) (layers \"*.Cu\" \"*.Mask\"))))\n";
+    fs::write(&path, text).expect("the fixture is written");
+    let imported = import(&path).expect("the board imports");
+    let codes: Vec<&str> =
+        imported["lossCodes"].as_array().expect("codes are listed").iter().filter_map(Value::as_str).collect();
+    assert!(codes.contains(&"kicad/pad-drill"), "an oval drill stays in the ledger; got {codes:?}");
+
+    let handle = handle_of(&imported);
+    let drills = store::read(handle, |board| {
+        board.footprints.iter().flat_map(|footprint| footprint.pads.iter().map(|pad| pad.drill)).collect::<Vec<_>>()
+    })
+    .expect("the imported board is readable");
+    assert_eq!(drills, [Some(0.8), None], "only the circular drill is stored");
+
+    let target = directory.join("drills-out.kicad_pcb");
+    export(handle, "kicad_pcb", &target).expect("KiCad export writes");
+    let exported = fs::read_to_string(&target).expect("the exported board is readable");
+    assert!(exported.contains("(drill 0.8)"), "the circular drill is written back; got {exported}");
+    let again = import(&target).expect("the exported board imports");
+    let again_codes: Vec<&str> =
+        again["lossCodes"].as_array().expect("codes are listed").iter().filter_map(Value::as_str).collect();
+    assert!(!again_codes.contains(&"kicad/pad-drill"), "a round trip keeps the drill; got {again_codes:?}");
+    close(handle).expect("the imported board closes");
+    close(handle_of(&again)).expect("the reimported board closes");
+}
+
+#[test]
+fn excellon_and_drill_map_include_pad_holes() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("J1".to_string()),
+            x: Some(10.0),
+            y: Some(20.0),
+            layer: Some("F.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: None,
+            drill: Some(0.4),
+        },
+    )
+    .expect("the drilled pad is added");
+    add_via(handle, AddViaRequest { at: [30.0, 40.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the via is placed");
+
+    let drill = directory.join("holes.drl");
+    export(handle, "drl", &drill).expect("the drill file writes");
+    let text = fs::read_to_string(&drill).expect("the drill file is readable");
+    assert!(text.contains("T1C0.300"), "the via tool comes first; got {text}");
+    assert!(text.contains("T2C0.400"), "the pad drill is its own tool; got {text}");
+    assert!(text.contains("T1\nX30.000Y40.000"), "the via hit is written; got {text}");
+    assert!(text.contains("T2\nX10.000Y20.000"), "the pad hit is written; got {text}");
+
+    let map = directory.join("holes.drill-map.svg");
+    export(handle, "drill_map", &map).expect("the drill map writes");
+    let map = fs::read_to_string(&map).expect("the drill map is readable");
+    assert_eq!(map.matches("<circle").count(), 2, "the via and the pad each draw one hole");
+    assert!(map.contains("T1 dia 0.300 mm plated x1"), "the via tool is in the legend; got {map}");
+    assert!(map.contains("T2 dia 0.400 mm plated x1"), "the pad tool is in the legend; got {map}");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn drill_report_counts_pad_holes_additively() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("J1".to_string()),
+            x: Some(10.0),
+            y: Some(20.0),
+            layer: Some("F.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("VCC".to_string()),
+            drill: Some(0.3),
+        },
+    )
+    .expect("the drilled pad is added");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [40.0, 20.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+
+    let report = drill_report(handle).expect("the drill report is built");
+    assert_eq!(report["holeCount"], 1, "the historical hole count still counts vias only");
+    assert_eq!(report["padHoleCount"], 1);
+    let tools = report["tools"].as_array().expect("tools is an array");
+    assert_eq!(tools.len(), 1, "a shared diameter is one tool");
+    assert_eq!(tools[0]["holes"], 1);
+    assert_eq!(tools[0]["slots"], 0);
+    assert_eq!(tools[0]["padHoles"], 1);
+    let pads = report["padHoles"].as_array().expect("padHoles is an array");
+    assert_eq!(pads.len(), 1);
+    assert_eq!(pads[0]["id"], "fp-1:1");
+    assert_eq!(pads[0]["net"], "VCC");
+    assert_eq!(pads[0]["tool"], 1);
+    assert_eq!(pads[0]["at"], json!([10.0, 20.0]));
+    assert_eq!(pads[0]["diameter"], 0.3);
+    assert_eq!(pads[0]["plated"], true);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn annular_ring_checks_drilled_pads_with_the_via_rule() {
+    let handle = created();
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("J1".to_string()),
+            x: Some(10.0),
+            y: Some(20.0),
+            layer: Some("F.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.4,
+            h: 0.4,
+            net: None,
+            drill: Some(0.35),
+        },
+    )
+    .expect("the thin-ring pad is added");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "2".to_string(),
+            x: 2.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: None,
+            drill: Some(0.4),
+        },
+    )
+    .expect("the healthy pad is added");
+
+    let report = inspect(handle, Some(vec!["annular-ring".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/annular-ring-too-small"]);
+    assert_eq!(report["issues"][0]["objectId"], "fp-1");
+    assert_eq!(report["issues"][0]["layerId"], "F.Cu");
+    assert!(report["issues"][0]["message"].as_str().is_some_and(|message| message.contains("pad `1`")));
+    assert_eq!(report["passed"], false);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn pads_without_drills_add_no_fabrication_output() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("J1".to_string()),
+            x: Some(10.0),
+            y: Some(20.0),
+            layer: Some("F.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the plain pad is added");
+    add_via(handle, AddViaRequest { at: [30.0, 40.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the via is placed");
+
+    let drill = directory.join("plain.drl");
+    export(handle, "drl", &drill).expect("the drill file writes");
+    let text = fs::read_to_string(&drill).expect("the drill file is readable");
+    assert_eq!(
+        text, "M48\n;OpenPCB drill file\n;Units: mm\nMETRIC,TZ\nT1C0.300\n%\nG90\nG05\nT1\nX30.000Y40.000\nM30\n",
+        "a pad without a drill leaves the drill file byte-for-byte unchanged"
+    );
+
+    let map = directory.join("plain.drill-map.svg");
+    export(handle, "drill_map", &map).expect("the drill map writes");
+    let map = fs::read_to_string(&map).expect("the drill map is readable");
+    assert_eq!(map.matches("<circle").count(), 1, "only the via draws a hole");
+    assert!(!map.contains("X10.000"), "the pad contributes no hit");
+
+    let kicad = directory.join("plain.kicad_pcb");
+    export(handle, "kicad_pcb", &kicad).expect("KiCad export writes");
+    let kicad = fs::read_to_string(&kicad).expect("the KiCad board is readable");
+    assert!(
+        kicad.contains("(pad \"1\" smd rect (at 0 0) (size 1 1) (layers \"F.Cu\" \"F.Paste\" \"F.Mask\"))"),
+        "the pad block keeps its historical shape; got {kicad}"
+    );
+    assert!(!kicad.contains("(pad \"1\" smd rect (at 0 0) (size 1 1) (drill"), "a pad without a drill writes no drill token");
+    assert_eq!(kicad.matches("(drill").count(), 1, "only the via declares a drill");
+
+    let report = drill_report(handle).expect("the drill report is built");
+    assert_eq!(report["padHoleCount"], 0);
+    assert_eq!(report["padHoles"], json!([]));
     close(handle).expect("the board closes");
 }
