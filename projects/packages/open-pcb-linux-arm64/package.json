@@ -1,17 +1,26 @@
 {
     "name": "@wae/open-pcb-linux-arm64",
-    "version": "0.0.0",
+    "version": "0.0.1",
     "description": "Linux arm64 native addon for @wae/open-pcb",
     "license": "MPL-2.0",
-    "os": ["linux"],
-    "cpu": ["arm64"],
+    "os": [
+        "linux"
+    ],
+    "cpu": [
+        "arm64"
+    ],
     "main": "open-pcb.linux-arm64.node",
-    "files": ["open-pcb.linux-arm64.node", "README.md", "License.md"],
-    "engines": { "node": ">=18" },
+    "files": [
+        "open-pcb.linux-arm64.node",
+        "README.md",
+        "License.md"
+    ],
+    "engines": {
+        "node": ">=18"
+    },
     "repository": {
         "type": "git",
         "url": "git+https://github.com/nyar-os/OpenPCB.git",
         "directory": "projects/packages/open-pcb-linux-arm64"
     }
 }
-
