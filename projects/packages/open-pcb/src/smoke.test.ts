@@ -158,6 +158,7 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.routing, 'supported');
     assert.equal(matrix.texts, 'supported');
     assert.equal(matrix.zoneReport, 'supported');
+    assert.equal(matrix.drillReport, 'supported');
     assert.equal(matrix.exportTargets.drl, 'supported');
     assert.equal(matrix.exportTargets.gbr, 'supported');
     assert.equal(matrix.exportTargets.pdf, 'supported');
@@ -370,6 +371,18 @@ test('zones, silkscreen text and drill reports round trip through the SDK', { sk
     assert.equal(legends.items[0].rotation, 90);
     assert.deepEqual(legends.items[0].at, [5, 75]);
 
+    const drill = await board.drillReport();
+    assert.equal(drill.units, 'mm');
+    assert.equal(drill.holeCount, 1);
+    assert.equal(drill.slotCount, 1);
+    assert.equal(drill.backDrilled, 0);
+    assert.equal(drill.vias.through, 1);
+    assert.equal(drill.tools.length, 2);
+    assert.equal(drill.tools[0].diameter, 0.3);
+    assert.equal(drill.tools[1].slots, 1);
+    assert.equal(drill.holes[0].id, 'via-1');
+    assert.equal(drill.slots[0].length, 5);
+
     assert.equal((await board.deleteText('text-1')).deleted, 'text-1');
     assert.equal((await board.deleteZone('zone-1')).deleted, 'zone-1');
     assert.equal((await board.listTexts()).count, 0);
@@ -566,6 +579,7 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         run('text', 'add', document, '--text', 'REV A', '--layer', 'F.SilkS', '--at', '5,75', '--size', '2');
         run('text', 'update', document, '--id', 'text-1', '--text', 'REV B');
         assert.match(run('text', 'list', document), /texts=1/);
+        assert.match(run('drill', 'report', document), /holes=1 slots=0 tools=1 backDrilled=0/);
 
         run('footprint', 'move', document, '--id', 'fp-1', '--x', '40', '--y', '25', '--rotation', '90');
         assert.equal(footprintX(), 40);

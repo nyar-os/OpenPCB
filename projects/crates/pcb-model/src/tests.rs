@@ -22,10 +22,11 @@ use crate::{
     add_track, add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
-    delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver, delete_zone, export,
-    impedance_table, import, inspect, list_texts, move_footprint, open, outline_geometry, panelize, redo, route, save,
-    set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance, stackup_width, stitch_vias,
-    store, summary, undo, update_footprint, update_layer, update_text, update_track, update_via, update_zone, zone_report,
+    delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver, delete_zone,
+    drill_report, export, impedance_table, import, inspect, list_texts, move_footprint, open, outline_geometry, panelize, redo,
+    route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance, stackup_width,
+    stitch_vias, store, summary, undo, update_footprint, update_layer, update_text, update_track, update_via, update_zone,
+    zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -481,6 +482,55 @@ fn silkscreen_text_items_edit_persist_and_reach_kicad_and_svg() {
     .expect("the matching legend is added");
     let after = inspect(reopened, Some(vec!["silkscreen".to_string()])).expect("silkscreen runs");
     assert!(!codes(&after).contains(&"silkscreen/no-reference-text"), "a matching legend satisfies the check");
+}
+
+#[test]
+fn drill_report_groups_tools_and_lists_holes_and_slots() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the through via is placed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [20.0, 10.0], diameter: 0.9, drill: 0.5, ..Default::default() },
+    )
+    .expect("the second via is placed");
+    add_slot(handle, AddSlotRequest { net: Some("VCC".to_string()), from: [1.0, 1.0], to: [6.0, 1.0], width: 0.8 })
+        .expect("the slot is added");
+    set_via_back_drill(handle, SetViaBackDrillRequest { id: "via-1".to_string(), depth: Some(0.8), stub: Some(0.2) })
+        .expect("the via is back drilled");
+
+    let report = drill_report(handle).expect("the drill report is built");
+    assert_eq!(report["units"], "mm");
+    assert_eq!(report["holeCount"], 2);
+    assert_eq!(report["slotCount"], 1);
+    assert_eq!(report["backDrilled"], 1);
+    assert_eq!(report["vias"]["through"], 2);
+    assert_eq!(report["vias"]["blind"], 0);
+    assert_eq!(report["vias"]["buried"], 0);
+
+    let tools = report["tools"].as_array().expect("tools is an array");
+    assert_eq!(tools.len(), 3, "each finished diameter is one tool");
+    assert_eq!(tools[0]["tool"], 1);
+    assert_eq!(tools[0]["diameter"], 0.3);
+    assert_eq!(tools[0]["holes"], 1);
+    assert_eq!(tools[1]["diameter"], 0.5);
+    assert_eq!(tools[2]["slots"], 1);
+    assert_eq!(tools[2]["diameter"], 0.8);
+
+    let holes = report["holes"].as_array().expect("holes is an array");
+    assert_eq!(holes[0]["id"], "via-1");
+    assert_eq!(holes[0]["tool"], 1);
+    assert_eq!(holes[0]["kind"], "through");
+    assert_eq!(holes[0]["backDrilled"], true);
+    assert_eq!(holes[0]["at"], json!([10.0, 10.0]));
+    let slots = report["slots"].as_array().expect("slots is an array");
+    assert_eq!(slots[0]["id"], "slot-1");
+    assert_eq!(slots[0]["width"], 0.8);
+    assert_eq!(slots[0]["length"], 5.0);
 }
 
 #[test]

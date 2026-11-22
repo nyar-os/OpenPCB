@@ -338,6 +338,14 @@ fn board_zone_report(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Reports the drill tools, holes and slots of an open board.
+#[function]
+fn board_drill_report(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::drill_report(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds one silkscreen text item to an open board.
 #[function]
 fn board_add_text(ctx: CallContext) -> Result<JsValue> {
@@ -1109,6 +1117,10 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
             let handle = rpc_handle(value)?;
             open_pcb_model::zone_report(handle)
         }
+        "board.drillReport" => {
+            let handle = rpc_handle(value)?;
+            open_pcb_model::drill_report(handle)
+        }
         "board.list" => {
             let handle = rpc_handle(value)?;
             let summary = open_pcb_model::list_board(handle)?;
@@ -1420,6 +1432,7 @@ register_module![
     board_delete_zone,
     board_update_zone,
     board_zone_report,
+    board_drill_report,
     board_add_text,
     board_update_text,
     board_delete_text,

@@ -266,6 +266,59 @@ export interface ZoneAreaReport {
     readonly zones: readonly ZoneAreaEntry[];
 }
 
+/** One drill tool and the hits it drives. */
+export interface DrillTool {
+    /** Stable tool number, ordered by ascending diameter. */
+    readonly tool: number;
+    /** Finished diameter, in millimetres. */
+    readonly diameter: number;
+    readonly holes: number;
+    readonly slots: number;
+}
+
+/** One via hole in the drill report. */
+export interface DrillHole {
+    readonly id: ObjectId;
+    readonly net: string | null;
+    readonly tool: number;
+    /** Hole centre, in millimetres. */
+    readonly at: readonly [number, number];
+    /** Finished drill diameter, in millimetres. */
+    readonly diameter: number;
+    readonly kind: ViaKind;
+    readonly backDrilled: boolean;
+    readonly fromLayer?: LayerId;
+    readonly toLayer?: LayerId;
+}
+
+/** One plated routed slot in the drill report. */
+export interface DrillSlot {
+    readonly id: ObjectId;
+    readonly net: string | null;
+    readonly tool: number;
+    /** First centreline end, in millimetres. */
+    readonly from: readonly [number, number];
+    /** Second centreline end, in millimetres. */
+    readonly to: readonly [number, number];
+    /** Slot width, equal to the tool diameter, in millimetres. */
+    readonly width: number;
+    /** Centreline length, in millimetres. */
+    readonly length: number;
+}
+
+/** Result of `board.drillReport()`. */
+export interface DrillReport {
+    readonly revision: number;
+    readonly units: 'mm';
+    readonly tools: readonly DrillTool[];
+    readonly holeCount: number;
+    readonly slotCount: number;
+    readonly backDrilled: number;
+    readonly vias: Readonly<Record<'through' | 'blind' | 'buried', number>>;
+    readonly holes: readonly DrillHole[];
+    readonly slots: readonly DrillSlot[];
+}
+
 /** Tab style used between adjacent boards in a panel. */
 export type PanelTabStyle = 'v-cut' | 'mouse-bite' | 'none';
 
@@ -409,6 +462,7 @@ export interface BoardCapabilities {
     /** Whether a copper pour area and perimeter report can be produced. */
     readonly zoneReport: SupportLevel;
     /** Whether a drill tool and hole report can be produced. */
+    readonly drillReport: SupportLevel;
     /** Whether copper keepout regions can be declared and checked. */
     readonly keepouts: SupportLevel;
     /** Whether stitching via fences can be generated along the board outline. */
@@ -1157,6 +1211,7 @@ export interface Board {
     updateText(options: UpdateTextOptions): Promise<BoardEditResult>;
     deleteText(id: ObjectId): Promise<BoardEditResult>;
     listTexts(): Promise<TextListReport>;
+    drillReport(): Promise<DrillReport>;
     addKeepout(options: AddKeepoutOptions): Promise<BoardEditResult>;
     deleteKeepout(id: ObjectId): Promise<BoardEditResult>;
     addNetClass(options: AddNetClassOptions): Promise<BoardEditResult>;

@@ -31,6 +31,7 @@ import type {
     BoardSummary,
     CopperBalanceReport,
     DeletePadInput,
+    DrillReport,
     ExportReport,
     ExportTarget,
     ImportReport,
@@ -276,6 +277,11 @@ export function deleteText(handle: number, id: string): BoardEditResult {
 /** Lists the silkscreen text items of an open board. */
 export function listTexts(handle: number): TextListReport {
     return decode<TextListReport>(() => binding('board.listTexts').board_list_texts(handle));
+}
+
+/** Reports the drill tools, holes and slots of an open board. */
+export function drillReport(handle: number): DrillReport {
+    return decode<DrillReport>(() => binding('board.drillReport').board_drill_report(handle));
 }
 
 /** Adds one copper keepout region to an open board. */

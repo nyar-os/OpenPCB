@@ -43,6 +43,7 @@ export interface NativeBinding {
     board_update_text(handle: number, requestJson: string): string;
     board_delete_text(handle: number, id: string): string;
     board_list_texts(handle: number): string;
+    board_drill_report(handle: number): string;
     board_add_keepout(handle: number, requestJson: string): string;
     board_delete_keepout(handle: number, id: string): string;
     board_add_net_class(handle: number, requestJson: string): string;

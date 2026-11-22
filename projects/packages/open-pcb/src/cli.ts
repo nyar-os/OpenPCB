@@ -1205,6 +1205,26 @@ textItem
         return 0;
     });
 
+const drill = cli.command('drill', 'cli.cmd.drill');
+drill
+    .command('report', 'cli.cmd.drill-report')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.drillReport();
+            ctx.emitResult(
+                report,
+                `holes=${report.holeCount} slots=${report.slotCount} tools=${report.tools.length} backDrilled=${report.backDrilled}`,
+            );
+            return 0;
+        });
+        return 0;
+    });
+
 const keepout = cli.command('keepout', 'cli.cmd.keepout');
 keepout
     .command('add', 'cli.cmd.keepout-add')

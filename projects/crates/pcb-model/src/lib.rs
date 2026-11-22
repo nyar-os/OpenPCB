@@ -24,6 +24,7 @@
 
 mod board;
 mod copper;
+mod drill;
 mod export;
 mod impedance;
 mod inspect;
@@ -213,6 +214,7 @@ pub fn capabilities() -> Value {
         "slots": "supported",
         "copperBalance": "supported",
         "zoneReport": "supported",
+        "drillReport": "supported",
         "panelization": "supported",
         "polygonOutline": "supported",
         "netClasses": "supported",
@@ -946,6 +948,15 @@ pub fn copper_balance(handle: u64) -> Result<Value, ServiceError> {
 /// Reports the area and perimeter of every copper pour region.
 pub fn zone_report(handle: u64) -> Result<Value, ServiceError> {
     store::read(handle, copper::zones)
+}
+
+/// Reports the drill tools, holes and slots of one open board.
+///
+/// Every via and plated routed slot is grouped by finished tool diameter in
+/// millimetres, so the tool table matches the Excellon writer without reading
+/// the file.
+pub fn drill_report(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, drill::report)
 }
 
 /// Builds the panelization report of one open board.

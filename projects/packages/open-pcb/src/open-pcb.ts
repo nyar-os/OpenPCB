@@ -40,6 +40,7 @@ import type {
     BoardSummary,
     CopperBalanceReport,
     DeletePadInput,
+    DrillReport,
     ExportOptions,
     ExportReport,
     ImpedanceOptions,
@@ -512,6 +513,10 @@ function attach(
         async listTexts(): Promise<TextListReport> {
             ensure();
             return service.listTexts(handle);
+        },
+        async drillReport(): Promise<DrillReport> {
+            ensure();
+            return service.drillReport(handle);
         },
         async addKeepout(options: AddKeepoutOptions): Promise<BoardEditResult> {
             ensure();
