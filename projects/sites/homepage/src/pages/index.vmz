@@ -38,13 +38,13 @@
                         <line x1="62.6" y1="45" x2="67" y2="45" stroke="#c87533" stroke-width="0.5"></line>
                         <line x1="67" y1="45" x2="67" y2="41" stroke="#c87533" stroke-width="0.5"></line>
                         <line x1="67" y1="41" x2="51" y2="41" stroke="#c87533" stroke-width="0.5"></line>
-                        <line x1="40" y1="29.8" x2="40" y2="26" stroke="#c87533" stroke-width="0.5"></line>
-                        <line x1="40" y1="26" x2="15.4" y2="26" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="39.8" y1="29.8" x2="39.8" y2="26" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="39.8" y1="26" x2="15.4" y2="26" stroke="#c87533" stroke-width="0.5"></line>
                         <line x1="15.4" y1="26" x2="15.4" y2="45" stroke="#c87533" stroke-width="0.5"></line>
-                        <line x1="44.8" y1="29.8" x2="61.4" y2="29.8" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="44.6" y1="29.8" x2="61.4" y2="29.8" stroke="#c87533" stroke-width="0.5"></line>
                         <line x1="61.4" y1="29.8" x2="61.4" y2="17" stroke="#c87533" stroke-width="0.5"></line>
-                        <line x1="42.4" y1="32.2" x2="42.4" y2="41" stroke="#2f6fb0" stroke-width="0.5"></line>
-                        <line x1="42.4" y1="41" x2="27" y2="41" stroke="#2f6fb0" stroke-width="0.5"></line>
+                        <line x1="42.2" y1="32.2" x2="42.2" y2="41" stroke="#2f6fb0" stroke-width="0.5"></line>
+                        <line x1="42.2" y1="41" x2="27" y2="41" stroke="#2f6fb0" stroke-width="0.5"></line>
                         <path d="M36.65 29.3 L38.15 29.3 L38.15 30.3 L36.65 30.3 Z" fill="#c87533"></path>
                         <path d="M39.05 29.3 L40.55 29.3 L40.55 30.3 L39.05 30.3 Z" fill="#c87533"></path>
                         <path d="M41.45 29.3 L42.95 29.3 L42.95 30.3 L41.45 30.3 Z" fill="#c87533"></path>
