@@ -550,6 +550,11 @@ fn candidate_clear(
                 return false;
             }
         }
+        for keepout in board.keepouts.iter().filter(|keepout| keepout_covers(&keepout.layer, &candidate.layer)) {
+            if !segment_polygon_clear(*start, *end, &keepout.points, radius) {
+                return false;
+            }
+        }
         for other in accepted.iter().filter(|other| other.net == net && other.layer == candidate.layer) {
             if endpoints_match(*start, *end, other.from, other.to) {
                 continue;
@@ -591,12 +596,61 @@ fn candidate_clear(
                 return false;
             }
         }
+        for keepout in &board.keepouts {
+            if !point_polygon_clear(*at, &keepout.points, settings.via_diameter / 2.0) {
+                return false;
+            }
+        }
     }
     true
 }
 
 fn copper(board: &Board, id: &str) -> bool {
     board.layers.iter().any(|layer| layer.id == id && layer.kind == LayerKind::Copper)
+}
+
+/// Returns whether a keepout on `keepout_layer` blocks copper on `layer`.
+///
+/// `*` covers every copper layer; a concrete layer keeps its own copper clear.
+fn keepout_covers(keepout_layer: &str, layer: &str) -> bool {
+    keepout_layer == "*" || keepout_layer == layer
+}
+
+/// Returns whether a segment with `radius` stays outside a closed keepout polygon.
+fn segment_polygon_clear(start: [f64; 2], end: [f64; 2], polygon: &[[f64; 2]], radius: f64) -> bool {
+    if point_in_polygon(start, polygon) || point_in_polygon(end, polygon) {
+        return false;
+    }
+    polygon
+        .iter()
+        .zip(polygon.iter().cycle().skip(1))
+        .take(polygon.len())
+        .all(|(left, right)| segment_distance(start, end, *left, *right) + EPSILON >= radius)
+}
+
+/// Returns whether a point with `radius` stays outside a closed keepout polygon.
+fn point_polygon_clear(point: [f64; 2], polygon: &[[f64; 2]], radius: f64) -> bool {
+    if point_in_polygon(point, polygon) {
+        return false;
+    }
+    polygon
+        .iter()
+        .zip(polygon.iter().cycle().skip(1))
+        .take(polygon.len())
+        .all(|(left, right)| point_segment_distance(point, *left, *right) + EPSILON >= radius)
+}
+
+/// Ray-casting point-in-polygon test for a closed, non-self-intersecting ring.
+fn point_in_polygon(point: [f64; 2], polygon: &[[f64; 2]]) -> bool {
+    let mut inside = false;
+    for (left, right) in polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()) {
+        let crosses = (left[1] > point[1]) != (right[1] > point[1])
+            && point[0] < (right[0] - left[0]) * (point[1] - left[1]) / (right[1] - left[1]) + left[0];
+        if crosses {
+            inside = !inside;
+        }
+    }
+    inside
 }
 
 fn inside(point: [f64; 2], min: [f64; 2], max: [f64; 2], margin: f64) -> bool {

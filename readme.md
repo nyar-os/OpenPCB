@@ -43,7 +43,8 @@ SDK and studio shell share one native model:
   `<file>.history.json` with `history: 'sidecar'`, with `canUndo`/`canRedo` on
   every summary and edit result.
 - Route every net with at least two pads through a deterministic two-layer
-  autorouter that reports collisions instead of inventing copper.
+  autorouter that reports collisions instead of inventing copper; track segments
+  and vias treat every applicable copper keepout as a hard obstacle.
 - Declare differential pairs with a target width, gap and maximum length skew,
   then compare the routed copper against those targets.
 - Generate linear teardrops at every pad-track junction as ordinary copper
@@ -326,9 +327,10 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
 - The router is a deterministic orthogonal MST router: it tries four
   L-shaped candidates per edge, reports an edge as unrouted rather than
   approximating a path, and does not rip up, use diagonal tracks or route
-  multi-layer inner copper. It does not route against net-class targets: `route`
-  takes its width, clearance and via arguments directly, while `netclass` only
-  checks what is already placed.
+  multi-layer inner copper. Keepout avoidance therefore shows up as an
+  unrouted edge when no candidate circumvents the region. It does not route
+  against net-class targets: `route` takes its width, clearance and via
+  arguments directly, while `netclass` only checks what is already placed.
 - Pad annulus is not checked because the document model stores no pad drill;
   `annular-ring` evaluates vias only. The drill map and the Excellon file
   therefore list via drills and routed slots, never pad drills.
@@ -353,9 +355,10 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   solver. Width conversion rejects a target outside the formula's valid range.
 - The test point report lists only explicitly declared pads and vias. It does not
   infer probes from nets or create panel or fixture geometry.
-- Keepout regions are design intent: the `keepout` check reads them, but they are
-  not written to Gerber, drill data, IPC-2581 or KiCad output, and the router
-  does not yet avoid them. The area and perimeter report measures the declared
+- Keepout regions are design intent: the `keepout` check reads them, the router
+  rejects every track and via that would enter one (track centreline plus half
+  width, via diameter), but they are not written to Gerber, drill data,
+  IPC-2581 or KiCad output. The area and perimeter report measures the declared
   polygons, not the copper actually excluded.
 - Via stitching follows the rectangular outline only, places through vias and
   skips positions that already hold a via. It does not test the new vias against

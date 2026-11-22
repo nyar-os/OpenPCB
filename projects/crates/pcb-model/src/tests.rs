@@ -2903,6 +2903,24 @@ fn router_connects_two_pads_on_a_clean_board() {
 }
 
 #[test]
+fn router_avoids_keepout_regions() {
+    let handle = created();
+    two_pad_net(handle, [10.0, 10.0], [20.0, 10.0]);
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+    add_keepout(handle, AddKeepoutRequest { layer: None, points: vec![[14.0, 0.0], [16.0, 0.0], [16.0, 30.0], [14.0, 30.0]] })
+        .expect("the blocking keepout is added");
+
+    let report = route(handle, RouteOptions::default()).expect("routing runs");
+    assert_eq!(report["routed"], 0, "the only direct path crosses a keepout");
+    assert_eq!(report["tracks"], 0, "no copper may enter a keepout");
+    assert_eq!(report["vias"], 0);
+    let unrouted = report["unrouted"].as_array().expect("unrouted is an array");
+    assert_eq!(unrouted.len(), 1);
+    assert_eq!(unrouted[0]["net"], "N1");
+    close(handle).expect("the board closes");
+}
+
+#[test]
 fn router_reports_an_unroutable_edge_instead_of_fabricating_tracks() {
     let handle = created();
     two_pad_net(handle, [10.0, 10.0], [20.0, 10.0]);
