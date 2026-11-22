@@ -328,6 +328,35 @@ test('waivers and severity overrides change the inspection verdict', { skip: wit
     await pcb.dispose();
 });
 
+test('differential impedance solves pair widths through the SDK', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+    const board = await pcb.create();
+    await board.setStackup({ copperThickness: 0.035, dielectricHeight: 0.2, dielectricConstant: 4.2 });
+
+    const pair = await board.impedance({ structure: 'diffMicrostrip', width: 0.15, gap: 0.2 });
+    assert.equal(pair.structure, 'diffMicrostrip');
+    assert.equal(pair.gap, 0.2);
+    assert.ok(pair.oddImpedance !== undefined && pair.evenImpedance !== undefined);
+    assert.ok(pair.oddImpedance < pair.evenImpedance);
+    assert.ok(Math.abs(pair.impedance - 2 * pair.oddImpedance) < 1e-6, 'differential is twice the odd mode');
+
+    const solved = await board.impedanceWidth({ structure: 'diffMicrostrip', impedance: 90, gap: 0.2 });
+    const achieved = await board.impedance({ structure: 'diffMicrostrip', width: solved.width, gap: 0.2 });
+    assert.ok(Math.abs(achieved.impedance - 90) < 0.02, `the solved width reaches the target: ${achieved.impedance}`);
+
+    const table = await board.impedanceTable({ structure: 'diffStripline', targets: [80, 100], gap: 0.2 });
+    assert.equal(table.gap, 0.2);
+    assert.equal(table.rows.length, 2);
+    assert.ok(table.rows[0].oddImpedance !== undefined && table.rows[0].evenImpedance !== undefined);
+
+    await assert.rejects(
+        board.impedance({ structure: 'diffMicrostrip', width: 0.15 }),
+        (error: unknown) => error instanceof OpenPCBError && error.code === 'session/argument-invalid',
+    );
+    await board.close();
+    await pcb.dispose();
+});
+
 test('zones, silkscreen text and drill reports round trip through the SDK', { skip: withAddon }, async () => {
     const pcb = new OpenPCB();
     const board = await pcb.create({ title: 'Reports' });
@@ -632,6 +661,19 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         run('text', 'add', document, '--text', 'REV A', '--layer', 'F.SilkS', '--at', '5,75', '--size', '2');
         run('text', 'update', document, '--id', 'text-1', '--text', 'REV B');
         assert.match(run('text', 'list', document), /texts=1/);
+        run('stackup', 'set', document, '--copper-thickness', '0.035', '--dielectric-height', '0.2', '--dielectric-constant', '4.2');
+        assert.match(
+            run('stackup', 'impedance', document, '--structure', 'diffMicrostrip', '--width', '0.15', '--gap', '0.2'),
+            /diffMicrostrip width=0\.15mm impedance=[\d.]+ohm gap=0\.2mm odd=[\d.]+ohm even=[\d.]+ohm/,
+        );
+        assert.match(
+            run('stackup', 'width', document, '--structure', 'diffStripline', '--impedance', '90', '--gap', '0.2'),
+            /diffStripline impedance=90ohm width=[\d.]+mm gap=0\.2mm/,
+        );
+        assert.match(
+            runFail('stackup', 'impedance', document, '--structure', 'diffMicrostrip', '--width', '0.15'),
+            /--gap/,
+        );
         assert.match(run('drill', 'report', document), /holes=1 slots=0 tools=1 backDrilled=0/);
 
         run('footprint', 'move', document, '--id', 'fp-1', '--x', '40', '--y', '25', '--rotation', '90');

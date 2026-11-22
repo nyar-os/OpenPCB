@@ -3622,11 +3622,14 @@ pub struct SetStackupRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImpedanceRequest {
-    /// Trace geometry: `microstrip` (default) or `stripline`.
+    /// Trace geometry: `microstrip` (default), `stripline`, `diffMicrostrip` or `diffStripline`.
     #[serde(default)]
     pub structure: Option<String>,
     /// Trace width, in millimetres.
     pub width: f64,
+    /// Edge-to-edge gap of a differential pair, in millimetres; required for a pair.
+    #[serde(default)]
+    pub gap: Option<f64>,
     /// Dielectric thickness, in millimetres; defaults to the board stackup.
     #[serde(default)]
     pub dielectric_height: Option<f64>,
@@ -3642,11 +3645,14 @@ pub struct ImpedanceRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WidthRequest {
-    /// Trace geometry: `microstrip` (default) or `stripline`.
+    /// Trace geometry: `microstrip` (default), `stripline`, `diffMicrostrip` or `diffStripline`.
     #[serde(default)]
     pub structure: Option<String>,
-    /// Target single-ended impedance, in ohms.
+    /// Target single-ended or differential impedance, in ohms.
     pub impedance: f64,
+    /// Edge-to-edge gap of a differential pair, in millimetres; required for a pair.
+    #[serde(default)]
+    pub gap: Option<f64>,
     /// Dielectric thickness, in millimetres; defaults to the board stackup.
     #[serde(default)]
     pub dielectric_height: Option<f64>,
@@ -3662,12 +3668,15 @@ pub struct WidthRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImpedanceTableRequest {
-    /// Trace geometry: `microstrip` (default) or `stripline`.
+    /// Trace geometry: `microstrip` (default), `stripline`, `diffMicrostrip` or `diffStripline`.
     #[serde(default)]
     pub structure: Option<String>,
-    /// Target single-ended impedances in ohms; defaults to `[50]`.
+    /// Target single-ended or differential impedances in ohms; defaults to `[50]`.
     #[serde(default)]
     pub targets: Option<Vec<f64>>,
+    /// Edge-to-edge gap of a differential pair, in millimetres; required for a pair.
+    #[serde(default)]
+    pub gap: Option<f64>,
     /// Dielectric thickness in millimetres; defaults to the board stackup.
     #[serde(default)]
     pub dielectric_height: Option<f64>,

@@ -830,36 +830,55 @@ pub fn set_stackup(handle: u64, request: SetStackupRequest) -> Result<Value, Ser
     edit_result(handle, Some(object), None)
 }
 
-/// Computes the single-ended impedance of one trace from the board stackup.
+/// Computes the single-ended or differential impedance of one trace from the
+/// board stackup.
 ///
 /// Request overrides replace the stored stackup per call, so a caller can test a
-/// width before committing a stackup. The structure defaults to microstrip.
+/// width before committing a stackup. The structure defaults to microstrip. A
+/// `diffMicrostrip` or `diffStripline` request also needs an edge `gap` and
+/// reports the odd, even and differential impedances.
 pub fn stackup_impedance(handle: u64, request: ImpedanceRequest) -> Result<Value, ServiceError> {
     store::read(handle, |board| {
         let structure = impedance::Structure::parse(request.structure.as_deref())?;
         let stackup =
             board.resolved_stackup(request.copper_thickness, request.dielectric_height, request.dielectric_constant)?;
-        let value = impedance::impedance(structure, request.width, stackup)?;
-        Ok(json!({
+        let values = impedance::values(structure, request.width, request.gap, stackup)?;
+        let mut report = json!({
             "revision": board.revision,
             "structure": structure.name(),
             "width": round6(request.width),
-            "impedance": round6(value),
+            "impedance": round6(values.impedance),
             "copperThickness": round6(stackup.copper_thickness),
             "dielectricHeight": round6(stackup.dielectric_height),
             "dielectricConstant": round6(stackup.dielectric_constant),
-        }))
+        });
+        if let Some(odd) = values.odd {
+            report["oddImpedance"] = json!(round6(odd));
+        }
+        if let Some(even) = values.even {
+            report["evenImpedance"] = json!(round6(even));
+        }
+        if structure.differential()
+            && let Some(gap) = request.gap
+        {
+            report["gap"] = json!(round6(gap));
+        }
+        Ok(report)
     })?
 }
 
 /// Converts a target impedance to the trace width that reaches it.
+///
+/// A differential structure solves for the width of each half at the requested
+/// edge gap and reports the resulting odd and even impedances.
 pub fn stackup_width(handle: u64, request: WidthRequest) -> Result<Value, ServiceError> {
     store::read(handle, |board| {
         let structure = impedance::Structure::parse(request.structure.as_deref())?;
         let stackup =
             board.resolved_stackup(request.copper_thickness, request.dielectric_height, request.dielectric_constant)?;
-        let width = impedance::width(structure, request.impedance, stackup)?;
-        Ok(json!({
+        let width = impedance::width(structure, request.impedance, request.gap, stackup)?;
+        let values = impedance::values(structure, width, request.gap, stackup)?;
+        let mut report = json!({
             "revision": board.revision,
             "structure": structure.name(),
             "impedance": round6(request.impedance),
@@ -867,7 +886,19 @@ pub fn stackup_width(handle: u64, request: WidthRequest) -> Result<Value, Servic
             "copperThickness": round6(stackup.copper_thickness),
             "dielectricHeight": round6(stackup.dielectric_height),
             "dielectricConstant": round6(stackup.dielectric_constant),
-        }))
+        });
+        if let Some(odd) = values.odd {
+            report["oddImpedance"] = json!(round6(odd));
+        }
+        if let Some(even) = values.even {
+            report["evenImpedance"] = json!(round6(even));
+        }
+        if structure.differential()
+            && let Some(gap) = request.gap
+        {
+            report["gap"] = json!(round6(gap));
+        }
+        Ok(report)
     })?
 }
 
@@ -875,7 +906,8 @@ pub fn stackup_width(handle: u64, request: WidthRequest) -> Result<Value, Servic
 ///
 /// The table uses the same closed form as [`stackup_width`], then recomputes the
 /// impedance of the suggested width so the row can be verified. Targets default
-/// to `[50]`; up to 64 are accepted and each must be reachable.
+/// to `[50]`; up to 64 are accepted and each must be reachable. A differential
+/// structure needs an edge `gap` and reports odd and even impedances per row.
 pub fn impedance_table(handle: u64, request: ImpedanceTableRequest) -> Result<Value, ServiceError> {
     store::read(handle, |board| {
         let structure = impedance::Structure::parse(request.structure.as_deref())?;
@@ -895,15 +927,22 @@ pub fn impedance_table(handle: u64, request: ImpedanceTableRequest) -> Result<Va
         }
         let mut rows = Vec::with_capacity(targets.len());
         for target in targets {
-            let width = impedance::width(structure, target, stackup)?;
-            let achieved = impedance::impedance(structure, width, stackup)?;
-            rows.push(json!({
+            let width = impedance::width(structure, target, request.gap, stackup)?;
+            let values = impedance::values(structure, width, request.gap, stackup)?;
+            let mut row = json!({
                 "targetImpedance": round6(target),
                 "width": round6(width),
-                "impedance": round6(achieved),
-            }));
+                "impedance": round6(values.impedance),
+            });
+            if let Some(odd) = values.odd {
+                row["oddImpedance"] = json!(round6(odd));
+            }
+            if let Some(even) = values.even {
+                row["evenImpedance"] = json!(round6(even));
+            }
+            rows.push(row);
         }
-        Ok(json!({
+        let mut report = json!({
             "revision": board.revision,
             "units": "mm",
             "structure": structure.name(),
@@ -912,7 +951,13 @@ pub fn impedance_table(handle: u64, request: ImpedanceTableRequest) -> Result<Va
             "dielectricHeight": round6(stackup.dielectric_height),
             "dielectricConstant": round6(stackup.dielectric_constant),
             "rows": rows,
-        }))
+        });
+        if structure.differential()
+            && let Some(gap) = request.gap
+        {
+            report["gap"] = json!(round6(gap));
+        }
+        Ok(report)
     })?
 }
 

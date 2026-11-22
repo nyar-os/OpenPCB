@@ -26,9 +26,11 @@ SDK and studio shell share one native model:
   edit the design rules the checks and writers use, including the solder-mask
   expansion.
 - Declare a physical stackup (copper foil thickness, dielectric height and
-  permittivity), compute microstrip or stripline single-ended impedance from it,
-  and convert a target impedance to the trace width that reaches it; per-request
-  overrides replace the stored values without changing the document.
+  permittivity), compute microstrip, stripline, edge-coupled differential
+  microstrip or edge-coupled differential stripline impedance from it, and
+  convert a target impedance (single-ended or differential) to the trace width
+  that reaches it; per-request overrides replace the stored values without
+  changing the document.
 - Declare copper pour regions on copper layers as closed polygons; the Gerber
   writer emits each one as a `G36`/`G37` region and the SVG and PDF previews
   draw the pour.
@@ -99,8 +101,8 @@ through, blind and buried vias, back drilling, linear teardrops, editable design
 rules, solder-mask and solder-paste Gerber layers, Gerber X2 attributes, copper
 pour regions, copper keepouts, via stitching, plated routed slots, the
 `via-in-pad` check, the copper area and balance report, net classes, test point
-reports, stackup definition, microstrip/stripline impedance, controlled-width
-conversion and waiver/severity policy as supported, micro vias as unsupported,
+reports, stackup definition, single-ended and differential trace impedance,
+controlled-width conversion and waiver/severity policy as supported, micro vias as unsupported,
 and both `kicad_pcb` and `ipc2581` import as supported. `open-pcb capabilities`
 prints exactly that matrix.
 
@@ -184,7 +186,9 @@ open-pcb waiver add blinker.opcb --code drc/footprint-no-pads --object fp-1 --re
 open-pcb waiver delete blinker.opcb --id waiver-1
 open-pcb stackup set blinker.opcb --copper-thickness 0.035 --dielectric-height 0.2 --dielectric-constant 4.2
 open-pcb stackup impedance blinker.opcb --structure microstrip --width 0.2
+open-pcb stackup impedance blinker.opcb --structure diffMicrostrip --width 0.15 --gap 0.2
 open-pcb stackup width blinker.opcb --structure stripline --impedance 50
+open-pcb stackup width blinker.opcb --structure diffStripline --impedance 90 --gap 0.2
 open-pcb undo blinker.opcb
 open-pcb redo blinker.opcb
 
@@ -249,6 +253,7 @@ await board.addNetClass({ name: 'Power', width: 0.5, clearance: 0.6, viaDiameter
 await board.assignNetClass({ net: 'VCC', class: 'Power' });
 await board.setStackup({ copperThickness: 0.035, dielectricHeight: 0.2, dielectricConstant: 4.2 });
 await board.impedance({ structure: 'microstrip', width: 0.2 });
+await board.impedance({ structure: 'diffMicrostrip', width: 0.15, gap: 0.2 });
 await board.impedanceWidth({ structure: 'stripline', impedance: 50 });
 await board.copperBalance(); // per-layer area, coverage and imbalance
 await board.addTestPoint({ target: 'fp-1:1' });
@@ -350,9 +355,13 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   existing columns and appends the footprint layer. Neither writer invents pad
   geometry or rotations the document does not hold.
 - The stackup stores one copper thickness, one dielectric height and one
-  permittivity, so impedance is single-ended only: there is no differential,
-  coplanar or per-layer stackup, and the IPC-2141 closed forms replace a field
-  solver. Width conversion rejects a target outside the formula's valid range.
+  permittivity, so it describes one homogeneous dielectric and no per-layer
+  stackup. Differential structures are edge-coupled only: there is no coplanar,
+  broadside-coupled or asymmetric pair, and the IPC-2141 closed forms replace a
+  field solver. The differential correction matches measured boards best for
+  `0.1 <= w / h <= 3` and `0.1 <= s / h <= 3`; outside that range it is still
+  computed but becomes an estimate. Width conversion rejects a target outside
+  the formula's reachable range.
 - The test point report lists only explicitly declared pads and vias. It does not
   infer probes from nets or create panel or fixture geometry.
 - Keepout regions are design intent: the `keepout` check reads them, the router

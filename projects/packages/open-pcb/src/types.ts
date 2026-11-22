@@ -120,7 +120,7 @@ export interface BoardStackup {
 }
 
 /** Trace geometry accepted by the impedance helpers. */
-export type ImpedanceStructure = 'microstrip' | 'stripline';
+export type ImpedanceStructure = 'microstrip' | 'stripline' | 'diffMicrostrip' | 'diffStripline';
 
 /** Options of `board.impedance()`. */
 export interface ImpedanceOptions {
@@ -128,6 +128,8 @@ export interface ImpedanceOptions {
     readonly structure?: ImpedanceStructure;
     /** Trace width, in millimetres. */
     readonly width: number;
+    /** Edge-to-edge gap of a differential pair, in millimetres; required for a pair. */
+    readonly gap?: number;
     /** Overrides the stored dielectric height. */
     readonly dielectricHeight?: number;
     /** Overrides the stored dielectric constant. */
@@ -141,8 +143,14 @@ export interface ImpedanceReport {
     readonly revision: number;
     readonly structure: ImpedanceStructure;
     readonly width: number;
-    /** Single-ended impedance, in ohms. */
+    /** Single-ended impedance, or differential impedance for a pair, in ohms. */
     readonly impedance: number;
+    /** Edge gap of a pair, in millimetres; absent for a single trace. */
+    readonly gap?: number;
+    /** Odd-mode impedance of each half of a pair, in ohms. */
+    readonly oddImpedance?: number;
+    /** Even-mode impedance of each half of a pair, in ohms. */
+    readonly evenImpedance?: number;
     readonly copperThickness: number;
     readonly dielectricHeight: number;
     readonly dielectricConstant: number;
@@ -152,8 +160,10 @@ export interface ImpedanceReport {
 export interface ImpedanceWidthOptions {
     /** Trace geometry; defaults to `microstrip`. */
     readonly structure?: ImpedanceStructure;
-    /** Target single-ended impedance, in ohms. */
+    /** Target single-ended or differential impedance, in ohms. */
     readonly impedance: number;
+    /** Edge-to-edge gap of a differential pair, in millimetres; required for a pair. */
+    readonly gap?: number;
     /** Overrides the stored dielectric height. */
     readonly dielectricHeight?: number;
     /** Overrides the stored dielectric constant. */
@@ -169,6 +179,12 @@ export interface ImpedanceWidthReport {
     readonly impedance: number;
     /** Trace width that reaches the target, in millimetres. */
     readonly width: number;
+    /** Edge gap of a pair, in millimetres; absent for a single trace. */
+    readonly gap?: number;
+    /** Odd-mode impedance of each half of a pair, in ohms. */
+    readonly oddImpedance?: number;
+    /** Even-mode impedance of each half of a pair, in ohms. */
+    readonly evenImpedance?: number;
     readonly copperThickness: number;
     readonly dielectricHeight: number;
     readonly dielectricConstant: number;
@@ -178,8 +194,10 @@ export interface ImpedanceWidthReport {
 export interface ImpedanceTableOptions {
     /** Trace geometry; defaults to `microstrip`. */
     readonly structure?: ImpedanceStructure;
-    /** Target single-ended impedances in ohms; defaults to `[50]`. */
+    /** Target single-ended or differential impedances in ohms; defaults to `[50]`. */
     readonly targets?: readonly number[];
+    /** Edge-to-edge gap of a differential pair, in millimetres; required for a pair. */
+    readonly gap?: number;
     /** Overrides the stored dielectric height. */
     readonly dielectricHeight?: number;
     /** Overrides the stored dielectric constant. */
@@ -195,6 +213,10 @@ export interface ImpedanceTableRow {
     readonly width: number;
     /** Impedance recomputed from the suggested width, in ohms. */
     readonly impedance: number;
+    /** Odd-mode impedance of each half of a pair, in ohms. */
+    readonly oddImpedance?: number;
+    /** Even-mode impedance of each half of a pair, in ohms. */
+    readonly evenImpedance?: number;
 }
 
 /** Result of `board.impedanceTable()`. */
@@ -203,6 +225,8 @@ export interface ImpedanceTableReport {
     readonly units: 'mm';
     readonly structure: ImpedanceStructure;
     readonly targets: number;
+    /** Edge gap of a pair, in millimetres; absent for a single trace. */
+    readonly gap?: number;
     readonly copperThickness: number;
     readonly dielectricHeight: number;
     readonly dielectricConstant: number;

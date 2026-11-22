@@ -1292,6 +1292,7 @@ fn stackup_drives_impedance_and_width_conversion() {
         ImpedanceRequest {
             structure: Some("microstrip".to_string()),
             width: 0.2,
+            gap: None,
             dielectric_height: None,
             dielectric_constant: None,
             copper_thickness: None,
@@ -1308,6 +1309,7 @@ fn stackup_drives_impedance_and_width_conversion() {
         ImpedanceRequest {
             structure: Some("stripline".to_string()),
             width: 0.2,
+            gap: None,
             dielectric_height: None,
             dielectric_constant: None,
             copper_thickness: None,
@@ -1322,6 +1324,7 @@ fn stackup_drives_impedance_and_width_conversion() {
         WidthRequest {
             structure: Some("microstrip".to_string()),
             impedance: 50.0,
+            gap: None,
             dielectric_height: None,
             dielectric_constant: None,
             copper_thickness: None,
@@ -1335,6 +1338,7 @@ fn stackup_drives_impedance_and_width_conversion() {
         ImpedanceRequest {
             structure: Some("microstrip".to_string()),
             width,
+            gap: None,
             dielectric_height: None,
             dielectric_constant: None,
             copper_thickness: None,
@@ -1359,6 +1363,7 @@ fn stackup_drives_impedance_and_width_conversion() {
         ImpedanceRequest {
             structure: None,
             width: 0.2,
+            gap: None,
             dielectric_height: None,
             dielectric_constant: None,
             copper_thickness: None,
@@ -1371,6 +1376,7 @@ fn stackup_drives_impedance_and_width_conversion() {
         ImpedanceRequest {
             structure: Some("coplanar".to_string()),
             width: 0.2,
+            gap: None,
             dielectric_height: Some(0.2),
             dielectric_constant: Some(4.2),
             copper_thickness: None,
@@ -1392,6 +1398,7 @@ fn impedance_table_suggests_widths_for_each_target() {
         ImpedanceTableRequest {
             structure: Some("microstrip".to_string()),
             targets: Some(vec![50.0, 75.0]),
+            gap: None,
             dielectric_height: None,
             dielectric_constant: None,
             copper_thickness: None,
@@ -1419,6 +1426,7 @@ fn impedance_table_suggests_widths_for_each_target() {
         ImpedanceTableRequest {
             structure: None,
             targets: None,
+            gap: None,
             dielectric_height: None,
             dielectric_constant: None,
             copper_thickness: None,
@@ -1436,6 +1444,7 @@ fn impedance_table_rejects_empty_and_unreachable_targets() {
     let request = |targets: Option<Vec<f64>>| ImpedanceTableRequest {
         structure: None,
         targets,
+        gap: None,
         dielectric_height: Some(0.2),
         dielectric_constant: Some(4.2),
         copper_thickness: None,
@@ -1449,6 +1458,86 @@ fn impedance_table_rejects_empty_and_unreachable_targets() {
 
     let negative = impedance_table(handle, request(Some(vec![-50.0]))).expect_err("a negative target is rejected");
     assert_eq!(negative.code, "session/argument-invalid");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn differential_impedance_reports_modes_and_solves_width() {
+    let handle = created();
+    set_stackup(handle, SetStackupRequest { copper_thickness: 0.035, dielectric_height: 0.2, dielectric_constant: 4.2 })
+        .expect("the stackup is declared");
+    let request = |structure: &str, width: f64, gap: Option<f64>| ImpedanceRequest {
+        structure: Some(structure.to_string()),
+        width,
+        gap,
+        dielectric_height: None,
+        dielectric_constant: None,
+        copper_thickness: None,
+    };
+
+    let pair = stackup_impedance(handle, request("diffMicrostrip", 0.15, Some(0.2))).expect("the pair is evaluated");
+    assert_eq!(pair["structure"], "diffMicrostrip");
+    assert_eq!(pair["gap"], 0.2);
+    let odd = pair["oddImpedance"].as_f64().expect("an odd-mode impedance");
+    let even = pair["evenImpedance"].as_f64().expect("an even-mode impedance");
+    let differential = pair["impedance"].as_f64().expect("a differential impedance");
+    assert!(even > odd, "even mode is higher than odd mode: {even} > {odd}");
+    assert!((differential - 2.0 * odd).abs() < 1e-6, "the differential value is twice the odd mode");
+    assert!((differential - 122.0).abs() < 5.0, "the closed form stays in a plausible range: {differential}");
+
+    let tight = stackup_impedance(handle, request("diffMicrostrip", 0.15, Some(0.1))).expect("the tight pair is evaluated");
+    let tight_differential = tight["impedance"].as_f64().expect("a differential impedance");
+    assert!(tight_differential < differential, "a tighter gap couples more and lowers the differential impedance");
+
+    let stripline =
+        stackup_impedance(handle, request("diffStripline", 0.15, Some(0.2))).expect("the stripline pair is evaluated");
+    let stripline_differential = stripline["impedance"].as_f64().expect("a differential impedance");
+    assert!(stripline_differential < differential, "a stripline pair is lower impedance than a microstrip pair");
+
+    let solved = stackup_width(
+        handle,
+        WidthRequest {
+            structure: Some("diffMicrostrip".to_string()),
+            impedance: 90.0,
+            gap: Some(0.2),
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("the pair width is solved");
+    assert_eq!(solved["gap"], 0.2);
+    let width = solved["width"].as_f64().expect("a solved width");
+    assert!(width > 0.0 && width < 5.0, "the solved width is bounded: {width}");
+    let round_trip =
+        stackup_impedance(handle, request("diffMicrostrip", width, Some(0.2))).expect("the solved width is evaluated");
+    let achieved = round_trip["impedance"].as_f64().expect("a differential impedance");
+    assert!((achieved - 90.0).abs() < 0.02, "the solved width reaches the differential target: {achieved}");
+
+    let table = impedance_table(
+        handle,
+        ImpedanceTableRequest {
+            structure: Some("diffMicrostrip".to_string()),
+            targets: Some(vec![80.0, 100.0]),
+            gap: Some(0.2),
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("the differential table is produced");
+    assert_eq!(table["gap"], 0.2);
+    let rows = table["rows"].as_array().expect("rows is an array");
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0]["oddImpedance"].is_number() && rows[0]["evenImpedance"].is_number());
+    assert!(rows[0]["width"].as_f64().expect("a width") > rows[1]["width"].as_f64().expect("a width"));
+
+    let missing = stackup_impedance(handle, request("diffMicrostrip", 0.15, None)).expect_err("a pair needs a gap");
+    assert_eq!(missing.code, "session/argument-invalid");
+    let stray = stackup_impedance(handle, request("microstrip", 0.15, Some(0.2))).expect_err("a single trace takes no gap");
+    assert_eq!(stray.code, "session/argument-invalid");
+    let zero_gap = stackup_impedance(handle, request("diffMicrostrip", 0.15, Some(0.0))).expect_err("a zero gap is rejected");
+    assert_eq!(zero_gap.code, "session/argument-invalid");
     close(handle).expect("the board closes");
 }
 

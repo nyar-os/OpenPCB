@@ -68,6 +68,7 @@
                 <li>Every mutation increments the document revision; saves write a temporary file and rename it into place.</li>
                 <li>Footprints move and update, tracks and vias delete in place, and lock rules block writes to a locked layer.</li>
                 <li>Rejecting duplicate references or undeclared nets keeps one coherent document.</li>
+                <li>Controlled impedance covers microstrip, stripline and edge-coupled differential pairs; a pair takes an edge gap and reports odd, even and differential impedance, and target width conversion solves the same structures.</li>
             </ul>
         </section>
 

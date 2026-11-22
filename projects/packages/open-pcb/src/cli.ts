@@ -2108,13 +2108,20 @@ function impedanceStructure(raw: string | undefined): ImpedanceStructure | undef
     if (raw === undefined) {
         return undefined;
     }
-    return raw === 'microstrip' || raw === 'stripline' ? raw : undefined;
+    return raw === 'microstrip' || raw === 'stripline' || raw === 'diffMicrostrip' || raw === 'diffStripline'
+        ? raw
+        : undefined;
+}
+
+function differentialStructure(structure: ImpedanceStructure | undefined): boolean {
+    return structure === 'diffMicrostrip' || structure === 'diffStripline';
 }
 
 stackup
     .command('impedance', 'cli.cmd.stackup-impedance')
-    .option('--structure <microstrip|stripline>', 'cli.opt.structure')
+    .option('--structure <microstrip|stripline|diffMicrostrip|diffStripline>', 'cli.opt.structure')
     .option('--width <mm>', 'cli.opt.width')
+    .option('--gap <mm>', 'cli.opt.gap')
     .option('--dielectric-height <mm>', 'cli.opt.dielectric-height')
     .option('--dielectric-constant <er>', 'cli.opt.dielectric-constant')
     .option('--copper-thickness <mm>', 'cli.opt.copper-thickness')
@@ -2122,27 +2129,47 @@ stackup
         const file = input(options);
         const width = numberOption(text(options, 'width'));
         const structure = impedanceStructure(text(options, 'structure'));
+        const gap = numberOption(text(options, 'gap'));
         if (file === undefined) {
             ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
             return 2;
         }
         if (text(options, 'structure') !== undefined && structure === undefined) {
-            ctx.fail('open-pcb.cli.structure-invalid', { message: '`--structure` must be microstrip or stripline' });
+            ctx.fail('open-pcb.cli.structure-invalid', {
+                message: '`--structure` must be microstrip, stripline, diffMicrostrip or diffStripline',
+            });
             return 2;
         }
         if (width === undefined || width <= 0) {
             ctx.fail('open-pcb.cli.width-required', { message: '`--width <mm>` must be greater than zero' });
             return 2;
         }
+        if (differentialStructure(structure) && (gap === undefined || gap <= 0)) {
+            ctx.fail('open-pcb.cli.gap-required', {
+                message: '`--gap <mm>` is required and must be greater than zero for a differential structure',
+            });
+            return 2;
+        }
+        if (!differentialStructure(structure) && gap !== undefined) {
+            ctx.fail('open-pcb.cli.gap-invalid', {
+                message: '`--gap <mm>` applies only to diffMicrostrip or diffStripline',
+            });
+            return 2;
+        }
         await withBoard(file, async (board) => {
             const report = await board.impedance({
                 structure,
                 width,
+                gap,
                 dielectricHeight: numberOption(text(options, 'dielectric-height')),
                 dielectricConstant: numberOption(text(options, 'dielectric-constant')),
                 copperThickness: numberOption(text(options, 'copper-thickness')),
             });
-            ctx.emitResult(report, `${report.structure} width=${report.width}mm impedance=${report.impedance}ohm`);
+            const modes =
+                report.oddImpedance === undefined
+                    ? ''
+                    : ` gap=${report.gap}mm odd=${report.oddImpedance}ohm even=${report.evenImpedance}ohm`;
+            ctx.emitResult(report, `${report.structure} width=${report.width}mm impedance=${report.impedance}ohm${modes}`);
             return 0;
         });
         return 0;
@@ -2150,8 +2177,9 @@ stackup
 
 stackup
     .command('width', 'cli.cmd.stackup-width')
-    .option('--structure <microstrip|stripline>', 'cli.opt.structure')
+    .option('--structure <microstrip|stripline|diffMicrostrip|diffStripline>', 'cli.opt.structure')
     .option('--impedance <ohm>', 'cli.opt.impedance')
+    .option('--gap <mm>', 'cli.opt.gap')
     .option('--dielectric-height <mm>', 'cli.opt.dielectric-height')
     .option('--dielectric-constant <er>', 'cli.opt.dielectric-constant')
     .option('--copper-thickness <mm>', 'cli.opt.copper-thickness')
@@ -2159,27 +2187,47 @@ stackup
         const file = input(options);
         const target = numberOption(text(options, 'impedance'));
         const structure = impedanceStructure(text(options, 'structure'));
+        const gap = numberOption(text(options, 'gap'));
         if (file === undefined) {
             ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
             return 2;
         }
         if (text(options, 'structure') !== undefined && structure === undefined) {
-            ctx.fail('open-pcb.cli.structure-invalid', { message: '`--structure` must be microstrip or stripline' });
+            ctx.fail('open-pcb.cli.structure-invalid', {
+                message: '`--structure` must be microstrip, stripline, diffMicrostrip or diffStripline',
+            });
             return 2;
         }
         if (target === undefined || target <= 0) {
             ctx.fail('open-pcb.cli.number-invalid', { message: '`--impedance <ohm>` must be greater than zero' });
             return 2;
         }
+        if (differentialStructure(structure) && (gap === undefined || gap <= 0)) {
+            ctx.fail('open-pcb.cli.gap-required', {
+                message: '`--gap <mm>` is required and must be greater than zero for a differential structure',
+            });
+            return 2;
+        }
+        if (!differentialStructure(structure) && gap !== undefined) {
+            ctx.fail('open-pcb.cli.gap-invalid', {
+                message: '`--gap <mm>` applies only to diffMicrostrip or diffStripline',
+            });
+            return 2;
+        }
         await withBoard(file, async (board) => {
             const report = await board.impedanceWidth({
                 structure,
                 impedance: target,
+                gap,
                 dielectricHeight: numberOption(text(options, 'dielectric-height')),
                 dielectricConstant: numberOption(text(options, 'dielectric-constant')),
                 copperThickness: numberOption(text(options, 'copper-thickness')),
             });
-            ctx.emitResult(report, `${report.structure} impedance=${report.impedance}ohm width=${report.width}mm`);
+            const modes =
+                report.oddImpedance === undefined
+                    ? ''
+                    : ` gap=${report.gap}mm odd=${report.oddImpedance}ohm even=${report.evenImpedance}ohm`;
+            ctx.emitResult(report, `${report.structure} impedance=${report.impedance}ohm width=${report.width}mm${modes}`);
             return 0;
         });
         return 0;
