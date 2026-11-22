@@ -69,6 +69,8 @@ import type {
     SetSeverityOptions,
     SetStackupOptions,
     SetViaBackDrillOptions,
+    SplitTrackOptions,
+    SplitTrackResult,
     StitchViasOptions,
     TextListReport,
     UpdateFootprintOptions,
@@ -456,6 +458,13 @@ function attach(
             ensure();
             return commit((current) => service.updateTrack(current, options));
         },
+        async splitTrack(options: SplitTrackOptions): Promise<SplitTrackResult> {
+            ensure();
+            assertObjectId(options.id);
+            assertFinite(options.x, 'x');
+            assertFinite(options.y, 'y');
+            return commit((current) => service.splitTrack(current, options)) as SplitTrackResult;
+        },
         async deleteTrack(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteTrack(current, id));
@@ -668,6 +677,18 @@ function attach(
             service.close(handle);
         },
     };
+}
+
+function assertObjectId(id: string): void {
+    if (typeof id !== 'string' || id.trim().length === 0) {
+        throw new OpenPCBError('session/argument-invalid', '`id` must be a non-empty string');
+    }
+}
+
+function assertFinite(value: number, field: string): void {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new OpenPCBError('session/argument-invalid', `\`${field}\` must be a finite number`);
+    }
 }
 
 function assertCreateOptions(options: BoardCreateOptions): void {

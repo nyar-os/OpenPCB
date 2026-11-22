@@ -28,6 +28,7 @@ export interface NativeBinding {
     board_delete_pad(handle: number, requestJson: string): string;
     board_add_track(handle: number, requestJson: string): string;
     board_update_track(handle: number, requestJson: string): string;
+    board_split_track(handle: number, requestJson: string): string;
     board_add_via(handle: number, requestJson: string): string;
     board_update_via(handle: number, requestJson: string): string;
     board_add_slot(handle: number, requestJson: string): string;

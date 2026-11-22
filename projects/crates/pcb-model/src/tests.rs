@@ -16,17 +16,17 @@ use crate::{
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTextRequest,
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
     ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, SetOutlineRequest,
-    SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest,
-    UpdateKeepoutRequest, UpdateLayerRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest,
-    WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot,
-    add_teardrops, add_test_point, add_text, add_track, add_via, add_waiver, add_zone, assign_net_class,
+    SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest,
+    UpdateKeepoutRequest, UpdateLayerRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest,
+    UpdateZoneRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class,
+    add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
     delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver, delete_zone,
     drill_report, export, impedance_table, import, inspect, keepout_report, list_texts, move_footprint, open, outline_geometry,
-    panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance,
-    stackup_width, stitch_vias, store, summary, undo, update_footprint, update_keepout, update_layer, update_text,
-    update_track, update_via, update_zone, zone_report,
+    panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, split_track,
+    stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_keepout, update_layer,
+    update_text, update_track, update_via, update_zone, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -2555,6 +2555,78 @@ fn tracks_update_in_place_and_validate_requests() {
         )
         .expect_err("a locked target layer rejects the edit")
         .code,
+        "board/layer-locked"
+    );
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn tracks_split_at_a_point_and_validate_the_split_point() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("VCC".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [0.0, 0.0],
+            to: [10.0, 0.0],
+        },
+    )
+    .expect("the track is routed");
+
+    let split = split_track(handle, SplitTrackRequest { id: "track-1".to_string(), x: 4.0, y: 0.0 })
+        .expect("the track splits on the segment");
+    assert_eq!(split["first"]["id"], "track-1");
+    assert_eq!(split["first"]["from"], json!([0.0, 0.0]));
+    assert_eq!(split["first"]["to"], json!([4.0, 0.0]));
+    assert_eq!(split["second"]["id"], "track-2");
+    assert_eq!(split["second"]["from"], json!([4.0, 0.0]));
+    assert_eq!(split["second"]["to"], json!([10.0, 0.0]));
+    assert_eq!(split["second"]["net"], "VCC");
+    assert_eq!(split["second"]["width"], 0.25);
+    assert_eq!(split["revision"], 4, "the split bumps the revision once");
+    assert_eq!(split["canRedo"], false);
+    assert_eq!(summary(handle).expect("the board is listed")["counts"]["tracks"], 2);
+
+    assert_eq!(
+        split_track(handle, SplitTrackRequest { id: "track-404".to_string(), x: 1.0, y: 0.0 })
+            .expect_err("a missing id is reported")
+            .code,
+        "object/not-found"
+    );
+    assert_eq!(
+        split_track(handle, SplitTrackRequest { id: "track-1".to_string(), x: 0.0, y: 0.0 })
+            .expect_err("the start endpoint is rejected")
+            .code,
+        "session/argument-invalid"
+    );
+    assert_eq!(
+        split_track(handle, SplitTrackRequest { id: "track-1".to_string(), x: 4.0, y: 0.0 })
+            .expect_err("the split of the second segment hits an endpoint")
+            .code,
+        "session/argument-invalid"
+    );
+    assert_eq!(
+        split_track(handle, SplitTrackRequest { id: "track-1".to_string(), x: 2.0, y: 1.0 })
+            .expect_err("a point off the segment is rejected")
+            .code,
+        "session/argument-invalid"
+    );
+    assert_eq!(
+        split_track(handle, SplitTrackRequest { id: "track-1".to_string(), x: f64::NAN, y: 0.0 })
+            .expect_err("a non-finite point is rejected")
+            .code,
+        "session/argument-invalid"
+    );
+
+    update_layer(handle, UpdateLayerRequest { id: "F.Cu".to_string(), locked: Some(true), ..Default::default() })
+        .expect("the layer is locked");
+    assert_eq!(
+        split_track(handle, SplitTrackRequest { id: "track-1".to_string(), x: 2.0, y: 0.0 })
+            .expect_err("a locked layer rejects the split")
+            .code,
         "board/layer-locked"
     );
     close(handle).expect("the board closes");

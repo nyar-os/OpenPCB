@@ -1080,6 +1080,16 @@ export interface UpdateTrackOptions {
     readonly to?: readonly [number, number];
 }
 
+/** Options of `board.splitTrack()`. */
+export interface SplitTrackOptions {
+    /** Track id to split, for example `track-1`. */
+    readonly id: ObjectId;
+    /** Split point X in board units; must be finite. */
+    readonly x: number;
+    /** Split point Y in board units; must be finite. */
+    readonly y: number;
+}
+
 /** Options of `board.updateVia()`. At least one editable field is required. */
 export interface UpdateViaOptions {
     /** Via id to update, for example `via-1`. */
@@ -1206,6 +1216,16 @@ export interface BoardEditResult {
     readonly deleted?: ObjectId;
 }
 
+/** Result of `board.splitTrack()`. */
+export interface SplitTrackResult extends BoardEditResult {
+    readonly canUndo: boolean;
+    readonly canRedo: boolean;
+    /** The original track, now ending at the split point. */
+    readonly first: BoardObject;
+    /** The new `track-N` segment from the split point to the original end. */
+    readonly second: BoardObject;
+}
+
 /** An open board document. Every operation keeps its own stable code. */
 export interface Board {
     readonly id: BoardId;
@@ -1227,6 +1247,7 @@ export interface Board {
     deletePad(input: DeletePadInput): Promise<BoardEditResult>;
     addTrack(options: AddTrackOptions): Promise<BoardEditResult>;
     updateTrack(options: UpdateTrackOptions): Promise<BoardEditResult>;
+    splitTrack(options: SplitTrackOptions): Promise<SplitTrackResult>;
     deleteTrack(id: ObjectId): Promise<BoardEditResult>;
     addVia(options: AddViaOptions): Promise<BoardEditResult>;
     updateVia(options: UpdateViaOptions): Promise<BoardEditResult>;

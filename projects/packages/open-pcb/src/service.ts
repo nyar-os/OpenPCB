@@ -58,6 +58,8 @@ import type {
     SetRulesOptions,
     SetSeverityOptions,
     SetViaBackDrillOptions,
+    SplitTrackOptions,
+    SplitTrackResult,
     TextListReport,
     UpdateFootprintOptions,
     UpdateKeepoutOptions,
@@ -204,6 +206,13 @@ export function addTrack(handle: number, options: AddTrackOptions): BoardEditRes
 export function updateTrack(handle: number, options: UpdateTrackOptions): BoardEditResult {
     return decode<BoardEditResult>(() =>
         binding('board.updateTrack').board_update_track(handle, JSON.stringify(options)),
+    );
+}
+
+/** Splits one track at a point on its centreline. */
+export function splitTrack(handle: number, options: SplitTrackOptions): SplitTrackResult {
+    return decode<SplitTrackResult>(() =>
+        binding('board.splitTrack').board_split_track(handle, JSON.stringify(options)),
     );
 }
 

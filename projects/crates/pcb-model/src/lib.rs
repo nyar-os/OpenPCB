@@ -47,9 +47,9 @@ pub use board::{
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTextRequest,
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest,
     ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
-    SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateKeepoutRequest,
-    UpdateLayerRequest, UpdatePadRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest,
-    WidthRequest,
+    SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest,
+    UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateTextRequest, UpdateTrackRequest,
+    UpdateViaRequest, UpdateZoneRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 pub use outline::OutlineGeometryRequest;
@@ -476,6 +476,30 @@ pub fn update_track(handle: u64, request: UpdateTrackRequest) -> Result<Value, S
         Ok(())
     })?;
     edit_result(handle, Some(object), None)
+}
+
+/// Splits one track at a point on its centreline.
+///
+/// The original track keeps its id as the first segment and a new `track-N`
+/// becomes the second, so the split is one revision and one undo step. The
+/// response carries both segments in `first` and `second` alongside the
+/// committed revision and the undo/redo flags.
+pub fn split_track(handle: u64, request: SplitTrackRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.split_track(request)?;
+        Ok(())
+    })?;
+    let summary = store::summary_of(handle)?;
+    Ok(json!({
+        "handle": handle,
+        "revision": summary["revision"],
+        "canUndo": summary["canUndo"],
+        "canRedo": summary["canRedo"],
+        "board": summary,
+        "first": object["first"],
+        "second": object["second"],
+    }))
 }
 
 /// Adds one via to an open board.

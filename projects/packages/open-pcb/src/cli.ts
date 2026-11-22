@@ -726,6 +726,42 @@ track
     });
 
 track
+    .command('split', 'cli.cmd.track-split')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--x <mm>', 'cli.opt.x')
+    .option('--y <mm>', 'cli.opt.y')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        const xText = text(options, 'x');
+        const x = numberOption(xText);
+        if (xText === undefined || x === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--x <mm>` must be a finite number' });
+            return 2;
+        }
+        const yText = text(options, 'y');
+        const y = numberOption(yText);
+        if (yText === undefined || y === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--y <mm>` must be a finite number' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.splitTrack({ id, x, y });
+            ctx.emitResult(result, `split ${id} into ${result.first.id} and ${result.second.id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+track
     .command('delete', 'cli.cmd.track-delete')
     .option('--id <id>', 'cli.opt.id')
     .actionCtx(async (options, _args, ctx) => {

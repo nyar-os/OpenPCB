@@ -390,6 +390,44 @@ test('zones, silkscreen text and drill reports round trip through the SDK', { sk
     await pcb.dispose();
 });
 
+test('tracks split at a point and slots update in place', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+    const board = await pcb.create();
+    await board.addNet({ name: 'VCC' });
+    await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [0, 0], to: [10, 0] });
+
+    const split = await board.splitTrack({ id: 'track-1', x: 4, y: 0 });
+    assert.equal(split.first.id, 'track-1');
+    assert.deepEqual(split.first.to, [4, 0]);
+    assert.equal(split.second.id, 'track-2');
+    assert.deepEqual(split.second.from, [4, 0]);
+    assert.deepEqual(split.second.to, [10, 0]);
+    assert.equal(split.second.net, 'VCC');
+    assert.equal(split.second.width, 0.25);
+    assert.equal(split.canUndo, true);
+    assert.equal(split.revision, board.revision);
+    assert.equal((await board.list()).counts.tracks, 2);
+
+    await assert.rejects(
+        board.splitTrack({ id: 'track-1', x: 0, y: 0 }),
+        (error: unknown) => error instanceof OpenPCBError && error.code === 'session/argument-invalid',
+    );
+    await assert.rejects(
+        board.splitTrack({ id: 'track-1', x: 2, y: 1 }),
+        (error: unknown) => error instanceof OpenPCBError && error.code === 'session/argument-invalid',
+    );
+    await assert.rejects(
+        board.splitTrack({ id: 'track-404', x: 1, y: 0 }),
+        (error: unknown) => error instanceof OpenPCBError && error.code === 'object/not-found',
+    );
+
+    const undone = await board.undo();
+    assert.equal(undone.board.counts.tracks, 1, 'the split is one undo step');
+
+    await board.close();
+    await pcb.dispose();
+});
+
 test('editing rejects invalid input with stable codes', { skip: withAddon }, async () => {
     const pcb = new OpenPCB();
     const board = await pcb.create();
@@ -649,6 +687,33 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
 
         run('footprint', 'delete', document, '--id', 'fp-1');
         assert.match(run('list', document), /footprints=0/);
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('CLI splits tracks in place', { skip: withAddon }, () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pcb-split-cli-'));
+    const cli = fileURLToPath(new URL('./cli.js', import.meta.url));
+    const document = path.join(directory, 'split.opcb');
+    const run = (...args: string[]): string => {
+        const result = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+        assert.equal(result.status, 0, result.stderr || result.stdout);
+        return result.stdout;
+    };
+    const runFail = (...args: string[]): string => {
+        const result = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+        assert.notEqual(result.status, 0, 'the command is expected to fail');
+        return `${result.stdout}${result.stderr}`;
+    };
+    try {
+        run('create', '--out', document, '--title', 'Split', '--template', 'blank');
+        run('net', 'add', document, '--name', 'VCC');
+        run('track', 'add', document, '--net', 'VCC', '--layer', 'F.Cu', '--from', '0,0', '--to', '10,0', '--width', '0.25');
+        assert.match(run('track', 'split', document, '--id', 'track-1', '--x', '4', '--y', '0'), /split track-1 into track-1 and track-2/);
+        assert.match(run('list', document), /tracks=2/);
+
+        assert.match(runFail('track', 'split', document, '--id', 'track-1', '--x', '0', '--y', '0'), /must lie between the track endpoints/);
     } finally {
         fs.rmSync(directory, { recursive: true, force: true });
     }

@@ -18,6 +18,10 @@ Implemented:
   back-drill depth and remaining stub on a through via; move, update and delete
   footprints; add, update and delete their pads; update, delete tracks, vias and
   slots in place.
+- Split a routed track at a point on its centreline (`track split`): the original
+  keeps its id as the first segment and a new `track-N` becomes the second, with
+  net, layer, width and the teardrop marker preserved. A point at an endpoint or
+  off the segment is rejected, and the split is one revision and one undo step.
 - Add, rename, hide and lock layers; set a rectangular outline.
 - Report copper area per copper layer (`copper balance`) from tracks, vias, pads
   and pours, plus each layer's coverage and the imbalance across layers.
@@ -147,6 +151,7 @@ a format, check or target.
 | `open-pcb footprint pad delete <file.opcb> --footprint <id> --number <n>` | Delete a pad from a footprint. |
 | `open-pcb track add <file.opcb> --net <name> --layer <layer> --from <x,y> --to <x,y> --width <mm>` | Route one track segment in place. |
 | `open-pcb track update <file.opcb> --id <id> [--net <name>] [--layer <layer>] [--width <mm>] [--from <x,y>] [--to <x,y>]` | Update a track in place; at least one field is required. |
+| `open-pcb track split <file.opcb> --id <id> --x <mm> --y <mm>` | Split one track at a point on its centreline into two collinear tracks. The original keeps its id and a new `track-N` becomes the second segment; a point at an endpoint or off the segment is rejected. |
 | `open-pcb track delete <file.opcb> --id <id>` | Delete a track by id. |
 | `open-pcb via add <file.opcb> --net <name> --at <x,y> --diameter <mm> --drill <mm>` | Place a via in place. |
 | `open-pcb via update <file.opcb> --id <id> [--net <name>] [--at <x,y>] [--diameter <mm>] [--drill <mm>]` | Update a via in place; at least one field is required. |

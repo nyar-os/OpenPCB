@@ -1096,6 +1096,49 @@ impl Board {
         Ok(json!(self.tracks[index].clone()))
     }
 
+    /// Splits one track at a point on its centreline into two collinear tracks.
+    ///
+    /// The original track keeps its id and becomes the first segment; the new
+    /// segment receives the next `track-N` id. Net, layer, width and the
+    /// teardrop marker are copied, so the split is one revision and one undo
+    /// step. A point at an endpoint or off the segment is rejected.
+    pub(crate) fn split_track(&mut self, request: SplitTrackRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .tracks
+            .iter()
+            .position(|track| track.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no track with id `{}`", request.id)))?;
+        self.editable_layer(&self.tracks[index].layer)?;
+        let x = finite(request.x, "x")?;
+        let y = finite(request.y, "y")?;
+        let track = self.tracks[index].clone();
+        let (from, to) = (track.from, track.to);
+        let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+        let length = dx.hypot(dy);
+        if length <= 1e-9 {
+            return Err(crate::argument("a track needs a non-zero length to split"));
+        }
+        let t = ((x - from[0]) * dx + (y - from[1]) * dy) / (length * length);
+        let tolerance = 1e-6_f64.max(length * 1e-9);
+        let distance = ((x - from[0]) * dy - (y - from[1]) * dx).abs() / length;
+        if distance > tolerance {
+            return Err(crate::argument("the split point is not on the track"));
+        }
+        if t <= 1e-9 || t >= 1.0 - 1e-9 {
+            return Err(crate::argument("the split point must lie between the track endpoints"));
+        }
+        let split = [from[0] + dx * t, from[1] + dy * t];
+        let id = format!("track-{}", self.next_track);
+        self.next_track += 1;
+        self.tracks[index].to = split;
+        let first = self.tracks[index].clone();
+        let second =
+            Track { id, net: track.net, layer: track.layer, width: track.width, from: split, to, teardrop: track.teardrop };
+        self.tracks.push(second.clone());
+        self.revision += 1;
+        Ok(json!({ "first": first, "second": second }))
+    }
+
     /// Adds linear teardrop copper at every pad-track junction.
     ///
     /// A teardrop is materialised as two ordinary copper tracks: from two
@@ -3272,6 +3315,18 @@ pub struct UpdateTrackRequest {
     /// New segment end.
     #[serde(default)]
     pub to: Option<[f64; 2]>,
+}
+
+/// Request of [`crate::split_track`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitTrackRequest {
+    /// Track id to split.
+    pub id: String,
+    /// Split point X in board units; must be finite and lie on the segment.
+    pub x: f64,
+    /// Split point Y in board units; must be finite and lie on the segment.
+    pub y: f64,
 }
 
 /// Request of [`crate::update_via`]. At least one editable field is required.

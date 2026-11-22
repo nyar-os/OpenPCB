@@ -23,6 +23,7 @@
             "track": "Edit the tracks of a board document",
             "track-add": "Route a track segment and write the document back in place",
             "track-update": "Update the net, layer, width or endpoints of a track in place",
+            "track-split": "Split a track at a point on its centreline and write the document back in place",
             "track-delete": "Delete a track by id and write the document back in place",
             "via": "Edit the vias of a board document",
             "via-add": "Place a via and write the document back in place",
