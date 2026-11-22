@@ -85,6 +85,8 @@ assuming a format, check or export target works.
 - **Routing that states its result.** A deterministic two-layer autorouter
   connects nets with at least two pads, treats applicable copper keepouts as
   hard obstacles, and returns unrouted edges rather than approximating them.
+  Opt in to net-class targets and each net routes with its class width,
+  clearance and via values.
 - **Checks before fabrication.** Twenty-one checks cover DRC, connectivity,
   clearance, annular rings, track width, unrouted nets, stackup, outline,
   silkscreen, courtyard, netlist, hole spacing, copper and hole edge clearance,

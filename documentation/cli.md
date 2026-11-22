@@ -278,7 +278,7 @@ The target is an existing pad key or via id.
 ## Routing and copper tools
 
 ```bash
-open-pcb route <file> [--width <mm>] [--clearance <mm>] [--via <mm>] [--net <name>]
+open-pcb route <file> [--width <mm>] [--clearance <mm>] [--via <mm>] [--net <name>] [--netclass]
 open-pcb teardrop <file> [--shape linear] [--length <mm>]
 open-pcb stitch <file> --net <name> --spacing <mm> [--inset <mm>]
     [--diameter <mm>] [--drill <mm>]
@@ -287,8 +287,10 @@ open-pcb drill report <file>
 open-pcb lengths <file>
 ```
 
-`route` defaults to width 0.25, clearance 0.2 and via diameter 0.6. `teardrop`
-implements `linear` only. `stitch` requires a net and a positive spacing and
+`route` defaults to width 0.25, clearance 0.2 and via diameter 0.6. `--netclass`
+makes each net use its declared net class for width, clearance and via values
+per field, falling back to the explicit arguments and then to those defaults.
+`teardrop` implements `linear` only. `stitch` requires a net and a positive spacing and
 reports how many vias it placed and skipped. `copper balance` prints per-layer
 area, coverage when an outline exists, and the imbalance between copper sides.
 `drill report` prints hole count, slot count, tool count and back-drilled count.
@@ -297,6 +299,7 @@ centreline length in document units and via count, plus the totals.
 
 ```bash
 open-pcb route board.opcb --net VCC --width 0.25
+open-pcb route board.opcb --netclass
 open-pcb stitch board.opcb --net GND --spacing 5 --inset 1
 ```
 

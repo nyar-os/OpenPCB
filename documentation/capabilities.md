@@ -75,7 +75,7 @@ via-in-pad
 | Solder-paste Gerber layers | `supported` |
 | Gerber X2 file, aperture and object attributes | `supported` |
 | Waivers and severity overrides | `supported` |
-| Routing | `supported` |
+| Routing (opt-in net-class targets via `useNetClasses`) | `supported` |
 | Copper pours and the zone report | `supported` |
 | Silkscreen text items | `supported` |
 | Keepouts and the keepout report | `supported` |
@@ -85,7 +85,7 @@ via-in-pad
 | Routed net-length report (`lengths`, `Board.netLengths`) | `supported` |
 | Panelization (`Board.panelize`, SDK only) | `supported` |
 | Polygon outline geometry (`Board.outlineGeometry`, SDK only) | `supported` |
-| Net classes | `supported` |
+| Net classes (checks and opt-in routing targets) | `supported` |
 | Test points | `supported` |
 | Stackup | `supported` |
 | Single-ended and edge-coupled differential impedance | `supported` |
@@ -171,8 +171,12 @@ stay in the ledger instead of being approximated.
 - It does not rip up, use diagonal tracks or route multi-layer inner copper.
   Keepout avoidance therefore appears as an unrouted edge when no candidate
   circumvents the region.
-- It does not route against net-class targets: `route` takes width, clearance and
-  via arguments directly, while `netclass` checks what is already placed.
+- Net-class routing is opt-in. With `useNetClasses` (CLI `--netclass`) each net
+  uses its declared class width, clearance and via diameter; a missing class or
+  class field falls back to the explicit option and then to the built-in
+  default. Without the option the explicit arguments apply, so existing calls
+  produce the same copper. When enabled the report adds `widthSource`
+  (`netclass`, `argument` or `default`) to each net and unrouted edge.
 - Defaults are width 0.25, clearance 0.2 and via diameter 0.6 board units.
 
 ### Fabrication and assembly
