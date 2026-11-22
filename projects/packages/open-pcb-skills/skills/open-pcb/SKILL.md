@@ -77,7 +77,9 @@ Implemented:
   `silkscreen-over-pad`, `diffpair`, `dangling-copper`, `netclass`, `keepout`,
   `via-in-pad`, `pad-overlap`, `testpoints`. The `via-in-pad` check warns about
   vias whose centre lands inside a pad they share copper with; `pad-overlap`
-  errors when two nets' rotated pads share copper on one layer; `testpoints`
+  errors when two nets' rotated pads share copper on one layer;
+  `silkscreen-over-pad` errors when a same-side silkscreen track or text box
+  overlaps a pad, while tangent legend stays clean; `testpoints`
   warns about connectable nets with no declared test point and errors on nets
   with no pad or via.
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `drill_map`

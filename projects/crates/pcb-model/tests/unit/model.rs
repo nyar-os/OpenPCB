@@ -4164,6 +4164,160 @@ fn silkscreen_over_pad_flags_a_silk_track_crossing_a_pad_on_the_same_side() {
 }
 
 #[test]
+fn silkscreen_over_pad_flags_silk_text_covering_a_pad_and_stays_deterministic() {
+    let handle = created();
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("U1".to_string()), x: Some(20.0), y: Some(20.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_text(
+        handle,
+        AddTextRequest {
+            text: "AB".to_string(),
+            layer: "F.SilkS".to_string(),
+            at: [20.0, 20.0],
+            rotation: Some(0.0),
+            size: None,
+            thickness: None,
+        },
+    )
+    .expect("the legend is placed");
+    let revision = summary(handle).expect("the board is listed")["revision"].clone();
+
+    let report = inspect(handle, Some(vec!["silkscreen-over-pad".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/silkscreen-over-pad"]);
+    assert_eq!(report["issues"][0]["objectId"], "text-1>fp-1:1");
+    assert_eq!(report["issues"][0]["layerId"], "F.SilkS");
+    assert_eq!(report["passed"], false);
+    assert_eq!(report["revision"], revision, "inspection never bumps the revision");
+    assert_eq!(summary(handle).expect("the board is listed")["revision"], revision, "inspection leaves the revision alone");
+
+    let repeat = inspect(handle, Some(vec!["silkscreen-over-pad".to_string()])).expect("the check runs again");
+    assert_eq!(codes(&repeat), codes(&report), "a repeat run reports the same findings in the same order");
+    assert_eq!(repeat["issues"][0]["objectId"], report["issues"][0]["objectId"]);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn silkscreen_over_pad_ignores_tangent_legend_and_the_other_side() {
+    let tangent_text = created();
+    add_footprint(
+        tangent_text,
+        AddFootprintRequest { reference: Some("U1".to_string()), x: Some(20.0), y: Some(20.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        tangent_text,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_text(
+        tangent_text,
+        AddTextRequest {
+            text: "AB".to_string(),
+            layer: "F.SilkS".to_string(),
+            at: [20.0, 21.25],
+            rotation: Some(0.0),
+            size: None,
+            thickness: None,
+        },
+    )
+    .expect("the legend is placed");
+    let report = inspect(tangent_text, Some(vec!["silkscreen-over-pad".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "a legend box that touches the pad edge is contact, not overlap");
+    close(tangent_text).expect("the board closes");
+
+    let tangent_track = created();
+    add_footprint(
+        tangent_track,
+        AddFootprintRequest { reference: Some("U1".to_string()), x: Some(20.0), y: Some(20.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        tangent_track,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 4.0,
+            h: 4.0,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_track(
+        tangent_track,
+        AddTrackRequest { net: None, layer: "F.SilkS".to_string(), width: 2.0, from: [16.0, 23.0], to: [24.0, 23.0] },
+    )
+    .expect("the silkscreen track is placed");
+    let report = inspect(tangent_track, Some(vec!["silkscreen-over-pad".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "a stroke whose edge touches the pad is contact, not overlap");
+    close(tangent_track).expect("the board closes");
+
+    let other_side = created();
+    add_footprint(
+        other_side,
+        AddFootprintRequest { reference: Some("U1".to_string()), x: Some(20.0), y: Some(20.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        other_side,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_text(
+        other_side,
+        AddTextRequest {
+            text: "AB".to_string(),
+            layer: "B.SilkS".to_string(),
+            at: [20.0, 20.0],
+            rotation: Some(0.0),
+            size: None,
+            thickness: None,
+        },
+    )
+    .expect("the legend is placed");
+    let report = inspect(other_side, Some(vec!["silkscreen-over-pad".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "bottom silkscreen text does not overlap a top pad");
+    close(other_side).expect("the board closes");
+}
+
+#[test]
 fn png_export_writes_a_valid_deterministic_raster() {
     let directory = TempDir::new();
     let handle = created();

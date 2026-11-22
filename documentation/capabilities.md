@@ -300,6 +300,11 @@ being approximated.
   The SVG and PDF writers draw them, Gerber emits them into `F_SilkS` and
   `B_SilkS`, and `silkscreen-over-pad` reads them. DRC treats a silkscreen track
   as legend rather than a copper violation.
+- `silkscreen-over-pad` also boxes each silkscreen text item from its anchor
+  (`0.6 × size` per character to the right, one `size` above and below) and
+  reports a legend that shares interior area with a pad on the same side. The
+  box ignores the stored rotation, matching the previews' fit. A shared edge is
+  contact, not overlap, so tangent silk and pads stay clean.
 - Footprint graphics are not stored. KiCad import reports them with
   `kicad/footprint-graphics`.
 

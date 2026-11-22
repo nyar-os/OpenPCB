@@ -1456,23 +1456,27 @@ fn edge_clearance(board: &Board, issues: &mut CheckReport) {
     }
 }
 
-/// Checks silkscreen tracks against pads on the same side of the board.
+/// Checks silkscreen tracks and text against pads on the same side of the board.
 ///
-/// Silkscreen geometry in this model is limited to tracks placed on a
-/// silkscreen layer; text has no geometry and is reported as unavailable by the
-/// `silkscreen` check, so this rule never claims to have checked text.
+/// A silkscreen track is legend geometry: its stroked centreline must not enter a
+/// pad rectangle, and a stroke that only touches the pad edge is contact rather
+/// than overlap. A text item stores no glyph outlines, so its legend is the box
+/// the preview writers use: one `0.6 × size` advance per character to the right
+/// of the anchor and one `size` above and below it. Both rules report every
+/// overlapping pair once, in document order, and only when the silk layer and the
+/// pad share a side (`F.` or `B.`).
 fn silkscreen_over_pad(board: &Board, issues: &mut CheckReport) {
     let pads = board.placed_pads();
     for track in &board.tracks {
-        if !board.layer(&track.layer).is_some_and(|layer| layer.kind == LayerKind::Silkscreen) {
+        let Some(side) = silkscreen_side(board, &track.layer)
+        else {
             continue;
-        }
-        let side = if track.layer.starts_with('B') { "B." } else { "F." };
+        };
         for pad in &pads {
-            if !pad.layer.starts_with(side) || !board.layer(pad.layer).is_some_and(|layer| layer.kind == LayerKind::Copper) {
+            if !copper_on_side(board, pad.layer, side) {
                 continue;
             }
-            if segment_box_distance(track.from, track.to, pad.at, pad.half) <= track.width / 2.0 {
+            if segment_box_distance(track.from, track.to, pad.at, pad.half) < track.width / 2.0 {
                 let object = format!("{}>{}", track.id, pad.key);
                 issues.push(finding(
                     "drc/silkscreen-over-pad",
@@ -1482,10 +1486,65 @@ fn silkscreen_over_pad(board: &Board, issues: &mut CheckReport) {
                     Some(&object),
                     format!("silkscreen track `{}` overlaps pad `{}` on the same side", track.id, pad.key),
                 ));
-                break;
             }
         }
     }
+
+    for text in &board.texts {
+        let Some(side) = silkscreen_side(board, &text.layer)
+        else {
+            continue;
+        };
+        let bounds = text_bounds(text);
+        for footprint in &board.footprints {
+            if !copper_on_side(board, &footprint.layer, side) {
+                continue;
+            }
+            for pad in &footprint.pads {
+                if !convex_overlap(&bounds, &pad_corners(footprint, pad)) {
+                    continue;
+                }
+                let key = format!("{}:{}", footprint.id, pad.number);
+                let object = format!("{}>{}", text.id, key);
+                issues.push(finding(
+                    "drc/silkscreen-over-pad",
+                    Severity::Error,
+                    board,
+                    Some(&text.layer),
+                    Some(&object),
+                    format!("silkscreen text `{}` overlaps pad `{}` on the same side", text.id, key),
+                ));
+            }
+        }
+    }
+}
+
+/// Side of the board a silkscreen layer belongs to, or `None` for other layers.
+fn silkscreen_side(board: &Board, layer: &str) -> Option<&'static str> {
+    board.layer(layer).is_some_and(|layer| layer.kind == LayerKind::Silkscreen).then_some(if layer.starts_with('B') {
+        "B."
+    }
+    else {
+        "F."
+    })
+}
+
+/// Whether a layer is copper on the given side of the board.
+fn copper_on_side(board: &Board, layer: &str, side: &str) -> bool {
+    layer.starts_with(side) && board.layer(layer).is_some_and(|layer| layer.kind == LayerKind::Copper)
+}
+
+/// Axis-aligned legend box of one silkscreen text item, in board units.
+///
+/// The model stores an anchor, a glyph size and a stroke thickness rather than
+/// glyph outlines. This is the box the preview writers use to fit and draw the
+/// legend: the text advances `0.6 × size` per character from its anchor and
+/// spans one `size` above and below.
+fn text_bounds(text: &crate::board::TextItem) -> [[f64; 2]; 4] {
+    let right = text.at[0] + text.text.chars().count() as f64 * text.size * 0.6;
+    let bottom = text.at[1] - text.size;
+    let top = text.at[1] + text.size;
+    [[text.at[0], bottom], [right, bottom], [right, top], [text.at[0], top]]
 }
 
 /// Compares each declared differential pair against its routing targets, then
