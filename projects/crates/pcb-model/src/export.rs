@@ -998,24 +998,24 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
     let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: max[1] + margin, width, height };
     let drawing = build_drawing(board, &layout, Some(Color::rgb(14, 26, 20)));
     let mut content = drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the SVG preview: {error}")))?;
-    if !board.texts.is_empty() {
-        if let Some(index) = content.rfind("</svg>") {
-            let mut group = String::from("<g class=\"board-text\">");
-            for text in &board.texts {
-                let x = (text.at[0] * scale - layout.origin_x) * layout.scale;
-                let y = (layout.origin_y - text.at[1] * scale) * layout.scale;
-                let _ = write!(
-                    group,
-                    "<text x=\"{x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"{:.3}\" fill=\"{}\" transform=\"rotate({:.3} {x:.3} {y:.3})\">{}</text>",
-                    text.size * scale * layout.scale,
-                    layer_color(board, &text.layer),
-                    -text.rotation,
-                    xml(&text.text)
-                );
-            }
-            group.push_str("</g>");
-            content.insert_str(index, &group);
+    if !board.texts.is_empty()
+        && let Some(index) = content.rfind("</svg>")
+    {
+        let mut group = String::from("<g class=\"board-text\">");
+        for text in &board.texts {
+            let x = (text.at[0] * scale - layout.origin_x) * layout.scale;
+            let y = (layout.origin_y - text.at[1] * scale) * layout.scale;
+            let _ = write!(
+                group,
+                "<text x=\"{x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"{:.3}\" fill=\"{}\" transform=\"rotate({:.3} {x:.3} {y:.3})\">{}</text>",
+                text.size * scale * layout.scale,
+                layer_color(board, &text.layer),
+                -text.rotation,
+                xml(&text.text)
+            );
         }
+        group.push_str("</g>");
+        content.insert_str(index, &group);
     }
     Ok((content, width, height))
 }
