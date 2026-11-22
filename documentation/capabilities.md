@@ -75,7 +75,7 @@ via-in-pad
 | Solder-paste Gerber layers | `supported` |
 | Gerber X2 file, aperture and object attributes | `supported` |
 | Waivers and severity overrides | `supported` |
-| Routing (opt-in net-class targets via `useNetClasses`) | `supported` |
+| Routing (orthogonal and `chamfer45` styles, opt-in net-class targets via `useNetClasses`) | `supported` |
 | Copper pours and the zone report | `supported` |
 | Silkscreen text items | `supported` |
 | Keepouts and the keepout report | `supported` |
@@ -165,12 +165,30 @@ stay in the ledger instead of being approximated.
 
 ### Routing
 
-- The router is a deterministic orthogonal MST router. It tries four L-shaped
-  candidates per edge and reports an edge as unrouted rather than approximating
-  a path.
-- It does not rip up, use diagonal tracks or route multi-layer inner copper.
-  Keepout avoidance therefore appears as an unrouted edge when no candidate
-  circumvents the region.
+- The router is a deterministic spanning-tree router. `style: "orthogonal"`
+  (the default) tries four L-shaped candidates per edge and reports an edge as
+  unrouted rather than approximating a path.
+- `style: "chamfer45"` tries paths made of an axis-aligned segment, a 45-degree
+  diagonal and another axis-aligned segment, on each configured layer. The
+  diagonal keeps both axis directions of the edge, so its angle is exactly 45
+  degrees and the whole path stays inside the pair's axis-aligned bounding box.
+  Two orientations and three diagonal shares per layer let a blocked diagonal
+  slide along the edge.
+- A chamfered edge falls back to an orthogonal L path when the diagonal has no
+  length (the edge is axis-aligned), lies outside the rectangular outline, or no
+  variant satisfies copper, pad, via and keepout clearance. The report then
+  marks `fallback` as `diagonal-length-zero`, `diagonal-outside-outline` or
+  `chamfer-clearance`. When the orthogonal fallback also fails, the edge stays
+  unrouted.
+- `chamfer45` adds `style` and an `edges` array to the report. Each edge carries
+  `net`, `from`, `to`, `routed`, `style`, `fallback`, `reason` and `segments`;
+  each segment carries its two points, layer, width and style. The default
+  report keeps its historical shape and adds no field.
+- The router still does not rip up, route multi-layer inner copper, or use
+  arbitrary angles, curves or arcs. Keepout avoidance therefore appears as an
+  orthogonal fallback or an unrouted edge when no candidate circumvents the
+  region. Chamfered segments are ordinary tracks, so DRC and clearance checks
+  read them exactly like orthogonal copper.
 - Net-class routing is opt-in. With `useNetClasses` (CLI `--netclass`) each net
   uses its declared class width, clearance and via diameter; a missing class or
   class field falls back to the explicit option and then to the built-in
