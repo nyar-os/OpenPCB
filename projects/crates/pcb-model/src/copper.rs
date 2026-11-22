@@ -67,6 +67,44 @@ pub(crate) fn zones(board: &Board) -> Value {
     })
 }
 
+/// Builds the routed net-length report of one board.
+///
+/// Only nets declared in the document are listed, in declaration order. A net
+/// with no copper reports zeros. Copper without a declared net is not reported.
+/// Tracks are straight segments, so each length is the exact sum of its segment
+/// lengths in document units; vias are counted, not measured.
+pub(crate) fn net_lengths(board: &Board) -> Value {
+    let mut nets: Vec<Value> = Vec::with_capacity(board.nets.len());
+    let mut total_tracks = 0usize;
+    let mut total_length = 0.0;
+    let mut total_vias = 0usize;
+    for net in &board.nets {
+        let tracks: Vec<&crate::board::Track> =
+            board.tracks.iter().filter(|track| track.net.as_deref() == Some(net.name.as_str())).collect();
+        let vias = board.vias.iter().filter(|via| via.net.as_deref() == Some(net.name.as_str())).count();
+        let length: f64 = tracks.iter().map(|track| (track.to[0] - track.from[0]).hypot(track.to[1] - track.from[1])).sum();
+        total_tracks += tracks.len();
+        total_length += length;
+        total_vias += vias;
+        nets.push(json!({
+            "name": net.name,
+            "tracks": tracks.len(),
+            "length": round6(length),
+            "vias": vias,
+        }));
+    }
+    json!({
+        "report": "open-pcb-net-lengths",
+        "revision": board.revision,
+        "nets": nets,
+        "totals": {
+            "tracks": total_tracks,
+            "length": round6(total_length),
+            "vias": total_vias,
+        },
+    })
+}
+
 /// Builds the copper area and balance report of one board.
 pub(crate) fn report(board: &Board) -> Value {
     let scale = board.millimetres();

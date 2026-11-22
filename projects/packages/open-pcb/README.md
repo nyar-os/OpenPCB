@@ -59,7 +59,8 @@ Every board exposes `id`, `revision`, `summary`, `canUndo` and `canRedo`, plus:
   `addKeepout`, `updateKeepout`, `deleteKeepout`, `addText`, `updateText`,
   `deleteText`, `listTexts`, `addTeardrops`, `stitchVias`.
 - **Routing:** `route(options?)`.
-- **Reports:** `zoneReport`, `keepoutReport`, `drillReport`, `copperBalance`.
+- **Reports:** `zoneReport`, `keepoutReport`, `drillReport`, `copperBalance`,
+  `netLengths`.
 - **Rules, stackup and impedance:** `setRules`, `setStackup`, `impedance`,
   `impedanceWidth`, `impedanceTable`.
 - **Test points and policy:** `addTestPoint`, `deleteTestPoint`, `addWaiver`,

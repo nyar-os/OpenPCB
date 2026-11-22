@@ -55,6 +55,7 @@ import type {
     KicadImportOptions,
     KicadImportResult,
     MoveFootprintOptions,
+    NetLengthsReport,
     OpenPCBOptions,
     OutlineGeometryOptions,
     OutlineGeometryReport,
@@ -663,6 +664,10 @@ function attach(
         async copperBalance(): Promise<CopperBalanceReport> {
             ensure();
             return service.copperBalance(handle);
+        },
+        async netLengths(): Promise<NetLengthsReport> {
+            ensure();
+            return service.netLengths(handle);
         },
         async panelize(options: PanelizeOptions): Promise<PanelizeReport> {
             ensure();

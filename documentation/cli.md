@@ -284,6 +284,7 @@ open-pcb stitch <file> --net <name> --spacing <mm> [--inset <mm>]
     [--diameter <mm>] [--drill <mm>]
 open-pcb copper balance <file>
 open-pcb drill report <file>
+open-pcb lengths <file>
 ```
 
 `route` defaults to width 0.25, clearance 0.2 and via diameter 0.6. `teardrop`
@@ -291,6 +292,8 @@ implements `linear` only. `stitch` requires a net and a positive spacing and
 reports how many vias it placed and skipped. `copper balance` prints per-layer
 area, coverage when an outline exists, and the imbalance between copper sides.
 `drill report` prints hole count, slot count, tool count and back-drilled count.
+`lengths` prints one entry per declared net with its track count, summed track
+centreline length in document units and via count, plus the totals.
 
 ```bash
 open-pcb route board.opcb --net VCC --width 0.25

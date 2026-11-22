@@ -722,6 +722,14 @@ fn board_copper_balance(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Reports routed copper length per declared net.
+#[function]
+fn board_net_lengths(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::net_lengths(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Builds the panelization report of one open board.
 #[function]
 fn board_panelize(ctx: CallContext) -> Result<JsValue> {
@@ -1526,6 +1534,7 @@ register_module![
     stackup_width,
     stackup_impedance_table,
     board_copper_balance,
+    board_net_lengths,
     board_panelize,
     board_outline_geometry,
     board_list,

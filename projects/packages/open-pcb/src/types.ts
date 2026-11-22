@@ -260,6 +260,31 @@ export interface CopperBalanceReport {
     readonly imbalancePercent: number | null;
 }
 
+/** One declared net in the routed-length report. Lengths use document units. */
+export interface NetLengthEntry {
+    readonly name: string;
+    readonly tracks: number;
+    /** Summed track centreline length, in document units. */
+    readonly length: number;
+    readonly vias: number;
+}
+
+/** Totals across every declared net in the routed-length report. */
+export interface NetLengthTotals {
+    readonly tracks: number;
+    /** Summed track centreline length, in document units. */
+    readonly length: number;
+    readonly vias: number;
+}
+
+/** Result of `board.netLengths()`. */
+export interface NetLengthsReport {
+    readonly report: 'open-pcb-net-lengths';
+    readonly revision: number;
+    readonly nets: readonly NetLengthEntry[];
+    readonly totals: NetLengthTotals;
+}
+
 /** One copper pour area entry of a layer. */
 export interface ZoneAreaLayer {
     readonly layer: LayerId;
@@ -516,6 +541,8 @@ export interface BoardCapabilities {
     readonly slots: SupportLevel;
     /** Whether a copper area and balance report can be produced. */
     readonly copperBalance: SupportLevel;
+    /** Whether a routed copper length report per declared net can be produced. */
+    readonly netLengths: SupportLevel;
     /** Whether a rectangular board can be arrayed into a panel with seams or tabs. */
     readonly panelization: SupportLevel;
     /** Whether a polygonal board outline can be validated, measured and offset. */
@@ -1331,6 +1358,7 @@ export interface Board {
     impedanceWidth(options: ImpedanceWidthOptions): Promise<ImpedanceWidthReport>;
     impedanceTable(options?: ImpedanceTableOptions): Promise<ImpedanceTableReport>;
     copperBalance(): Promise<CopperBalanceReport>;
+    netLengths(): Promise<NetLengthsReport>;
     panelize(options: PanelizeOptions): Promise<PanelizeReport>;
     addWaiver(options: AddWaiverOptions): Promise<BoardEditResult>;
     deleteWaiver(id: ObjectId): Promise<BoardEditResult>;

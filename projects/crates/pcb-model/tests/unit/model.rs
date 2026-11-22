@@ -23,10 +23,10 @@ use crate::{
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
     delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver, delete_zone,
-    drill_report, export, impedance_table, import, inspect, keepout_report, list_texts, move_footprint, open, outline_geometry,
-    panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, split_track,
-    stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_keepout, update_layer,
-    update_slot, update_text, update_track, update_via, update_zone, zone_report,
+    drill_report, export, impedance_table, import, inspect, keepout_report, list_texts, move_footprint, net_lengths, open,
+    outline_geometry, panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill,
+    split_track, stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_keepout,
+    update_layer, update_slot, update_text, update_track, update_via, update_zone, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -4651,4 +4651,65 @@ fn linear_teardrops_materialise_without_drc_false_positives() {
     assert_eq!(third["object"]["tracks"], 0);
     assert_eq!(third["object"]["skipped"], 4);
     close(reopened).expect("the reopened board closes");
+}
+
+#[test]
+fn net_lengths_sum_track_segments_and_count_vias() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("VCC is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("GND is declared");
+    add_net(handle, AddNetRequest { name: "SPARE".to_string() }).expect("SPARE is declared");
+
+    // A 3-4-5 right triangle followed by a 2 mm continuation: 5 + 2 = 7 mm.
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("VCC".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [0.0, 0.0],
+            to: [3.0, 4.0],
+        },
+    )
+    .expect("the 3-4-5 segment is routed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("VCC".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [3.0, 4.0],
+            to: [5.0, 4.0],
+        },
+    )
+    .expect("the second segment is routed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [3.0, 4.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+    add_track(
+        handle,
+        AddTrackRequest { net: None, layer: "F.Cu".to_string(), width: 0.25, from: [0.0, 10.0], to: [10.0, 10.0] },
+    )
+    .expect("copper without a net is routed");
+
+    let report = net_lengths(handle).expect("the report is produced");
+    assert_eq!(report["report"], "open-pcb-net-lengths");
+    let nets = report["nets"].as_array().expect("nets is an array");
+    assert_eq!(nets.len(), 3, "only declared nets are listed");
+    assert_eq!(nets[0]["name"], "VCC");
+    assert_eq!(nets[0]["tracks"], 2);
+    assert_eq!(nets[0]["length"], 7.0);
+    assert_eq!(nets[0]["vias"], 1);
+    assert_eq!(nets[1]["name"], "GND");
+    assert_eq!(nets[1]["tracks"], 0);
+    assert_eq!(nets[1]["length"], 0.0);
+    assert_eq!(nets[1]["vias"], 0);
+    assert_eq!(nets[2]["name"], "SPARE");
+    assert_eq!(nets[2]["length"], 0.0);
+    assert_eq!(report["totals"]["tracks"], 2);
+    assert_eq!(report["totals"]["length"], 7.0);
+    assert_eq!(report["totals"]["vias"], 1);
+    close(handle).expect("the board closes");
 }

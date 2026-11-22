@@ -215,6 +215,7 @@ pub fn capabilities() -> Value {
         "viaStitching": "supported",
         "slots": "supported",
         "copperBalance": "supported",
+        "netLengths": "supported",
         "zoneReport": "supported",
         "drillReport": "supported",
         "panelization": "supported",
@@ -1044,6 +1045,16 @@ pub fn copper_balance(handle: u64) -> Result<Value, ServiceError> {
 /// Reports the area and perimeter of every copper pour region.
 pub fn zone_report(handle: u64) -> Result<Value, ServiceError> {
     store::read(handle, copper::zones)
+}
+
+/// Reports routed copper length per declared net.
+///
+/// Nets are listed in document order. Each entry carries the track count, the
+/// summed centreline length in document units and the via count; a declared net
+/// without copper reports zeros. Tracks are straight segments, so the summed
+/// length is exact, and copper without a declared net is not listed.
+pub fn net_lengths(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, copper::net_lengths)
 }
 
 /// Reports the drill tools, holes and slots of one open board.

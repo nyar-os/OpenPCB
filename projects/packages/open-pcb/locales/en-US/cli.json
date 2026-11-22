@@ -84,6 +84,7 @@
             "severity-delete": "Remove the severity override of one finding code",
             "copper": "Report copper area and layer balance",
             "copper-balance": "Print copper area per layer and the coverage imbalance",
+            "lengths": "Report routed copper length per declared net",
             "gui": "Open the OpenPCB Studio window on the native board"
         },
         "opt": {

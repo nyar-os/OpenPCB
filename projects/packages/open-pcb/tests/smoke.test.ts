@@ -158,6 +158,7 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.routing, 'supported');
     assert.equal(matrix.texts, 'supported');
     assert.equal(matrix.zoneReport, 'supported');
+    assert.equal(matrix.netLengths, 'supported');
     assert.equal(matrix.drillReport, 'supported');
     assert.equal(matrix.exportTargets.drl, 'supported');
     assert.equal(matrix.exportTargets.gbr, 'supported');
@@ -195,6 +196,10 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         assert.equal(rules.board.rules.componentToEdge, 0.25, 'untouched rules keep their value');
         await board.addTrack({ net: 'VCC', layer: 'F.Cu', width: 0.25, from: [10, 10], to: [30, 10] });
         await board.addVia({ net: 'VCC', at: [20, 20], diameter: 0.6, drill: 0.3 });
+        const lengths = await board.netLengths();
+        assert.equal(lengths.report, 'open-pcb-net-lengths');
+        assert.deepEqual(lengths.nets, [{ name: 'VCC', tracks: 1, length: 20, vias: 1 }]);
+        assert.deepEqual(lengths.totals, { tracks: 1, length: 20, vias: 1 });
         await board.setOutline({ from: [0, 0], to: [100, 80] });
         assert.equal(board.canUndo, true);
 
@@ -659,6 +664,7 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         );
         run('track', 'add', document, '--net', 'VCC', '--layer', 'F.Cu', '--from', '10,10', '--to', '30,10', '--width', '0.25');
         run('via', 'add', document, '--net', 'VCC', '--at', '20,20', '--diameter', '0.6', '--drill', '0.3');
+        assert.match(run('lengths', document), /nets=1 total=20 VCC=20/);
         run('zone', 'add', document, '--layer', 'F.Cu', '--points', '0,0 10,0 10,10 0,10');
         run('zone', 'update', document, '--id', 'zone-1', '--points', '0,0 20,0 20,10 0,10');
         assert.match(run('zone', 'list', document), /zones=1 total=200mm2 F\.Cu=200mm2/);

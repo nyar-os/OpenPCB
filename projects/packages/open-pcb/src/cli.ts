@@ -1974,6 +1974,21 @@ copper.command('balance', 'cli.cmd.copper-balance').actionCtx(async (options, _a
     return 0;
 });
 
+cli.command('lengths', 'cli.cmd.lengths').actionCtx(async (options, _args, ctx) => {
+    const file = input(options);
+    if (file === undefined) {
+        ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+        return 2;
+    }
+    await withBoard(file, async (board) => {
+        const report = await board.netLengths();
+        const nets = report.nets.map((net) => `${net.name}=${net.length}`).join(' ') || 'none';
+        ctx.emitResult(report, `nets=${report.nets.length} total=${report.totals.length} ${nets}`);
+        return 0;
+    });
+    return 0;
+});
+
 const waiver = cli.command('waiver', 'cli.cmd.waiver');
 waiver
     .command('add', 'cli.cmd.waiver-add')

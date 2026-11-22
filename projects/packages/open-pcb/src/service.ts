@@ -45,6 +45,7 @@ import type {
     InspectReport,
     KeepoutAreaReport,
     MoveFootprintOptions,
+    NetLengthsReport,
     OutlineGeometryOptions,
     OutlineGeometryReport,
     PanelizeOptions,
@@ -454,6 +455,11 @@ export function outlineGeometry(handle: number, options: OutlineGeometryOptions)
 /** Reports copper area per layer and the coverage imbalance across them. */
 export function copperBalance(handle: number): CopperBalanceReport {
     return decode<CopperBalanceReport>(() => binding('board.copperBalance').board_copper_balance(handle));
+}
+
+/** Reports routed copper length per declared net. */
+export function netLengths(handle: number): NetLengthsReport {
+    return decode<NetLengthsReport>(() => binding('board.netLengths').board_net_lengths(handle));
 }
 
 /** Builds the panelization report of one open board. */

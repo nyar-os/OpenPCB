@@ -82,6 +82,7 @@ via-in-pad
 | Via stitching | `supported` |
 | Plated routed slots and the drill report | `supported` |
 | Copper area and balance report | `supported` |
+| Routed net-length report (`lengths`, `Board.netLengths`) | `supported` |
 | Panelization (`Board.panelize`, SDK only) | `supported` |
 | Polygon outline geometry (`Board.outlineGeometry`, SDK only) | `supported` |
 | Net classes | `supported` |
@@ -209,6 +210,10 @@ stay in the ledger instead of being approximated.
 ### Checks and policy
 
 - `via-in-pad` is a manufacturability warning, not an electrical error.
+- The net-length report sums straight track segments in document units, so a
+  routed net reports its exact centreline length. It counts the vias assigned to
+  a net without measuring their barrels, lists only declared nets, and reports
+  zeros for a declared net with no copper.
 - The copper balance report sums feature areas, so overlapping copper counts once
   per feature rather than once as a union. Coverage and imbalance need a
   rectangular outline; without one the report still lists per-layer areas.
