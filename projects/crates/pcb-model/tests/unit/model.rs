@@ -5095,6 +5095,112 @@ fn diffpair_check_reports_length_and_spacing_deviation() {
 }
 
 #[test]
+fn diffpair_check_infers_pairs_from_net_names() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "CLK_P".to_string() }).expect("the positive net is declared");
+    add_net(handle, AddNetRequest { name: "CLK_N".to_string() }).expect("the negative net is declared");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("CLK_P".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [0.0, 0.0],
+            to: [10.0, 0.0],
+        },
+    )
+    .expect("the positive half is routed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("CLK_N".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [0.0, 1.0],
+            to: [10.0, 1.0],
+        },
+    )
+    .expect("the negative half is routed");
+
+    let matched = inspect(handle, Some(vec!["diffpair".to_string()])).expect("the check runs");
+    assert_eq!(codes(&matched), Vec::<&str>::new(), "equal halves pass without a declared pair");
+
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("CLK_P".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [10.0, 0.0],
+            to: [12.0, 0.0],
+        },
+    )
+    .expect("the positive half is extended");
+    let skewed = inspect(handle, Some(vec!["diffpair".to_string()])).expect("the check runs");
+    assert_eq!(codes(&skewed), ["drc/diffpair-skew"]);
+    let issue = &skewed["issues"][0];
+    assert_eq!(issue["severity"], "warning");
+    let message = issue["message"].as_str().expect("the finding has a message");
+    assert!(message.contains("CLK"), "the message names the base pair: {message}");
+    assert!(message.contains("12.000") && message.contains("10.000"), "the message carries both lengths: {message}");
+    assert!(message.contains("2.000"), "the message carries the skew: {message}");
+    assert_eq!(issue["objectId"], "CLK", "the finding names the base pair");
+    close(handle).expect("the board closes");
+
+    let unpaired_handle = created();
+    for (net, x) in [("X_P", 0.0), ("Y_P", 2.0)] {
+        add_net(unpaired_handle, AddNetRequest { name: net.to_string() }).expect("the lone net is declared");
+        add_track(
+            unpaired_handle,
+            AddTrackRequest { net: Some(net.to_string()), layer: "F.Cu".to_string(), width: 0.2, from: [0.0, x], to: [5.0, x] },
+        )
+        .expect("the lone net is routed");
+    }
+    let unpaired = inspect(unpaired_handle, Some(vec!["diffpair".to_string()])).expect("the check runs");
+    assert_eq!(codes(&unpaired), ["drc/diffpair-unpaired", "drc/diffpair-unpaired"]);
+    let messages: Vec<&str> = unpaired["issues"]
+        .as_array()
+        .expect("issues is an array")
+        .iter()
+        .filter_map(|issue| issue["message"].as_str())
+        .collect();
+    assert!(messages.iter().any(|message| message.contains("X_P")), "the message names the unpaired net: {messages:?}");
+    assert!(messages.iter().any(|message| message.contains("Y_P")), "one finding per unpaired net: {messages:?}");
+    close(unpaired_handle).expect("the board closes");
+
+    let plus_handle = created();
+    add_net(plus_handle, AddNetRequest { name: "RX+".to_string() }).expect("the positive net is declared");
+    add_net(plus_handle, AddNetRequest { name: "RX-".to_string() }).expect("the negative net is declared");
+    for (net, y) in [("RX+", 0.0), ("RX-", 1.0)] {
+        add_track(
+            plus_handle,
+            AddTrackRequest { net: Some(net.to_string()), layer: "F.Cu".to_string(), width: 0.2, from: [0.0, y], to: [8.0, y] },
+        )
+        .expect("the suffixed net is routed");
+    }
+    let plus = inspect(plus_handle, Some(vec!["diffpair".to_string()])).expect("the check runs");
+    assert_eq!(codes(&plus), Vec::<&str>::new(), "`+` and `-` suffixes pair too");
+    close(plus_handle).expect("the board closes");
+
+    let plain_handle = created();
+    add_net(plain_handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    add_track(
+        plain_handle,
+        AddTrackRequest {
+            net: Some("GND".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [0.0, 0.0],
+            to: [5.0, 0.0],
+        },
+    )
+    .expect("the net is routed");
+    let plain = inspect(plain_handle, Some(vec!["diffpair".to_string()])).expect("the check runs");
+    assert_eq!(codes(&plain), Vec::<&str>::new(), "no differential networks means no diagnostics");
+    close(plain_handle).expect("the board closes");
+}
+
+#[test]
 fn dangling_copper_reports_loose_track_ends_only() {
     let handle = created();
     add_net(handle, AddNetRequest { name: "SIG".to_string() }).expect("the net is declared");

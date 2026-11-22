@@ -4,7 +4,7 @@
 //! capability matrix. Requesting an unimplemented check reports a warning
 //! issue instead of a clean pass, so "not run" is never mistaken for "passed".
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use boost_check::{CheckReport, Issue, Severity};
 use boost_collection::UnionFind;
@@ -34,6 +34,9 @@ const TRACK_WIDTH_WARNING_MM: f64 = 0.15;
 const CONNECTIVITY_TOLERANCE_MM: f64 = 0.01;
 /// Slack allowed when comparing differential-pair geometry, in millimetres.
 const DIFFPAIR_TOLERANCE_MM: f64 = 0.01;
+/// Largest allowed routed-length difference inside a naming-inferred
+/// differential pair, in millimetres.
+const DIFFPAIR_SKEW_MM: f64 = 0.5;
 
 /// Every declared check, in report order.
 pub(crate) const CHECKS: &[&str] = &[
@@ -1414,19 +1417,28 @@ fn silkscreen_over_pad(board: &Board, issues: &mut CheckReport) {
     }
 }
 
-/// Compares each declared differential pair against its routing targets.
+/// Compares each declared differential pair against its routing targets, then
+/// infers further pairs from net names.
 ///
 /// Length is the sum of the routed copper segments of one net, straight-line
 /// per segment; via barrels are not counted. The spacing is the smallest
 /// edge-to-edge gap between a positive and a negative segment that share a
 /// layer. Both halves must be routed and share at least one layer before a
 /// measurement is claimed; otherwise the pair is reported as unrouted.
+///
+/// Nets that no declared pair covers are grouped by a shared base name with a
+/// `_P`/`_N` or `+`/`-` suffix. Both halves must be routed before their skew is
+/// measured against [`DIFFPAIR_SKEW_MM`]; a half without a counterpart is
+/// reported as unpaired.
 fn diffpair(board: &Board, issues: &mut CheckReport) {
     let scale = board.millimetres();
     if scale <= 0.0 {
         return;
     }
+    let mut declared = HashSet::new();
     for pair in &board.differential_pairs {
+        declared.insert(pair.positive.as_str());
+        declared.insert(pair.negative.as_str());
         let positive: Vec<_> =
             board.tracks.iter().filter(|track| track.net.as_deref() == Some(pair.positive.as_str())).collect();
         let negative: Vec<_> =
@@ -1522,6 +1534,119 @@ fn diffpair(board: &Board, issues: &mut CheckReport) {
             ));
         }
     }
+
+    diffpair_by_name(board, &declared, scale, issues);
+}
+
+/// Polarity of one half of a naming-inferred differential pair.
+#[derive(Clone, Copy)]
+enum PairPolarity {
+    /// `_P` or `+` suffix.
+    Positive,
+    /// `_N` or `-` suffix.
+    Negative,
+}
+
+/// Splits one net name into its pair base name and polarity.
+fn diffpair_member(name: &str) -> Option<(&str, PairPolarity)> {
+    if let Some(base) = name.strip_suffix("_P")
+        && !base.is_empty()
+    {
+        return Some((base, PairPolarity::Positive));
+    }
+    if let Some(base) = name.strip_suffix("_N")
+        && !base.is_empty()
+    {
+        return Some((base, PairPolarity::Negative));
+    }
+    if let Some(base) = name.strip_suffix('+')
+        && !base.is_empty()
+    {
+        return Some((base, PairPolarity::Positive));
+    }
+    if let Some(base) = name.strip_suffix('-')
+        && !base.is_empty()
+    {
+        return Some((base, PairPolarity::Negative));
+    }
+    None
+}
+
+/// Groups naming-inferred pairs by base name, in sorted order.
+#[derive(Default)]
+struct NamedPair<'a> {
+    positive: Option<&'a str>,
+    negative: Option<&'a str>,
+}
+
+/// Reports skew and unpaired halves of pairs inferred from net names.
+///
+/// Nets already covered by a declared pair are skipped so one board never
+/// reports the same pair twice. Groups are visited in base-name order, which
+/// keeps the report deterministic.
+fn diffpair_by_name(board: &Board, declared: &HashSet<&str>, scale: f64, issues: &mut CheckReport) {
+    let mut groups: BTreeMap<&str, NamedPair<'_>> = BTreeMap::new();
+    for net in &board.nets {
+        let name = net.name.as_str();
+        if declared.contains(name) {
+            continue;
+        }
+        let Some((base, polarity)) = diffpair_member(name)
+        else {
+            continue;
+        };
+        let group = groups.entry(base).or_default();
+        match polarity {
+            PairPolarity::Positive => group.positive = group.positive.or(Some(name)),
+            PairPolarity::Negative => group.negative = group.negative.or(Some(name)),
+        }
+    }
+
+    for (base, group) in &groups {
+        match (group.positive, group.negative) {
+            (Some(positive), Some(negative)) => {
+                let positive_length = net_track_length(board, positive, scale);
+                let negative_length = net_track_length(board, negative, scale);
+                if positive_length <= 0.0 || negative_length <= 0.0 {
+                    for (name, length) in [(positive, positive_length), (negative, negative_length)] {
+                        if length <= 0.0 {
+                            issues.push(finding(
+                                "drc/diffpair-unpaired",
+                                Severity::Warning,
+                                board,
+                                None,
+                                Some(name),
+                                format!("differential pair net `{name}` has no routed track to pair on `{base}`"),
+                            ));
+                        }
+                    }
+                    continue;
+                }
+                let skew = (positive_length - negative_length).abs();
+                if skew > DIFFPAIR_SKEW_MM {
+                    issues.push(finding(
+                        "drc/diffpair-skew",
+                        Severity::Warning,
+                        board,
+                        None,
+                        Some(*base),
+                        format!(
+                            "differential pair `{base}` is skewed by {skew:.3} mm ({positive} {positive_length:.3} mm versus {negative} {negative_length:.3} mm); the limit is {DIFFPAIR_SKEW_MM:.3} mm"
+                        ),
+                    ));
+                }
+            }
+            (Some(only), None) | (None, Some(only)) => issues.push(finding(
+                "drc/diffpair-unpaired",
+                Severity::Warning,
+                board,
+                None,
+                Some(only),
+                format!("differential pair net `{only}` has no counterpart on `{base}`"),
+            )),
+            (None, None) => {}
+        }
+    }
 }
 
 /// Total routed length of one net's segments, in board units.
@@ -1533,6 +1658,16 @@ fn pair_length(tracks: &[&crate::board::Track]) -> f64 {
             let dy = track.to[1] - track.from[1];
             (dx * dx + dy * dy).sqrt()
         })
+        .sum()
+}
+
+/// Total routed length of one named net, in millimetres.
+fn net_track_length(board: &Board, net: &str, scale: f64) -> f64 {
+    board
+        .tracks
+        .iter()
+        .filter(|track| track.net.as_deref() == Some(net))
+        .map(|track| (track.to[0] - track.from[0]).hypot(track.to[1] - track.from[1]) * scale)
         .sum()
 }
 

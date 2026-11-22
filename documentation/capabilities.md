@@ -61,6 +61,12 @@ via-in-pad       testpoints
 
 `annular_rings` and `annular-ring` are both accepted spellings.
 
+`diffpair` compares declared pairs against their width, gap and skew targets and
+also infers pairs from net names for nets that no declared pair covers. Two nets
+form an inferred pair when they share a base name and end in `_P`/`_N` or
+`+`/`-`; skew above 0.5 mm warns `drc/diffpair-skew`, and a half without a
+counterpart warns `drc/diffpair-unpaired`.
+
 ## Feature matrix
 
 | Capability | Level |
@@ -245,6 +251,10 @@ being approximated.
 ### Checks and policy
 
 - `via-in-pad` is a manufacturability warning, not an electrical error.
+- `diffpair` infers pairs from net naming only: one shared base name with `_P`
+  and `_N` (or `+` and `-`). Length is the sum of straight track segments, so
+  via barrels and copper inside pads are not counted. An inferred pair uses the
+  fixed 0.5 mm skew limit because it has no declared target.
 - The net-length report sums straight track segments in document units, so a
   routed net reports its exact centreline length. It counts the vias assigned to
   a net without measuring their barrels, lists only declared nets, and reports
