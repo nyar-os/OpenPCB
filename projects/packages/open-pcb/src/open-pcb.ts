@@ -22,6 +22,7 @@ import type {
     AddLayerOptions,
     AddNetClassOptions,
     AddNetOptions,
+    AddPadInput,
     AddSlotOptions,
     AddTrackOptions,
     AddViaOptions,
@@ -37,6 +38,7 @@ import type {
     BoardInput,
     BoardSummary,
     CopperBalanceReport,
+    DeletePadInput,
     ExportOptions,
     ExportReport,
     ImpedanceOptions,
@@ -67,6 +69,7 @@ import type {
     StitchViasOptions,
     UpdateFootprintOptions,
     UpdateLayerOptions,
+    UpdatePadInput,
 } from './types.js';
 
 /** Sidecar surface consumed by a board; provided only in `history: 'sidecar'` sessions. */
@@ -422,6 +425,18 @@ function attach(
         async updateFootprint(options: UpdateFootprintOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.updateFootprint(current, options));
+        },
+        async addPad(input: AddPadInput): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addPad(current, input));
+        },
+        async updatePad(input: UpdatePadInput): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.updatePad(current, input));
+        },
+        async deletePad(input: DeletePadInput): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deletePad(current, input));
         },
         async addTrack(options: AddTrackOptions): Promise<BoardEditResult> {
             ensure();

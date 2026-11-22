@@ -160,6 +160,39 @@ fn board_delete_footprint(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Adds one pad to a footprint on an open board.
+#[function]
+fn board_add_pad(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::AddPadRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::add_pad(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Updates the geometry or net of one pad on an open board.
+#[function]
+fn board_update_pad(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::UpdatePadRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::update_pad(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Deletes one pad from a footprint on an open board.
+#[function]
+fn board_delete_pad(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::DeletePadRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::delete_pad(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds one track to an open board.
 #[function]
 fn board_add_track(ctx: CallContext) -> Result<JsValue> {
@@ -1263,6 +1296,9 @@ register_module![
     board_close,
     board_add_footprint,
     board_delete_footprint,
+    board_add_pad,
+    board_update_pad,
+    board_delete_pad,
     board_add_track,
     board_add_via,
     board_stitch_vias,

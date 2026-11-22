@@ -23,6 +23,9 @@ export interface NativeBinding {
     board_close(handle: number): boolean;
     board_add_footprint(handle: number, requestJson: string): string;
     board_delete_footprint(handle: number, id: string): string;
+    board_add_pad(handle: number, requestJson: string): string;
+    board_update_pad(handle: number, requestJson: string): string;
+    board_delete_pad(handle: number, requestJson: string): string;
     board_add_track(handle: number, requestJson: string): string;
     board_add_via(handle: number, requestJson: string): string;
     board_add_slot(handle: number, requestJson: string): string;

@@ -10,6 +10,7 @@ The TypeScript surface is wired to the shared native model. `new
 OpenPCB(options?)` creates a session; `create` and `open` return an editable
 `Board` with `inspect`, `save`, `export`, `close`, `undo`, `redo`,
 `addFootprint`, `moveFootprint`, `updateFootprint`, `deleteFootprint`,
+`addPad`, `updatePad`, `deletePad`,
 `addTrack`, `deleteTrack`, `addVia`, `deleteVia`, `addZone`, `deleteZone`,
 `addNetClass`, `deleteNetClass`, `assignNetClass`, `addTestPoint`,
 `deleteTestPoint`, `addNet`, `route`, `addLayer`,

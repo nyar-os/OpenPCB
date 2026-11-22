@@ -17,6 +17,7 @@ import type {
     AddLayerOptions,
     AddNetClassOptions,
     AddNetOptions,
+    AddPadInput,
     AddSlotOptions,
     AddTrackOptions,
     AddViaOptions,
@@ -28,6 +29,7 @@ import type {
     BoardEditResult,
     BoardSummary,
     CopperBalanceReport,
+    DeletePadInput,
     ExportReport,
     ExportTarget,
     ImportReport,
@@ -55,6 +57,7 @@ import type {
     SetViaBackDrillOptions,
     UpdateFootprintOptions,
     UpdateLayerOptions,
+    UpdatePadInput,
 } from './types.js';
 
 /** Result of creating or opening a board. */
@@ -165,6 +168,21 @@ export function addFootprint(handle: number, options: AddFootprintOptions): Boar
 /** Deletes one footprint from an open board. */
 export function deleteFootprint(handle: number, id: string): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.deleteFootprint').board_delete_footprint(handle, id));
+}
+
+/** Adds one pad to a footprint on an open board. */
+export function addPad(handle: number, input: AddPadInput): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.addPad').board_add_pad(handle, JSON.stringify(input)));
+}
+
+/** Updates the geometry or net of one pad on an open board. */
+export function updatePad(handle: number, input: UpdatePadInput): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.updatePad').board_update_pad(handle, JSON.stringify(input)));
+}
+
+/** Deletes one pad from a footprint on an open board. */
+export function deletePad(handle: number, input: DeletePadInput): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deletePad').board_delete_pad(handle, JSON.stringify(input)));
 }
 
 /** Adds one track to an open board. */

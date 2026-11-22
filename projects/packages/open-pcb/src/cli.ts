@@ -478,6 +478,158 @@ footprint
         return 0;
     });
 
+const pad = footprint.command('pad', 'cli.cmd.footprint-pad');
+pad.command('add', 'cli.cmd.footprint-pad-add')
+    .option('--footprint <id>', 'cli.opt.footprint-id')
+    .option('--number <n>', 'cli.opt.pad-number')
+    .option('--x <mm>', 'cli.opt.x')
+    .option('--y <mm>', 'cli.opt.y')
+    .option('--w <mm>', 'cli.opt.w')
+    .option('--h <mm>', 'cli.opt.h')
+    .option('--net <name>', 'cli.opt.net')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const footprintId = text(options, 'footprint');
+        const padNumber = text(options, 'number');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (footprintId === undefined || footprintId.length === 0) {
+            ctx.fail('open-pcb.cli.footprint-required', { message: '`--footprint <id>` is required' });
+            return 2;
+        }
+        if (padNumber === undefined || padNumber.length === 0) {
+            ctx.fail('open-pcb.cli.number-required', { message: '`--number <n>` is required' });
+            return 2;
+        }
+        const x = numberOption(text(options, 'x'));
+        const y = numberOption(text(options, 'y'));
+        const w = numberOption(text(options, 'w'));
+        const h = numberOption(text(options, 'h'));
+        if (x === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--x <mm>` must be a finite number' });
+            return 2;
+        }
+        if (y === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--y <mm>` must be a finite number' });
+            return 2;
+        }
+        if (w === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--w <mm>` must be a finite number' });
+            return 2;
+        }
+        if (h === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--h <mm>` must be a finite number' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addPad({
+                footprint: footprintId,
+                number: padNumber,
+                x,
+                y,
+                w,
+                h,
+                net: text(options, 'net'),
+            });
+            ctx.emitResult(result, `added pad ${footprintId}:${padNumber}`);
+            return 0;
+        });
+        return 0;
+    });
+
+pad.command('update', 'cli.cmd.footprint-pad-update')
+    .option('--footprint <id>', 'cli.opt.footprint-id')
+    .option('--number <n>', 'cli.opt.pad-number')
+    .option('--x <mm>', 'cli.opt.x')
+    .option('--y <mm>', 'cli.opt.y')
+    .option('--w <mm>', 'cli.opt.w')
+    .option('--h <mm>', 'cli.opt.h')
+    .option('--net <name>', 'cli.opt.net')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const footprintId = text(options, 'footprint');
+        const padNumber = text(options, 'number');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (footprintId === undefined || footprintId.length === 0) {
+            ctx.fail('open-pcb.cli.footprint-required', { message: '`--footprint <id>` is required' });
+            return 2;
+        }
+        if (padNumber === undefined || padNumber.length === 0) {
+            ctx.fail('open-pcb.cli.number-required', { message: '`--number <n>` is required' });
+            return 2;
+        }
+        const x = numberOption(text(options, 'x'));
+        const y = numberOption(text(options, 'y'));
+        const w = numberOption(text(options, 'w'));
+        const h = numberOption(text(options, 'h'));
+        if (text(options, 'x') !== undefined && x === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--x <mm>` must be a finite number' });
+            return 2;
+        }
+        if (text(options, 'y') !== undefined && y === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--y <mm>` must be a finite number' });
+            return 2;
+        }
+        if (text(options, 'w') !== undefined && w === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--w <mm>` must be a finite number' });
+            return 2;
+        }
+        if (text(options, 'h') !== undefined && h === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--h <mm>` must be a finite number' });
+            return 2;
+        }
+        if (x === undefined && y === undefined && w === undefined && h === undefined && text(options, 'net') === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: 'an update needs `--x`, `--y`, `--w`, `--h` or `--net`' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.updatePad({
+                footprint: footprintId,
+                number: padNumber,
+                x,
+                y,
+                w,
+                h,
+                net: text(options, 'net'),
+            });
+            ctx.emitResult(result, `updated pad ${footprintId}:${padNumber}`);
+            return 0;
+        });
+        return 0;
+    });
+
+pad.command('delete', 'cli.cmd.footprint-pad-delete')
+    .option('--footprint <id>', 'cli.opt.footprint-id')
+    .option('--number <n>', 'cli.opt.pad-number')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const footprintId = text(options, 'footprint');
+        const padNumber = text(options, 'number');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (footprintId === undefined || footprintId.length === 0) {
+            ctx.fail('open-pcb.cli.footprint-required', { message: '`--footprint <id>` is required' });
+            return 2;
+        }
+        if (padNumber === undefined || padNumber.length === 0) {
+            ctx.fail('open-pcb.cli.number-required', { message: '`--number <n>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deletePad({ footprint: footprintId, number: padNumber });
+            ctx.emitResult(result, `deleted pad ${footprintId}:${result.deleted ?? padNumber}`);
+            return 0;
+        });
+        return 0;
+    });
+
 const track = cli.command('track', 'cli.cmd.track');
 track
     .command('add', 'cli.cmd.track-add')

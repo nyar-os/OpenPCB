@@ -16,7 +16,7 @@ Implemented:
 - Create, open, save, list, inspect, export, undo, redo and close a board.
 - Add nets, footprints, pads, tracks, vias and plated routed slots; record a
   back-drill depth and remaining stub on a through via; move, update and delete
-  footprints; delete tracks, vias and slots.
+  footprints; add, update and delete their pads; delete tracks, vias and slots.
 - Add, rename, hide and lock layers; set a rectangular outline.
 - Report copper area per copper layer (`copper balance`) from tracks, vias, pads
   and pours, plus each layer's coverage and the imbalance across layers.
@@ -141,6 +141,9 @@ a format, check or target.
 | `open-pcb footprint move <file.opcb> --id <id> -x <mm> -y <mm> --rotation <deg> --layer <layer>` | Move, rotate or re-layer a footprint in place. `-x` and `-y` also accept the `--x` and `--y` spelling; `--layer` is optional. |
 | `open-pcb footprint update <file.opcb> --id <id> --value <value> --footprint <package>` | Update the value or package of a footprint. |
 | `open-pcb footprint delete <file.opcb> --id <id>` | Delete a footprint by its stable id. |
+| `open-pcb footprint pad add <file.opcb> --footprint <id> --number <n> --x <mm> --y <mm> --w <mm> --h <mm> [--net <name>]` | Add a pad to a footprint. |
+| `open-pcb footprint pad update <file.opcb> --footprint <id> --number <n> [--x <mm>] [--y <mm>] [--w <mm>] [--h <mm>] [--net <name>]` | Update the geometry or net of a pad; at least one field is required. |
+| `open-pcb footprint pad delete <file.opcb> --footprint <id> --number <n>` | Delete a pad from a footprint. |
 | `open-pcb track add <file.opcb> --net <name> --layer <layer> --from <x,y> --to <x,y> --width <mm>` | Route one track segment in place. |
 | `open-pcb track delete <file.opcb> --id <id>` | Delete a track by id. |
 | `open-pcb via add <file.opcb> --net <name> --at <x,y> --diameter <mm> --drill <mm>` | Place a via in place. |

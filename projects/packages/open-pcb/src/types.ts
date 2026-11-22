@@ -638,6 +638,24 @@ export interface AddFootprintOptions {
     readonly layer?: string;
 }
 
+/** Input of `board.addPad()`. */
+export interface AddPadInput {
+    /** Footprint id that owns the pad, for example `fp-1`. */
+    readonly footprint: ObjectId;
+    /** Pad number or name, unique within the footprint. */
+    readonly number: string;
+    /** Pad centre, X, in board units. */
+    readonly x: number;
+    /** Pad centre, Y, in board units. */
+    readonly y: number;
+    /** Pad width, in board units. */
+    readonly w: number;
+    /** Pad height, in board units. */
+    readonly h: number;
+    /** Declared net name, when assigned. */
+    readonly net?: string;
+}
+
 /** Options of `board.addTrack()`. */
 export interface AddTrackOptions {
     /** Declared net name, when assigned. */
@@ -846,6 +864,32 @@ export interface UpdateFootprintOptions {
     readonly footprint?: string;
 }
 
+/** Input of `board.updatePad()`. At least one editable field is required. */
+export interface UpdatePadInput {
+    /** Footprint id that owns the pad, for example `fp-1`. */
+    readonly footprint: ObjectId;
+    /** Pad number or name to update. */
+    readonly number: string;
+    /** New pad centre, X, in board units. */
+    readonly x?: number;
+    /** New pad centre, Y, in board units. */
+    readonly y?: number;
+    /** New pad width, in board units. */
+    readonly w?: number;
+    /** New pad height, in board units. */
+    readonly h?: number;
+    /** New declared net name. */
+    readonly net?: string;
+}
+
+/** Input of `board.deletePad()`. */
+export interface DeletePadInput {
+    /** Footprint id that owns the pad, for example `fp-1`. */
+    readonly footprint: ObjectId;
+    /** Pad number or name to delete. */
+    readonly number: string;
+}
+
 /** Options of `board.addLayer()`. */
 export interface AddLayerOptions {
     /** Layer name, unique on the board and used as the layer id. */
@@ -966,6 +1010,9 @@ export interface Board {
     deleteFootprint(id: ObjectId): Promise<BoardEditResult>;
     moveFootprint(options: MoveFootprintOptions): Promise<BoardEditResult>;
     updateFootprint(options: UpdateFootprintOptions): Promise<BoardEditResult>;
+    addPad(input: AddPadInput): Promise<BoardEditResult>;
+    updatePad(input: UpdatePadInput): Promise<BoardEditResult>;
+    deletePad(input: DeletePadInput): Promise<BoardEditResult>;
     addTrack(options: AddTrackOptions): Promise<BoardEditResult>;
     deleteTrack(id: ObjectId): Promise<BoardEditResult>;
     addVia(options: AddViaOptions): Promise<BoardEditResult>;
