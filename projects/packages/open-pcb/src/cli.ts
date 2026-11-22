@@ -2283,6 +2283,19 @@ function differentialStructure(structure: ImpedanceStructure | undefined): boole
     return structure === 'diffMicrostrip' || structure === 'diffStripline';
 }
 
+/** Parses `a,b,...` into target impedances; an all-empty list stays empty for the model. */
+function impedanceTargets(raw: string | undefined): number[] | undefined {
+    if (raw === undefined) {
+        return undefined;
+    }
+    const parts = raw.split(',').map((part) => part.trim());
+    if (parts.every((part) => part.length === 0)) {
+        return [];
+    }
+    const values = parts.map((part) => Number(part));
+    return values.every((value) => Number.isFinite(value)) ? values : undefined;
+}
+
 stackup
     .command('impedance', 'cli.cmd.stackup-impedance')
     .option('--structure <microstrip|stripline|diffMicrostrip|diffStripline>', 'cli.opt.structure')
@@ -2394,6 +2407,47 @@ stackup
                     ? ''
                     : ` gap=${report.gap}mm odd=${report.oddImpedance}ohm even=${report.evenImpedance}ohm`;
             ctx.emitResult(report, `${report.structure} impedance=${report.impedance}ohm width=${report.width}mm${modes}`);
+            return 0;
+        });
+        return 0;
+    });
+
+stackup
+    .command('table', 'cli.cmd.stackup-table')
+    .option('--targets <ohms>', 'cli.opt.targets')
+    .option('--structure <microstrip|stripline|diffMicrostrip|diffStripline>', 'cli.opt.structure')
+    .option('--gap <mm>', 'cli.opt.gap')
+    .option('--dielectric-height <mm>', 'cli.opt.dielectric-height')
+    .option('--dielectric-constant <er>', 'cli.opt.dielectric-constant')
+    .option('--copper-thickness <mm>', 'cli.opt.copper-thickness')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        const rawTargets = text(options, 'targets');
+        const targets = impedanceTargets(rawTargets);
+        if (rawTargets !== undefined && targets === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', {
+                message: '`--targets <ohm,ohm,...>` must be a comma-separated list of numbers',
+            });
+            return 2;
+        }
+        if (text(options, 'gap') !== undefined && numberOption(text(options, 'gap')) === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--gap <mm>` must be a finite number' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.impedanceTable({
+                structure: text(options, 'structure') as ImpedanceStructure | undefined,
+                targets,
+                gap: numberOption(text(options, 'gap')),
+                dielectricHeight: numberOption(text(options, 'dielectric-height')),
+                dielectricConstant: numberOption(text(options, 'dielectric-constant')),
+                copperThickness: numberOption(text(options, 'copper-thickness')),
+            });
+            ctx.emitResult(report, JSON.stringify(report));
             return 0;
         });
         return 0;

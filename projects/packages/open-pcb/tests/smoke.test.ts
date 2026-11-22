@@ -872,6 +872,25 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
             run('stackup', 'width', document, '--structure', 'diffStripline', '--impedance', '90', '--gap', '0.2'),
             /diffStripline impedance=90ohm width=[\d.]+mm gap=0\.2mm/,
         );
+        const table = JSON.parse(
+            run('stackup', 'table', document, '--targets', '40,50', '--structure', 'microstrip'),
+        ) as { targets: number; rows: { targetImpedance: number; width: number; impedance: number }[] };
+        assert.equal(table.targets, 2);
+        assert.deepEqual(
+            table.rows.map((row) => row.targetImpedance),
+            [40, 50],
+        );
+        for (const row of table.rows) {
+            assert.ok(row.width > 0, 'each row suggests a positive width');
+            assert.ok(Math.abs(row.impedance - row.targetImpedance) < 0.02, `row reaches its target: ${row.impedance}`);
+        }
+        assert.deepEqual(
+            JSON.parse(run('stackup', 'table', document, '--targets', '40,50', '--structure', 'microstrip')),
+            table,
+            'the table is deterministic',
+        );
+        assert.match(runFail('stackup', 'table', document, '--targets', 'fast'), /--targets/);
+        assert.match(runFail('stackup', 'table', document, '--gap', 'wide'), /--gap/);
         assert.match(
             runFail('stackup', 'impedance', document, '--structure', 'diffMicrostrip', '--width', '0.15'),
             /--gap/,

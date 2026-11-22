@@ -372,6 +372,10 @@ open-pcb stackup width <file> --impedance <ohm>
     [--structure microstrip|stripline|diffMicrostrip|diffStripline]
     [--gap <mm>] [--dielectric-height <mm>] [--dielectric-constant <er>]
     [--copper-thickness <mm>]
+open-pcb stackup table <file> [--targets <ohm,ohm,...>]
+    [--structure microstrip|stripline|diffMicrostrip|diffStripline]
+    [--gap <mm>] [--dielectric-height <mm>] [--dielectric-constant <er>]
+    [--copper-thickness <mm>]
 ```
 
 `rules set` needs at least one option. `stackup set` needs all three values;
@@ -379,11 +383,14 @@ open-pcb stackup width <file> --impedance <ohm>
 `--width`; `stackup width` needs a positive `--impedance`. `--gap` is required
 for `diffMicrostrip` and `diffStripline`, and rejected for the single-ended
 structures. The structure defaults to `microstrip`. Unspecified electrical
-values come from the stored stackup.
+values come from the stored stackup. `stackup table` prints the width/impedance
+report as JSON; `--targets` defaults to `50`, and each value must be positive,
+finite and at most 64 targets.
 
 ```bash
 open-pcb stackup set board.opcb --copper-thickness 0.035 --dielectric-height 0.2 --dielectric-constant 4.2
 open-pcb stackup impedance board.opcb --width 0.25 --structure diffMicrostrip --gap 0.2
+open-pcb stackup table board.opcb --targets 40,50,60 --structure microstrip
 ```
 
 ## Waivers and severity
@@ -405,5 +412,3 @@ These board methods have no CLI subcommand:
 
 - `Board.outlineGeometry(options)` validates and measures a supplied polygon, or
   measures the stored rectangle, and can return one offset polygon.
-- `Board.impedanceTable(options)` returns a width/impedance table across a stackup
-  sweep.

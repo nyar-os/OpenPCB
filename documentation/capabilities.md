@@ -96,7 +96,7 @@ counterpart warns `drc/diffpair-unpaired`.
 | Test points | `supported` |
 | Stackup | `supported` |
 | Single-ended and edge-coupled differential impedance | `supported` |
-| Impedance-to-width table (`Board.impedanceTable`, SDK only) | `supported` |
+| Impedance-to-width table (`stackup table`, `Board.impedanceTable`) | `supported` |
 
 ## Import loss ledgers
 

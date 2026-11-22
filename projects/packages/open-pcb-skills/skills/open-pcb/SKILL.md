@@ -49,9 +49,9 @@ Implemented:
   height and permittivity; compute microstrip or stripline single-ended
   impedance (`stackup impedance`) and convert a target impedance to a trace
   width (`stackup width`). Per-request overrides replace the stored values.
-- Build a controlled-impedance trace-width table (`Board.impedanceTable`) for a
-  list of target impedances; each row gives the suggested width and the
-  impedance recomputed from it on the same stackup.
+- Build a controlled-impedance trace-width table (`stackup table`,
+  `Board.impedanceTable`) for a list of target impedances; each row gives the
+  suggested width and the impedance recomputed from it on the same stackup.
 - Declare net classes (`netclass add`), move nets into them (`netclass assign`)
   and let their optional width, clearance, via diameter and via drill targets
   drive the `netclass` check; `clearance` also uses the strictest class value.
@@ -191,6 +191,7 @@ a format, check or target.
 | `open-pcb stackup show <file.opcb>` | Print the declared stackup, or `stackup unset`. |
 | `open-pcb stackup impedance <file.opcb> --width <mm> [--structure microstrip\|stripline] [--dielectric-height <mm>] [--dielectric-constant <er>] [--copper-thickness <mm>]` | Compute single-ended impedance, defaulting to microstrip and the stored stackup. |
 | `open-pcb stackup width <file.opcb> --impedance <ohm> [--structure microstrip\|stripline] [--dielectric-height <mm>] [--dielectric-constant <er>] [--copper-thickness <mm>]` | Convert a target impedance to the trace width that reaches it. |
+| `open-pcb stackup table <file.opcb> [--targets <ohm,ohm,...>] [--structure microstrip\|stripline\|diffMicrostrip\|diffStripline] [--gap <mm>] [--dielectric-height <mm>] [--dielectric-constant <er>] [--copper-thickness <mm>]` | Print the width/impedance table for each target, defaulting to `50` ohm and the stored stackup. |
 | `open-pcb waiver add <file.opcb> --code <code> --object <id> --reason <text>` | Waive a finding code, optionally narrowed to one object. `--object` and `--reason` are optional. |
 | `open-pcb waiver delete <file.opcb> --id <id>` | Delete a waiver by id. |
 | `open-pcb severity set <file.opcb> --code <code> --severity <info\|warning\|error>` | Override the severity of one finding code. |
