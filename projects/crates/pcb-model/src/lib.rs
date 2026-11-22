@@ -209,6 +209,7 @@ pub fn capabilities() -> Value {
         "gerberX2": "supported",
         "drcPolicy": "supported",
         "routing": "supported",
+        "routingNetClasses": "supported",
         "zones": "supported",
         "texts": "supported",
         "keepouts": "supported",
@@ -705,7 +706,10 @@ pub fn set_via_back_drill(handle: u64, request: SetViaBackDrillRequest) -> Resul
 ///
 /// The router is deterministic: the same board and options always produce the
 /// same copper. Edges it cannot place without a clearance or outline violation
-/// are reported in `unrouted` instead of being approximated.
+/// are reported in `unrouted` instead of being approximated. With
+/// `useNetClasses` a net's declared class supplies the track width, clearance
+/// and via values per field, falling back to the explicit arguments and then to
+/// the built-in defaults.
 pub fn route(handle: u64, options: RouteOptions) -> Result<Value, ServiceError> {
     let mut report = Value::Null;
     store::mutate_if_changed(handle, |board| {

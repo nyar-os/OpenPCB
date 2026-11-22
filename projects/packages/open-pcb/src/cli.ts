@@ -1737,6 +1737,7 @@ cli
     .option('--clearance <mm>', 'cli.opt.clearance')
     .option('--via <mm>', 'cli.opt.via')
     .option('--net <name>', 'cli.opt.net')
+    .option('--netclass', 'cli.opt.netclass')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         if (file === undefined) {
@@ -1759,7 +1760,13 @@ cli
             return 2;
         }
         await withBoard(file, async (board) => {
-            const report = await board.route({ width, clearance, viaDiameter, net: text(options, 'net') });
+            const report = await board.route({
+                width,
+                clearance,
+                viaDiameter,
+                net: text(options, 'net'),
+                useNetClasses: flag(options, 'netclass'),
+            });
             ctx.emitResult(
                 report,
                 `routed ${report.routed} connection(s): ${report.tracks} tracks, ${report.vias} vias, ${report.unrouted.length} unrouted`,

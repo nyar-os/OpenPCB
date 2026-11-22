@@ -113,6 +113,7 @@
             "width": "Trace width",
             "clearance": "Clearance kept from existing copper",
             "via": "Via copper diameter used by the router",
+            "netclass": "Route each net with its declared net-class width, clearance and via values",
             "spacing": "Target spacing between adjacent stitching vias along the perimeter",
             "inset": "Distance from the board edge to the stitching ring",
             "at": "Via centre as x,y",

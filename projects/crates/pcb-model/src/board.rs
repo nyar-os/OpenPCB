@@ -3713,4 +3713,11 @@ pub struct RouteOptions {
     /// Rip-up and retry rounds after the first pass; defaults to 2, capped at 8.
     #[serde(default)]
     pub retries: Option<u32>,
+    /// Use each net's declared class for width, clearance and via values.
+    ///
+    /// Defaults to false, so the same options keep producing the explicit
+    /// arguments. A class value wins per field, then the argument, then the
+    /// built-in default.
+    #[serde(default)]
+    pub use_net_classes: bool,
 }

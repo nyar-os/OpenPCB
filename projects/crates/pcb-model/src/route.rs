@@ -7,7 +7,9 @@
 //! greedy pass leaves edges unrouted, the router rips up its own copper and
 //! retries with the failed nets routed first and the layer preference flipped,
 //! for a bounded number of rounds. It never invents connectivity: an edge either
-//! produces collision-free copper or is reported as unrouted.
+//! produces collision-free copper or is reported as unrouted. Routing follows
+//! net-class width, clearance and via targets only when `useNetClasses` is set,
+//! so the explicit-argument behavior stays the default.
 
 use std::collections::BTreeMap;
 
@@ -58,12 +60,23 @@ struct ViaObstacle {
 #[derive(Debug, Clone)]
 struct Settings {
     layers: Vec<String>,
+    width: Option<f64>,
+    clearance: Option<f64>,
+    via_diameter: Option<f64>,
+    via_drill: Option<f64>,
+    net: Option<String>,
+    retries: u32,
+    use_net_classes: bool,
+}
+
+/// Routing values one net uses, after the net class and argument fallbacks.
+#[derive(Debug, Clone, Copy)]
+struct EdgeSettings {
     width: f64,
     clearance: f64,
     via_diameter: f64,
     via_drill: f64,
-    net: Option<String>,
-    retries: u32,
+    width_source: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +85,15 @@ struct Accepted {
     layer: String,
     from: [f64; 2],
     to: [f64; 2],
+    width: f64,
+}
+
+#[derive(Debug, Clone)]
+struct AcceptedVia {
+    net: String,
+    at: [f64; 2],
+    diameter: f64,
+    drill: f64,
 }
 
 struct Candidate {
@@ -99,7 +121,7 @@ struct EdgeResult {
 #[derive(Debug, Clone, Default)]
 struct Attempt {
     segments: Vec<Accepted>,
-    vias: Vec<(String, [f64; 2])>,
+    vias: Vec<AcceptedVia>,
     edges: Vec<EdgeResult>,
     unrouted: Vec<Value>,
     routed: usize,
@@ -167,9 +189,12 @@ pub(crate) fn run(board: &mut Board, options: RouteOptions) -> Result<(Value, bo
         .map(|via| ViaObstacle { net: via.net.clone(), at: via.at, diameter: via.diameter })
         .collect::<Vec<_>>();
     let outline = board.outline.as_ref().map(|outline| (outline.from, outline.to));
+    let net_settings =
+        plans.iter().map(|plan| (plan.name.clone(), edge_settings(board, &settings, &plan.name))).collect::<BTreeMap<_, _>>();
 
     let mut order = (0..plans.len()).collect::<Vec<_>>();
-    let mut current = attempt(board, &settings, &plans, &order, false, &all_pads, &base_tracks, &base_vias, outline);
+    let mut current =
+        attempt(board, &settings, &net_settings, &plans, &order, false, &all_pads, &base_tracks, &base_vias, outline);
     let mut best = current.clone();
     let mut retries_by_net = plans.iter().map(|plan| (plan.name.clone(), 0usize)).collect::<BTreeMap<_, _>>();
     let mut rounds = 0u32;
@@ -196,7 +221,18 @@ pub(crate) fn run(board: &mut Board, options: RouteOptions) -> Result<(Value, bo
         order = retry_order;
         // Alternate the direction-preferred layer so a retry explores different
         // geometry instead of repeating the same greedy choice.
-        current = attempt(board, &settings, &plans, &order, rounds % 2 == 1, &all_pads, &base_tracks, &base_vias, outline);
+        current = attempt(
+            board,
+            &settings,
+            &net_settings,
+            &plans,
+            &order,
+            rounds % 2 == 1,
+            &all_pads,
+            &base_tracks,
+            &base_vias,
+            outline,
+        );
         if current.routed > best.routed {
             best = current.clone();
         }
@@ -211,21 +247,21 @@ pub(crate) fn run(board: &mut Board, options: RouteOptions) -> Result<(Value, bo
             id,
             net: Some(segment.net.clone()),
             layer: segment.layer.clone(),
-            width: settings.width,
+            width: segment.width,
             from: segment.from,
             to: segment.to,
             teardrop: false,
         });
     }
-    for (net, at) in &best.vias {
+    for via in &best.vias {
         let id = format!("via-{}", board.next_via);
         board.next_via += 1;
         board.vias.push(Via {
             id,
-            net: Some(net.clone()),
-            at: *at,
-            diameter: settings.via_diameter,
-            drill: settings.via_drill,
+            net: Some(via.net.clone()),
+            at: via.at,
+            diameter: via.diameter,
+            drill: via.drill,
             from_layer: None,
             to_layer: None,
             back_drill: None,
@@ -252,14 +288,21 @@ pub(crate) fn run(board: &mut Board, options: RouteOptions) -> Result<(Value, bo
                 0 => "unrouted",
                 _ => "partial",
             };
-            json!({
+            let mut entry = json!({
                 "net": name,
                 "status": status,
                 "edges": *total,
                 "routed": *routed_edges,
                 "unrouted": *total - *routed_edges,
                 "retries": retries_by_net.get(name).copied().unwrap_or(0),
-            })
+            });
+            if settings.use_net_classes
+                && let Some(edge) = net_settings.get(name)
+            {
+                entry["width"] = json!(edge.width);
+                entry["widthSource"] = json!(edge.width_source);
+            }
+            entry
         })
         .collect::<Vec<_>>();
 
@@ -279,6 +322,7 @@ pub(crate) fn run(board: &mut Board, options: RouteOptions) -> Result<(Value, bo
 fn attempt(
     board: &Board,
     settings: &Settings,
+    net_settings: &BTreeMap<String, EdgeSettings>,
     plans: &[NetPlan],
     order: &[usize],
     flip: bool,
@@ -292,13 +336,14 @@ fn attempt(
     let mut result = Attempt::default();
     for &index in order {
         let plan = &plans[index];
+        let edge = net_settings.get(&plan.name).copied().unwrap_or_else(|| edge_settings(board, settings, &plan.name));
         for &(from, to) in &plan.edges {
             let pad_a = &plan.pads[from];
             let pad_b = &plan.pads[to];
             let chosen = candidates(settings, pad_a.at, pad_b.at, flip).into_iter().find(|candidate| {
                 candidate_clear(
                     board,
-                    settings,
+                    &edge,
                     candidate,
                     &plan.name,
                     &pad_a.key,
@@ -312,12 +357,16 @@ fn attempt(
             });
             let Some(candidate) = chosen
             else {
-                result.unrouted.push(json!({
+                let mut entry = json!({
                     "net": plan.name,
                     "from": pad_a.key,
                     "to": pad_b.key,
                     "reason": UNROUTED_REASON,
-                }));
+                });
+                if settings.use_net_classes {
+                    entry["widthSource"] = json!(edge.width_source);
+                }
+                result.unrouted.push(entry);
                 result.edges.push(EdgeResult { net: plan.name.clone(), routed: false });
                 continue;
             };
@@ -326,7 +375,7 @@ fn attempt(
                 tracks.push(TrackObstacle {
                     net: Some(plan.name.clone()),
                     layer: candidate.layer.clone(),
-                    width: settings.width,
+                    width: edge.width,
                     from: *segment_from,
                     to: *segment_to,
                 });
@@ -335,11 +384,17 @@ fn attempt(
                     layer: candidate.layer.clone(),
                     from: *segment_from,
                     to: *segment_to,
+                    width: edge.width,
                 });
             }
             for at in &candidate.vias {
-                vias.push(ViaObstacle { net: Some(plan.name.clone()), at: *at, diameter: settings.via_diameter });
-                result.vias.push((plan.name.clone(), *at));
+                vias.push(ViaObstacle { net: Some(plan.name.clone()), at: *at, diameter: edge.via_diameter });
+                result.vias.push(AcceptedVia {
+                    net: plan.name.clone(),
+                    at: *at,
+                    diameter: edge.via_diameter,
+                    drill: edge.via_drill,
+                });
             }
             result.edges.push(EdgeResult { net: plan.name.clone(), routed: true });
         }
@@ -379,11 +434,13 @@ fn resolve(options: &RouteOptions) -> Result<Settings, ServiceError> {
     if layers.len() == 2 && layers[0] == layers[1] {
         return Err(argument("`layers` must not repeat a layer"));
     }
-    let width = number(options.width, DEFAULT_WIDTH, "width")?;
-    let clearance = number(options.clearance, DEFAULT_CLEARANCE, "clearance")?;
-    let via_diameter = number(options.via_diameter, DEFAULT_VIA_DIAMETER, "viaDiameter")?;
-    let via_drill = number(options.via_drill, DEFAULT_VIA_DRILL, "viaDrill")?;
-    if via_drill >= via_diameter {
+    let width = number(options.width, "width")?;
+    let clearance = number(options.clearance, "clearance")?;
+    let via_diameter = number(options.via_diameter, "viaDiameter")?;
+    let via_drill = number(options.via_drill, "viaDrill")?;
+    let resolved_diameter = via_diameter.unwrap_or(DEFAULT_VIA_DIAMETER);
+    let resolved_drill = via_drill.unwrap_or(DEFAULT_VIA_DRILL);
+    if resolved_drill >= resolved_diameter {
         return Err(argument("`viaDrill` must be smaller than `viaDiameter`"));
     }
     Ok(Settings {
@@ -394,15 +451,49 @@ fn resolve(options: &RouteOptions) -> Result<Settings, ServiceError> {
         via_drill,
         net: options.net.clone(),
         retries: options.retries.unwrap_or(DEFAULT_RETRIES).min(MAX_RETRIES),
+        use_net_classes: options.use_net_classes,
     })
 }
 
-fn number(value: Option<f64>, fallback: f64, field: &str) -> Result<f64, ServiceError> {
-    let value = value.unwrap_or(fallback);
-    if !value.is_finite() || value <= 0.0 {
+fn number(value: Option<f64>, field: &str) -> Result<Option<f64>, ServiceError> {
+    if let Some(value) = value
+        && (!value.is_finite() || value <= 0.0)
+    {
         return Err(argument(format!("`{field}` must be a finite number greater than zero")));
     }
     Ok(value)
+}
+
+/// Resolves the routing values of one net.
+///
+/// With `useNetClasses` enabled the net's class wins per field, then the explicit
+/// argument, then the built-in default. A class that assigns a via diameter is
+/// paired with a drill smaller than it, so a class drill larger than the chosen
+/// diameter is halved instead of producing an invalid via.
+fn edge_settings(board: &Board, settings: &Settings, net: &str) -> EdgeSettings {
+    let class = if settings.use_net_classes { board.class_of_net(net) } else { None };
+    let (width, width_source) = pick(class.and_then(|class| class.width), settings.width, DEFAULT_WIDTH);
+    let (clearance, _) = pick(class.and_then(|class| class.clearance), settings.clearance, DEFAULT_CLEARANCE);
+    let (via_diameter, _) = pick(class.and_then(|class| class.via_diameter), settings.via_diameter, DEFAULT_VIA_DIAMETER);
+    let (mut via_drill, _) = pick(class.and_then(|class| class.via_drill), settings.via_drill, DEFAULT_VIA_DRILL);
+    if via_drill >= via_diameter {
+        via_drill = via_diameter / 2.0;
+    }
+    EdgeSettings { width, clearance, via_diameter, via_drill, width_source }
+}
+
+/// Class value, then explicit argument, then default, plus where the value came from.
+fn pick(class_value: Option<f64>, argument: Option<f64>, default: f64) -> (f64, &'static str) {
+    if let Some(value) = class_value
+        && value.is_finite()
+        && value > 0.0
+    {
+        return (value, "netclass");
+    }
+    match argument {
+        Some(value) => (value, "argument"),
+        None => (default, "default"),
+    }
 }
 
 /// Rejects missing, non-copper or locked routing layers.
@@ -508,7 +599,7 @@ fn segments(points: &[[f64; 2]]) -> Vec<([f64; 2], [f64; 2])> {
 #[allow(clippy::too_many_arguments)]
 fn candidate_clear(
     board: &Board,
-    settings: &Settings,
+    edge: &EdgeSettings,
     candidate: &Candidate,
     net: &str,
     from_key: &str,
@@ -519,7 +610,7 @@ fn candidate_clear(
     accepted: &[Accepted],
     outline: Option<([f64; 2], [f64; 2])>,
 ) -> bool {
-    let radius = settings.width / 2.0;
+    let radius = edge.width / 2.0;
     for (start, end) in &candidate.segments {
         if let Some((min, max)) = outline
             && (!inside(*start, min, max, radius) || !inside(*end, min, max, radius))
@@ -531,13 +622,13 @@ fn candidate_clear(
                 continue;
             }
             let distance = segment_distance(*start, *end, track.from, track.to);
-            if distance + EPSILON < settings.clearance + radius + track.width / 2.0 {
+            if distance + EPSILON < edge.clearance + radius + track.width / 2.0 {
                 return false;
             }
         }
         for via in vias {
             let distance = point_segment_distance(via.at, *start, *end);
-            if distance + EPSILON < settings.clearance + radius + via.diameter / 2.0 {
+            if distance + EPSILON < edge.clearance + radius + via.diameter / 2.0 {
                 return false;
             }
         }
@@ -546,7 +637,7 @@ fn candidate_clear(
                 continue;
             }
             let distance = segment_box_distance(*start, *end, pad.at, pad.half);
-            if distance + EPSILON < settings.clearance + radius {
+            if distance + EPSILON < edge.clearance + radius {
                 return false;
             }
         }
@@ -566,7 +657,7 @@ fn candidate_clear(
     }
     for at in &candidate.vias {
         if let Some((min, max)) = outline
-            && !inside(*at, min, max, settings.via_diameter / 2.0)
+            && !inside(*at, min, max, edge.via_diameter / 2.0)
         {
             return false;
         }
@@ -575,7 +666,7 @@ fn candidate_clear(
                 continue;
             }
             let distance = point_segment_distance(*at, track.from, track.to);
-            if distance + EPSILON < settings.clearance + settings.via_diameter / 2.0 + track.width / 2.0 {
+            if distance + EPSILON < edge.clearance + edge.via_diameter / 2.0 + track.width / 2.0 {
                 return false;
             }
         }
@@ -583,7 +674,7 @@ fn candidate_clear(
             if via.net.as_deref() == Some(net) && near(*at, via.at) {
                 continue;
             }
-            if distance(*at, via.at) + EPSILON < settings.clearance + (settings.via_diameter + via.diameter) / 2.0 {
+            if distance(*at, via.at) + EPSILON < edge.clearance + (edge.via_diameter + via.diameter) / 2.0 {
                 return false;
             }
         }
@@ -592,12 +683,12 @@ fn candidate_clear(
                 continue;
             }
             let distance = point_box_distance(*at, pad.at, pad.half);
-            if distance + EPSILON < settings.clearance + settings.via_diameter / 2.0 {
+            if distance + EPSILON < edge.clearance + edge.via_diameter / 2.0 {
                 return false;
             }
         }
         for keepout in &board.keepouts {
-            if !point_polygon_clear(*at, &keepout.points, settings.via_diameter / 2.0) {
+            if !point_polygon_clear(*at, &keepout.points, edge.via_diameter / 2.0) {
                 return false;
             }
         }

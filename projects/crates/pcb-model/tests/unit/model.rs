@@ -3301,6 +3301,164 @@ fn router_reports_a_failure_after_bounded_rip_up_retries() {
     close(handle).expect("the board closes");
 }
 
+fn assign_power_class(handle: u64, width: Option<f64>, clearance: Option<f64>, via_diameter: Option<f64>) {
+    add_net_class(
+        handle,
+        AddNetClassRequest {
+            name: "PWR".to_string(),
+            width,
+            clearance,
+            via_diameter,
+            via_drill: via_diameter.map(|diameter| diameter / 2.0),
+        },
+    )
+    .expect("the net class is declared");
+    assign_net_class(handle, AssignNetClassRequest { net: "N1".to_string(), class: "PWR".to_string() })
+        .expect("the net joins the class");
+}
+
+#[test]
+fn router_uses_net_class_width_and_via() {
+    let handle = created();
+    two_pad_net(handle, [10.0, 10.0], [20.0, 10.0]);
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+    add_track(
+        handle,
+        AddTrackRequest { net: None, layer: "F.Cu".to_string(), width: 0.25, from: [15.0, 0.0], to: [15.0, 30.0] },
+    )
+    .expect("the top-layer blocker is routed");
+    assign_power_class(handle, Some(0.4), Some(0.3), Some(0.8));
+
+    let report = route(handle, RouteOptions { use_net_classes: true, ..Default::default() }).expect("routing runs");
+    assert_eq!(report["routed"], 1);
+    assert_eq!(report["vias"], 2, "the blocked top layer forces a via at each endpoint: {report}");
+    let nets = report["nets"].as_array().expect("nets is an array");
+    assert_eq!(nets[0]["width"], 0.4);
+    assert_eq!(nets[0]["widthSource"], "netclass");
+
+    let (tracks, vias) = store::read(handle, |board| (board.tracks.clone(), board.vias.clone())).expect("the board is open");
+    let routed = tracks.iter().filter(|track| track.net.as_deref() == Some("N1")).collect::<Vec<_>>();
+    assert!(!routed.is_empty());
+    assert!(routed.iter().all(|track| track.width == 0.4), "every routed segment uses the class width");
+    assert_eq!(vias.len(), 2);
+    assert!(vias.iter().all(|via| via.diameter == 0.8 && via.drill == 0.4), "vias use the class diameter and drill");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn router_uses_net_class_clearance_and_falls_back_per_field() {
+    let handle = created();
+    two_pad_net(handle, [10.0, 10.0], [20.0, 10.0]);
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+    add_track(
+        handle,
+        AddTrackRequest { net: None, layer: "F.Cu".to_string(), width: 0.25, from: [5.0, 10.55], to: [25.0, 10.55] },
+    )
+    .expect("the parallel blocker is routed");
+    add_net_class(handle, AddNetClassRequest { name: "PWR".to_string(), clearance: Some(0.05), ..Default::default() })
+        .expect("the clearance-only class is declared");
+    assign_net_class(handle, AssignNetClassRequest { net: "N1".to_string(), class: "PWR".to_string() })
+        .expect("the net joins the class");
+
+    // The argument clearance (0.8) would block the 0.55 gap; the class clearance
+    // (0.05) clears it, and the missing class width falls back to the argument.
+    let report = route(
+        handle,
+        RouteOptions {
+            layers: Some(vec!["F.Cu".to_string()]),
+            width: Some(0.4),
+            clearance: Some(0.8),
+            use_net_classes: true,
+            ..Default::default()
+        },
+    )
+    .expect("routing runs");
+    assert_eq!(report["routed"], 1, "the class clearance governs the gap: {report}");
+    let nets = report["nets"].as_array().expect("nets is an array");
+    assert_eq!(nets[0]["width"], 0.4, "a class without a width falls back to the argument");
+    assert_eq!(nets[0]["widthSource"], "argument");
+    let tracks = store::read(handle, |board| board.tracks.clone()).expect("the board is open");
+    assert!(tracks.iter().filter(|track| track.net.as_deref() == Some("N1")).all(|track| track.width == 0.4));
+    close(handle).expect("the board closes");
+
+    let fallback = created();
+    two_pad_net(fallback, [10.0, 10.0], [20.0, 10.0]);
+    set_outline(fallback, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+    add_net_class(fallback, AddNetClassRequest { name: "EMPTY".to_string(), ..Default::default() })
+        .expect("the empty class is declared");
+    assign_net_class(fallback, AssignNetClassRequest { net: "N1".to_string(), class: "EMPTY".to_string() })
+        .expect("the net joins the empty class");
+
+    let report = route(fallback, RouteOptions { use_net_classes: true, ..Default::default() }).expect("routing runs");
+    assert_eq!(report["routed"], 1);
+    let nets = report["nets"].as_array().expect("nets is an array");
+    assert_eq!(nets[0]["width"], 0.25);
+    assert_eq!(nets[0]["widthSource"], "default");
+    let tracks = store::read(fallback, |board| board.tracks.clone()).expect("the board is open");
+    assert!(tracks.iter().all(|track| track.width == 0.25));
+    close(fallback).expect("the board closes");
+
+    let unassigned = created();
+    two_pad_net(unassigned, [10.0, 10.0], [20.0, 10.0]);
+    set_outline(unassigned, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+    let report = route(unassigned, RouteOptions { use_net_classes: true, ..Default::default() }).expect("routing runs");
+    assert_eq!(report["routed"], 1);
+    let nets = report["nets"].as_array().expect("nets is an array");
+    assert_eq!(nets[0]["width"], 0.25, "a net without a class falls back to the default");
+    assert_eq!(nets[0]["widthSource"], "default");
+    close(unassigned).expect("the board closes");
+}
+
+#[test]
+fn router_ignores_net_classes_unless_opted_in() {
+    let route_with = |options: RouteOptions| {
+        let handle = created();
+        two_pad_net(handle, [10.0, 10.0], [20.0, 10.0]);
+        set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+        assign_power_class(handle, Some(0.5), Some(0.5), Some(0.9));
+        let report = route(handle, options).expect("routing runs");
+        let tracks = store::read(handle, |board| board.tracks.clone()).expect("the board is open");
+        close(handle).expect("the board closes");
+        (report, tracks)
+    };
+
+    let (legacy, legacy_tracks) = route_with(RouteOptions::default());
+    let (explicit_off, explicit_off_tracks) = route_with(RouteOptions { use_net_classes: false, ..Default::default() });
+    assert_eq!(legacy, explicit_off, "the option defaults to off");
+    assert_eq!(
+        legacy_tracks.iter().map(|track| track.width).collect::<Vec<_>>(),
+        explicit_off_tracks.iter().map(|track| track.width).collect::<Vec<_>>()
+    );
+    assert!(legacy_tracks.iter().all(|track| track.width == 0.25), "the class width stays unused");
+    assert!(!serde_json::to_string(&legacy).expect("the report serializes").contains("widthSource"));
+}
+
+#[test]
+fn router_still_reports_unrouted_edges_with_net_classes() {
+    let handle = created();
+    two_pad_net(handle, [10.0, 10.0], [20.0, 10.0]);
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+    for layer in ["F.Cu", "B.Cu"] {
+        add_track(
+            handle,
+            AddTrackRequest { net: None, layer: layer.to_string(), width: 0.25, from: [15.0, 0.0], to: [15.0, 30.0] },
+        )
+        .expect("the blocking track is routed");
+    }
+    assign_power_class(handle, Some(0.4), None, None);
+
+    let report = route(handle, RouteOptions { use_net_classes: true, ..Default::default() }).expect("routing runs");
+    assert_eq!(report["routed"], 0);
+    assert_eq!(report["tracks"], 0);
+    assert_eq!(report["vias"], 0);
+    let unrouted = report["unrouted"].as_array().expect("unrouted is an array");
+    assert_eq!(unrouted.len(), 1);
+    assert_eq!(unrouted[0]["net"], "N1");
+    assert_eq!(unrouted[0]["widthSource"], "netclass");
+    assert!(unrouted[0]["reason"].as_str().is_some_and(|reason| !reason.is_empty()));
+    close(handle).expect("the board closes");
+}
+
 #[test]
 fn new_checks_flag_annular_ring_track_width_and_unrouted_nets() {
     let handle = created();

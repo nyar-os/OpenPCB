@@ -549,6 +549,8 @@ export interface BoardCapabilities {
     readonly polygonOutline: SupportLevel;
     /** Whether net classes with clearance and width targets are available. */
     readonly netClasses: SupportLevel;
+    /** Whether `board.route()` can follow per-net class width, clearance and via targets. */
+    readonly routingNetClasses: SupportLevel;
     /** Whether declared test points can be reported. */
     readonly testPoints: SupportLevel;
     /** Whether a physical stackup can be declared and read. */
@@ -1078,6 +1080,12 @@ export interface RouteOptions {
     readonly viaDrill?: number;
     /** Route only this declared net. */
     readonly net?: string;
+    /**
+     * Use each net's declared class for width, clearance and via values.
+     * Defaults to false; a class value wins per field, then the argument, then
+     * the built-in default.
+     */
+    readonly useNetClasses?: boolean;
 }
 
 /** One spanning-tree edge the router could not place. */
@@ -1088,6 +1096,8 @@ export interface UnroutedConnection {
     /** Stable pad key `footprint-id:pad-number`. */
     readonly to: string;
     readonly reason: string;
+    /** Where the edge's width came from; set when `useNetClasses` is true. */
+    readonly widthSource?: 'netclass' | 'argument' | 'default';
 }
 
 /** Result of `board.route()`. `tracks` and `vias` count appended objects. */

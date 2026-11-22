@@ -28,6 +28,17 @@ const installed = (() => {
 const withoutAddon = installed ? 'a built addon is installed' : false;
 const withAddon = installed ? false : 'no built addon is installed';
 
+/** A two-pad `PWR` net `board.route()` can connect in one horizontal segment. */
+async function routingBoard(pcb: OpenPCB) {
+    const board = await pcb.create();
+    await board.addNet({ name: 'PWR' });
+    await board.addFootprint({ reference: 'U1', x: 0, y: 0 });
+    await board.addPad({ footprint: 'fp-1', number: '1', x: 10, y: 10, w: 0.5, h: 0.5, net: 'PWR' });
+    await board.addPad({ footprint: 'fp-1', number: '2', x: 20, y: 10, w: 0.5, h: 0.5, net: 'PWR' });
+    await board.setOutline({ from: [0, 0], to: [50, 40] });
+    return board;
+}
+
 test('session construction is synchronous and side-effect free', async () => {
     const pcb = new OpenPCB();
     assert.equal(pcb.locale, 'en');
@@ -156,6 +167,7 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.solderMask, 'supported');
     assert.equal(matrix.drcPolicy, 'supported');
     assert.equal(matrix.routing, 'supported');
+    assert.equal(matrix.routingNetClasses, 'supported');
     assert.equal(matrix.texts, 'supported');
     assert.equal(matrix.zoneReport, 'supported');
     assert.equal(matrix.netLengths, 'supported');
@@ -363,6 +375,85 @@ test('differential impedance solves pair widths through the SDK', { skip: withAd
         (error: unknown) => error instanceof OpenPCBError && error.code === 'session/argument-invalid',
     );
     await board.close();
+    await pcb.dispose();
+});
+
+test('routing follows net-class width, clearance and via targets when enabled', { skip: withAddon }, async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pcb-netclass-'));
+    try {
+        const pcb = new OpenPCB();
+
+        const viaBoard = await routingBoard(pcb);
+        await viaBoard.addTrack({ layer: 'F.Cu', width: 0.25, from: [15, 0], to: [15, 30] });
+        await viaBoard.addNetClass({ name: 'PWR', width: 0.4, clearance: 0.3, viaDiameter: 0.8, viaDrill: 0.4 });
+        await viaBoard.assignNetClass({ net: 'PWR', class: 'PWR' });
+        const viaReport = await viaBoard.route({ useNetClasses: true });
+        assert.equal(viaReport.routed, 1);
+        assert.equal(viaReport.vias, 2, 'the blocked top layer forces a via at each endpoint');
+        const viaTarget = path.join(directory, 'netclass.kicad_pcb');
+        await viaBoard.export({ format: 'kicad_pcb', target: viaTarget });
+        const viaText = fs.readFileSync(viaTarget, 'utf8');
+        assert.match(viaText, /\(width 0\.4\)/, 'routed tracks use the class width');
+        assert.match(viaText, /\(size 0\.8\) \(drill 0\.4\)/, 'vias use the class diameter and drill');
+
+        const clearanceBoard = await routingBoard(pcb);
+        await clearanceBoard.addTrack({ layer: 'F.Cu', width: 0.25, from: [5, 10.55], to: [25, 10.55] });
+        await clearanceBoard.addNetClass({ name: 'RF', clearance: 0.05 });
+        await clearanceBoard.assignNetClass({ net: 'PWR', class: 'RF' });
+        const clearanceReport = await clearanceBoard.route({
+            layers: ['F.Cu'],
+            width: 0.3,
+            clearance: 0.8,
+            useNetClasses: true,
+        });
+        assert.equal(clearanceReport.routed, 1, 'the class clearance clears the 0.55 gap the argument would block');
+        const clearanceTarget = path.join(directory, 'clearance.kicad_pcb');
+        await clearanceBoard.export({ format: 'kicad_pcb', target: clearanceTarget });
+        assert.match(fs.readFileSync(clearanceTarget, 'utf8'), /\(width 0\.3\)/, 'a class without width falls back to the argument');
+
+        await viaBoard.close();
+        await clearanceBoard.close();
+        await pcb.dispose();
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('net-class routing falls back per field and stays off by default', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+    const raw = (report: unknown): { nets: { width: number; widthSource?: string }[] } =>
+        report as { nets: { width: number; widthSource?: string }[] };
+
+    const legacy = await routingBoard(pcb);
+    await legacy.addNetClass({ name: 'BIG', width: 0.5, clearance: 0.5, viaDiameter: 0.9, viaDrill: 0.45 });
+    await legacy.assignNetClass({ net: 'PWR', class: 'BIG' });
+    const legacyReport = await legacy.route();
+    assert.equal(legacyReport.routed, 1);
+    assert.equal(raw(legacyReport).nets[0].width, undefined, 'without the option the report keeps its old shape');
+    assert.equal(raw(legacyReport).nets[0].widthSource, undefined);
+
+    const fallback = await routingBoard(pcb);
+    await fallback.addNetClass({ name: 'EMPTY' });
+    await fallback.assignNetClass({ net: 'PWR', class: 'EMPTY' });
+    const fallbackReport = await fallback.route({ width: 0.4, useNetClasses: true });
+    assert.equal(fallbackReport.routed, 1);
+    assert.equal(raw(fallbackReport).nets[0].width, 0.4, 'an empty class falls back to the argument');
+    assert.equal(raw(fallbackReport).nets[0].widthSource, 'argument');
+
+    const wall = await routingBoard(pcb);
+    for (const layer of ['F.Cu', 'B.Cu']) {
+        await wall.addTrack({ layer, width: 0.25, from: [15, 0], to: [15, 30] });
+    }
+    await wall.addNetClass({ name: 'PWR', width: 0.4 });
+    await wall.assignNetClass({ net: 'PWR', class: 'PWR' });
+    const blocked = await wall.route({ useNetClasses: true });
+    assert.equal(blocked.routed, 0);
+    assert.equal(blocked.unrouted.length, 1, 'an unroutable edge is still reported');
+    assert.equal(blocked.unrouted[0].widthSource, 'netclass');
+
+    await legacy.close();
+    await fallback.close();
+    await wall.close();
     await pcb.dispose();
 });
 
