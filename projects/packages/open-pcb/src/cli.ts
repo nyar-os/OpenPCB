@@ -27,6 +27,7 @@ import type {
     InspectCheck,
     InspectReport,
     LayerKind,
+    PanelTabStyle,
     RouteStyle,
     Severity,
 } from './types.js';
@@ -91,6 +92,15 @@ function numberOption(raw: string | undefined): number | undefined {
     }
     const value = Number(raw);
     return Number.isFinite(value) ? value : undefined;
+}
+
+/** Parses one positive integer count; anything else is invalid. */
+function countOption(raw: string | undefined): number | undefined {
+    if (raw === undefined) {
+        return undefined;
+    }
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 /** Parses `x,y` into a coordinate pair. */
@@ -2037,6 +2047,78 @@ cli.command('lengths', 'cli.cmd.lengths').actionCtx(async (options, _args, ctx) 
     });
     return 0;
 });
+
+function panelTabStyle(raw: string | undefined): PanelTabStyle | undefined {
+    if (raw === undefined) {
+        return undefined;
+    }
+    return raw === 'v-cut' || raw === 'mouse-bite' || raw === 'none' ? raw : undefined;
+}
+
+cli
+    .command('panel', 'cli.cmd.panel')
+    .option('--columns <count>', 'cli.opt.columns')
+    .option('--rows <count>', 'cli.opt.rows')
+    .option('--gap-x <mm>', 'cli.opt.gap-x')
+    .option('--gap-y <mm>', 'cli.opt.gap-y')
+    .option('--rail <mm>', 'cli.opt.rail')
+    .option('--tab <style>', 'cli.opt.tab')
+    .option('--tab-width <mm>', 'cli.opt.tab-width')
+    .option('--tab-spacing <mm>', 'cli.opt.tab-spacing')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const columns = countOption(text(options, 'columns'));
+        const rows = countOption(text(options, 'rows'));
+        const gaps = { gapX: numberOption(text(options, 'gap-x')), gapY: numberOption(text(options, 'gap-y')) };
+        const rail = numberOption(text(options, 'rail'));
+        const tab = panelTabStyle(text(options, 'tab'));
+        const tabWidth = numberOption(text(options, 'tab-width'));
+        const tabSpacing = numberOption(text(options, 'tab-spacing'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (columns === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--columns <count>` must be a positive integer' });
+            return 2;
+        }
+        if (rows === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--rows <count>` must be a positive integer' });
+            return 2;
+        }
+        const lengths = { 'gap-x': gaps.gapX, 'gap-y': gaps.gapY, rail, 'tab-width': tabWidth, 'tab-spacing': tabSpacing };
+        for (const key of Object.keys(lengths) as (keyof typeof lengths)[]) {
+            const value = lengths[key];
+            if (text(options, key) !== undefined && (value === undefined || value < 0)) {
+                ctx.fail('open-pcb.cli.number-invalid', { message: `\`--${key} <mm>\` must not be negative` });
+                return 2;
+            }
+        }
+        if (text(options, 'tab') !== undefined && tab === undefined) {
+            ctx.fail('open-pcb.cli.tab-invalid', { message: '`--tab` must be v-cut, mouse-bite or none' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.panelize({
+                columns,
+                rows,
+                gapX: gaps.gapX,
+                gapY: gaps.gapY,
+                rail,
+                tab,
+                tabWidth,
+                tabSpacing,
+            });
+            ctx.emitResult(
+                report,
+                `panel ${report.columns}x${report.rows} boards=${report.boardCount}`
+                    + ` size=${report.panelSize.width}x${report.panelSize.height}mm tab=${report.tab}`
+                    + ` tabs=${report.tabCount} utilization=${report.utilizationPercent}%`,
+            );
+            return 0;
+        });
+        return 0;
+    });
 
 const waiver = cli.command('waiver', 'cli.cmd.waiver');
 waiver

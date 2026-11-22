@@ -592,6 +592,34 @@ test('zones, silkscreen text and drill reports round trip through the SDK', { sk
     await pcb.dispose();
 });
 
+test('panelization reports the grid, seams, tabs and utilization', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+    const board = await pcb.create();
+    await board.setOutline({ from: [0, 0], to: [100, 80] });
+
+    const panel = await board.panelize({ columns: 2, rows: 2, gapX: 5, gapY: 5, rail: 2, tab: 'mouse-bite' });
+    assert.equal(panel.boardCount, 4);
+    assert.deepEqual(panel.panelSize, { width: 209, height: 169 });
+    assert.deepEqual(panel.panelOutline, { from: [-2, -2], to: [207, 167] });
+    assert.equal(panel.tab, 'mouse-bite');
+    assert.equal(panel.placements.length, 4);
+    assert.equal(panel.seams.length, 2);
+    assert.equal(panel.tabs.length, panel.tabCount);
+    assert.ok(panel.tabCount > 0);
+    assert.ok(panel.utilizationPercent > 90 && panel.utilizationPercent < 91);
+
+    const defaults = await board.panelize({ columns: 1, rows: 1 });
+    assert.equal(defaults.gapX, 0);
+    assert.equal(defaults.gapY, 0);
+    assert.equal(defaults.rail, 0);
+    assert.equal(defaults.tab, 'v-cut');
+    assert.deepEqual(defaults.tabs, []);
+    assert.equal(defaults.utilizationPercent, 100);
+
+    await board.close();
+    await pcb.dispose();
+});
+
 test('tracks split at a point and slots update in place', { skip: withAddon }, async () => {
     const pcb = new OpenPCB();
     const board = await pcb.create();
@@ -864,6 +892,11 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         run('layer', 'lock', document, '--id', 'Inner2', '--locked', 'true');
         run('layer', 'lock', document, '--id', 'Inner2', '--locked', 'false');
         run('outline', 'set', document, '--from', '0,0', '--to', '100,80');
+        assert.match(
+            run('panel', document, '--columns', '2', '--rows', '2', '--gap-x', '5', '--gap-y', '5', '--rail', '2', '--tab', 'mouse-bite'),
+            /panel 2x2 boards=4 size=209x169mm tab=mouse-bite tabs=18 utilization=[\d.]+%/,
+        );
+        assert.match(runFail('panel', document, '--columns', '2', '--rows', '2', '--tab', 'castellated'), /--tab/);
         assert.match(run('rules', 'show', document), /solderMaskExpansion=0.05/);
         run('rules', 'set', document, '--hole-clearance', '0.3', '--solder-mask-expansion', '0.1');
         assert.match(run('rules', 'show', document), /holeClearance=0.3 .*solderMaskExpansion=0.1/);

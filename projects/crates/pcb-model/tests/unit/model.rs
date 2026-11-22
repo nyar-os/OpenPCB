@@ -799,6 +799,41 @@ fn panelization_rejects_an_absent_outline_and_invalid_tabs() {
 }
 
 #[test]
+fn panelization_defaults_and_repeat_reports_are_stable() {
+    let handle = created();
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [100.0, 80.0] }).expect("the outline is set");
+    let request = || PanelizeRequest {
+        columns: 3,
+        rows: 1,
+        gap_x: None,
+        gap_y: None,
+        rail: None,
+        tab: None,
+        tab_width: None,
+        tab_spacing: None,
+    };
+
+    let report = panelize(handle, request()).expect("the panel is reported");
+    assert_eq!(report["gapX"], 0.0);
+    assert_eq!(report["gapY"], 0.0);
+    assert_eq!(report["rail"], 0.0);
+    assert_eq!(report["tab"], "v-cut");
+    assert_eq!(report["tabCount"], 0);
+    assert_eq!(report["tabs"], json!([]));
+    assert_eq!(report["boardCount"], 3);
+    assert_eq!(report["panelSize"]["width"], 300.0);
+    assert_eq!(report["panelSize"]["height"], 80.0);
+    assert_eq!(report["panelOutline"]["from"], json!([0.0, 0.0]));
+    assert_eq!(report["placements"].as_array().expect("placements is an array").len(), 3);
+    assert_eq!(report["seams"].as_array().expect("seams is an array").len(), 2);
+    assert_eq!(report["utilizationPercent"], 100.0);
+
+    let repeat = panelize(handle, request()).expect("the panel is reported again");
+    assert_eq!(repeat, report, "the same board and request produce the same report");
+    close(handle).expect("the board closes");
+}
+
+#[test]
 fn outline_geometry_measures_a_polygon_and_offsets_it() {
     let handle = created();
     let square = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];

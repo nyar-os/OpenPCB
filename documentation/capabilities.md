@@ -90,7 +90,7 @@ counterpart warns `drc/diffpair-unpaired`.
 | Plated routed slots and the drill report | `supported` |
 | Copper area and balance report | `supported` |
 | Routed net-length report (`lengths`, `Board.netLengths`) | `supported` |
-| Panelization (`Board.panelize`, SDK only) | `supported` |
+| Panelization (`panel`, `Board.panelize`) | `supported` |
 | Polygon outline geometry (`Board.outlineGeometry`, SDK only) | `supported` |
 | Net classes (checks and opt-in routing targets) | `supported` |
 | Test points | `supported` |

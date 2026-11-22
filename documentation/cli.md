@@ -320,6 +320,25 @@ open-pcb route board.opcb --style chamfer45
 open-pcb stitch board.opcb --net GND --spacing 5 --inset 1
 ```
 
+## Panelization
+
+```bash
+open-pcb panel <file> --columns <count> --rows <count> [--gap-x <mm>] [--gap-y <mm>]
+    [--rail <mm>] [--tab v-cut|mouse-bite|none] [--tab-width <mm>] [--tab-spacing <mm>]
+```
+
+`panel` arrays the rectangular outline and reports the panel outline, every
+placement, seam lines, tab placeholders, the board and panel areas and the
+utilization. `--columns` and `--rows` are positive integers. `--gap-x` and
+`--gap-y` default to 0, `--rail` to 0 and `--tab` to `v-cut`. Mouse-bite tabs
+default to a width of 5 mm and a spacing of 20 mm, need a positive gap wherever
+boards meet, and need a width no larger than the spacing. The report writes no
+fabrication file.
+
+```bash
+open-pcb panel board.opcb --columns 2 --rows 2 --gap-x 5 --gap-y 5 --rail 2 --tab mouse-bite
+```
+
 ## Layers and outline
 
 ```bash
@@ -384,8 +403,6 @@ marks it as waived.
 
 These board methods have no CLI subcommand:
 
-- `Board.panelize(options)` returns a panel outline, placements, seams, tab
-  placeholders, areas and utilization.
 - `Board.outlineGeometry(options)` validates and measures a supplied polygon, or
   measures the stored rectangle, and can return one offset polygon.
 - `Board.impedanceTable(options)` returns a width/impedance table across a stackup

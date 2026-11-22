@@ -25,10 +25,10 @@ Implemented:
 - Add, rename, hide and lock layers; set a rectangular outline.
 - Report copper area per copper layer (`copper balance`) from tracks, vias, pads
   and pours, plus each layer's coverage and the imbalance across layers.
-- Estimate a panel from the rectangular outline (`Board.panelize`): columns,
-  rows, gaps, an edge rail and a `v-cut`, `mouse-bite` or `none` tab style. The
-  report gives the panel outline, every placement, seam lines, tab placeholders
-  and the board and panel areas with utilization.
+- Estimate a panel from the rectangular outline (`panel`, `Board.panelize`):
+  columns, rows, gaps, an edge rail and a `v-cut`, `mouse-bite` or `none` tab
+  style. The report gives the panel outline, every placement, seam lines, tab
+  placeholders and the board and panel areas with utilization.
 - Measure a polygonal board outline (`Board.outlineGeometry`): validate at least
   three distinct vertices with no self-intersection, report area and perimeter in
   millimetres and offset the polygon outward or inward. An offset that collapses
@@ -164,6 +164,7 @@ a format, check or target.
 | `open-pcb slot update <file.opcb> --id <id> [--net <name>] [--from <x,y>] [--to <x,y>] [--width <mm>]` | Update a routed slot in place; at least one field is required and the endpoints must still differ. A new width changes the Excellon and drill-map input only. |
 | `open-pcb slot delete <file.opcb> --id <id>` | Delete a slot by id. |
 | `open-pcb copper balance <file.opcb>` | Print per-layer copper area, coverage and the coverage imbalance. |
+| `open-pcb panel <file.opcb> --columns <count> --rows <count> [--gap-x <mm>] [--gap-y <mm>] [--rail <mm>] [--tab <style>] [--tab-width <mm>] [--tab-spacing <mm>]` | Estimate a panel with all placements, seams, tab placeholders, areas and utilization. `--tab` defaults to `v-cut`. |
 | `open-pcb route <file.opcb> --width <mm> --clearance <mm> --via <mm> --net <name>` | Route every two-pad net, or only `--net`. Defaults: width 0.25, clearance 0.2, via diameter 0.6. Prints `{routed, unrouted, tracks, vias}`. |
 | `open-pcb stitch <file.opcb> --net <name> --spacing <mm> [--inset <mm>] [--diameter <mm>] [--drill <mm>]` | Generate a stitching via fence around the inset rectangular outline. |
 | `open-pcb layer add <file.opcb> --name <name> --kind <kind> --color <css>` | Add a layer. `--kind` defaults to `copper`; `--color` defaults to the kind colour. |

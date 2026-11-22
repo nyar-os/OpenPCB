@@ -85,6 +85,7 @@
             "copper": "Report copper area and layer balance",
             "copper-balance": "Print copper area per layer and the coverage imbalance",
             "lengths": "Report routed copper length per declared net",
+            "panel": "Report a panelization layout of the rectangular board outline",
             "gui": "Open the OpenPCB Studio window on the native board"
         },
         "opt": {
@@ -149,6 +150,14 @@
             "structure": "Trace structure: microstrip, stripline, diffMicrostrip or diffStripline",
             "impedance": "Target single-ended or differential impedance, in ohms",
             "gap": "Edge-to-edge gap of a differential pair, in millimetres",
+            "columns": "Boards across one row of the panel",
+            "rows": "Rows of boards in the panel",
+            "gap-x": "Gap between neighbouring columns, in millimetres",
+            "gap-y": "Gap between neighbouring rows, in millimetres",
+            "rail": "Border around the panel array, in millimetres",
+            "tab": "Tab style: v-cut, mouse-bite or none",
+            "tab-width": "Length of one mouse-bite tab along its seam, in millimetres",
+            "tab-spacing": "Distance between tab centres along a seam, in millimetres",
             "code": "Stable finding code, for example drc/track-width-too-small",
             "object": "Object id the waiver is narrowed to; omit to cover every object",
             "reason": "Why the finding was accepted",
