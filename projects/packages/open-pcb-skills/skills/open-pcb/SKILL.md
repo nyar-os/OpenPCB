@@ -105,7 +105,9 @@ intent only: the `keepout` check reads them, but they are not written to Gerber,
 drill data, IPC-2581 or KiCad output and the router does not avoid them. Plated
 routed slots live in `.opcb` and reach the Excellon file (one `G85` segment) and
 the drill map only; Gerber, IPC-2581, KiCad PCB, SVG, PDF and PNG output do not
-carry them, and DRC does not treat a slot as copper or as a hole. The copper
+carry them, and DRC does not treat a slot as copper or as a hole. Updating a slot
+edits the model and that drill input only: the width is the routed tool
+diameter, and no other geometry is recomputed. The copper
 balance report sums feature areas rather than a union, and coverage and imbalance
 need a rectangular outline. Via
 stitching follows the rectangular outline only, places through vias, skips
@@ -158,6 +160,7 @@ a format, check or target.
 | `open-pcb via backdrill <file.opcb> --id <id> --depth <mm> --stub <mm>` | Record back-drill depth and remaining stub on a through via. Blind and buried vias are rejected. |
 | `open-pcb via delete <file.opcb> --id <id>` | Delete a via by id. |
 | `open-pcb slot add <file.opcb> [--net <name>] --from <x,y> --to <x,y> --width <mm>` | Add a plated routed slot; the width is the tool diameter and the endpoints must differ. |
+| `open-pcb slot update <file.opcb> --id <id> [--net <name>] [--from <x,y>] [--to <x,y>] [--width <mm>]` | Update a routed slot in place; at least one field is required and the endpoints must still differ. A new width changes the Excellon and drill-map input only. |
 | `open-pcb slot delete <file.opcb> --id <id>` | Delete a slot by id. |
 | `open-pcb copper balance <file.opcb>` | Print per-layer copper area, coverage and the coverage imbalance. |
 | `open-pcb route <file.opcb> --width <mm> --clearance <mm> --via <mm> --net <name>` | Route every two-pad net, or only `--net`. Defaults: width 0.25, clearance 0.2, via diameter 0.6. Prints `{routed, unrouted, tracks, vias}`. |

@@ -424,6 +424,21 @@ test('tracks split at a point and slots update in place', { skip: withAddon }, a
     const undone = await board.undo();
     assert.equal(undone.board.counts.tracks, 1, 'the split is one undo step');
 
+    await board.addSlot({ net: 'VCC', from: [0, 5], to: [5, 5], width: 0.8 });
+    const updated = await board.updateSlot({ id: 'slot-1', to: [6, 5], width: 1 });
+    assert.equal(updated.object?.id, 'slot-1');
+    assert.equal(updated.object?.width, 1);
+    assert.deepEqual(updated.object?.from, [0, 5]);
+    assert.deepEqual(updated.object?.to, [6, 5]);
+    await assert.rejects(
+        board.updateSlot({ id: 'slot-1', to: [0, 5] }),
+        (error: unknown) => error instanceof OpenPCBError && error.code === 'session/argument-invalid',
+    );
+    await assert.rejects(
+        board.updateSlot({ id: 'slot-404', width: 1 }),
+        (error: unknown) => error instanceof OpenPCBError && error.code === 'object/not-found',
+    );
+
     await board.close();
     await pcb.dispose();
 });
@@ -692,7 +707,7 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
     }
 });
 
-test('CLI splits tracks in place', { skip: withAddon }, () => {
+test('CLI splits tracks and updates slots in place', { skip: withAddon }, () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pcb-split-cli-'));
     const cli = fileURLToPath(new URL('./cli.js', import.meta.url));
     const document = path.join(directory, 'split.opcb');
@@ -713,7 +728,12 @@ test('CLI splits tracks in place', { skip: withAddon }, () => {
         assert.match(run('track', 'split', document, '--id', 'track-1', '--x', '4', '--y', '0'), /split track-1 into track-1 and track-2/);
         assert.match(run('list', document), /tracks=2/);
 
+        run('slot', 'add', document, '--net', 'VCC', '--from', '0,5', '--to', '5,5', '--width', '0.8');
+        assert.match(run('slot', 'update', document, '--id', 'slot-1', '--width', '1.2', '--to', '6,5'), /updated slot-1/);
+        assert.match(run('drill', 'report', document), /holes=0 slots=1 tools=1/);
+
         assert.match(runFail('track', 'split', document, '--id', 'track-1', '--x', '0', '--y', '0'), /must lie between the track endpoints/);
+        assert.match(runFail('slot', 'update', document, '--id', 'slot-1', '--to', '0,5'), /needs two distinct endpoints/);
     } finally {
         fs.rmSync(directory, { recursive: true, force: true });
     }

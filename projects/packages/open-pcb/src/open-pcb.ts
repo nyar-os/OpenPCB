@@ -77,6 +77,7 @@ import type {
     UpdateKeepoutOptions,
     UpdateLayerOptions,
     UpdatePadInput,
+    UpdateSlotOptions,
     UpdateTextOptions,
     UpdateTrackOptions,
     UpdateViaOptions,
@@ -481,6 +482,26 @@ function attach(
             ensure();
             return commit((current) => service.addSlot(current, options));
         },
+        async updateSlot(options: UpdateSlotOptions): Promise<BoardEditResult> {
+            ensure();
+            assertObjectId(options.id);
+            if (options.net !== undefined && (typeof options.net !== 'string' || options.net.trim().length === 0)) {
+                throw new OpenPCBError('session/argument-invalid', '`net` must be a non-empty string');
+            }
+            if (options.from !== undefined) {
+                assertPoint(options.from, 'from');
+            }
+            if (options.to !== undefined) {
+                assertPoint(options.to, 'to');
+            }
+            if (options.width !== undefined && (!Number.isFinite(options.width) || options.width <= 0)) {
+                throw new OpenPCBError('session/argument-invalid', '`width` must be a finite number greater than zero');
+            }
+            if (options.net === undefined && options.from === undefined && options.to === undefined && options.width === undefined) {
+                throw new OpenPCBError('session/argument-invalid', 'a slot update needs `net`, `from`, `to` or `width`');
+            }
+            return commit((current) => service.updateSlot(current, options));
+        },
         async deleteSlot(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteSlot(current, id));
@@ -688,6 +709,12 @@ function assertObjectId(id: string): void {
 function assertFinite(value: number, field: string): void {
     if (typeof value !== 'number' || !Number.isFinite(value)) {
         throw new OpenPCBError('session/argument-invalid', `\`${field}\` must be a finite number`);
+    }
+}
+
+function assertPoint(point: readonly [number, number], field: string): void {
+    if (!Array.isArray(point) || point.length !== 2 || !Number.isFinite(point[0]) || !Number.isFinite(point[1])) {
+        throw new OpenPCBError('session/argument-invalid', `\`${field}\` must be an \`[x, y]\` pair of finite numbers`);
     }
 }
 

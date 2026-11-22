@@ -65,6 +65,7 @@ import type {
     UpdateKeepoutOptions,
     UpdateLayerOptions,
     UpdatePadInput,
+    UpdateSlotOptions,
     UpdateTextOptions,
     UpdateTrackOptions,
     UpdateViaOptions,
@@ -229,6 +230,13 @@ export function updateVia(handle: number, options: UpdateViaOptions): BoardEditR
 /** Adds one plated routed slot to an open board. */
 export function addSlot(handle: number, options: AddSlotOptions): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.addSlot').board_add_slot(handle, JSON.stringify(options)));
+}
+
+/** Updates the net, endpoints or width of one routed slot in place. */
+export function updateSlot(handle: number, options: UpdateSlotOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.updateSlot').board_update_slot(handle, JSON.stringify(options)),
+    );
 }
 
 /** Deletes one slot from an open board. */

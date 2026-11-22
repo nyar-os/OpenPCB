@@ -1473,6 +1473,50 @@ impl Board {
         Ok(object)
     }
 
+    /// Updates the net, endpoints or width of one plated routed slot.
+    ///
+    /// A partial update keeps every field it does not name. The width is the
+    /// Excellon tool diameter, so a new width changes the drill file and drill
+    /// map input only; no other geometry is recomputed. At least one field is
+    /// required, the endpoints must still differ and a rejected request leaves
+    /// the board untouched.
+    pub(crate) fn update_slot(&mut self, request: UpdateSlotRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .slots
+            .iter()
+            .position(|slot| slot.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no slot with id `{}`", request.id)))?;
+        for layer in self.layers.iter().filter(|layer| layer.kind == LayerKind::Copper) {
+            if layer.locked {
+                return Err(ServiceError::new("board/layer-locked", format!("layer `{}` is locked", layer.id)));
+            }
+        }
+        if request.net.is_none() && request.from.is_none() && request.to.is_none() && request.width.is_none() {
+            return Err(crate::argument("a slot update needs `net`, `from`, `to` or `width`"));
+        }
+        let net = self.declared_net(request.net.as_deref())?;
+        let width = request.width.map(|width| positive(width, "width")).transpose()?;
+        let from = request.from.map(|from| finite_pair(from, "from")).transpose()?;
+        let to = request.to.map(|to| finite_pair(to, "to")).transpose()?;
+        let slot = &mut self.slots[index];
+        let next_from = from.unwrap_or(slot.from);
+        let next_to = to.unwrap_or(slot.to);
+        if (next_to[0] - next_from[0]).hypot(next_to[1] - next_from[1]) <= 1e-9 {
+            return Err(crate::argument("a slot needs two distinct endpoints"));
+        }
+        if net.is_some() {
+            slot.net = net;
+        }
+        if let Some(width) = width {
+            slot.width = width;
+        }
+        slot.from = next_from;
+        slot.to = next_to;
+        let object = slot.to_value();
+        self.revision += 1;
+        Ok(object)
+    }
+
     /// Removes one slot by id and returns the removed id.
     pub(crate) fn delete_slot(&mut self, id: &str) -> Result<String, ServiceError> {
         let index = self
@@ -3362,6 +3406,26 @@ pub struct AddSlotRequest {
     pub to: [f64; 2],
     /// Tool diameter, equal to the cut width; greater than zero.
     pub width: f64,
+}
+
+/// Request of [`crate::update_slot`]. At least one editable field is required.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSlotRequest {
+    /// Slot id to update.
+    pub id: String,
+    /// New declared net name.
+    #[serde(default)]
+    pub net: Option<String>,
+    /// New first endpoint of the slot centreline.
+    #[serde(default)]
+    pub from: Option<[f64; 2]>,
+    /// New second endpoint of the slot centreline.
+    #[serde(default)]
+    pub to: Option<[f64; 2]>,
+    /// New tool diameter, equal to the cut width; greater than zero.
+    #[serde(default)]
+    pub width: Option<f64>,
 }
 
 /// Request of [`crate::add_teardrops`].

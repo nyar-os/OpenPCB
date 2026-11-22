@@ -17,7 +17,7 @@ use crate::{
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
     ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, SetOutlineRequest,
     SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest,
-    UpdateKeepoutRequest, UpdateLayerRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest,
+    UpdateKeepoutRequest, UpdateLayerRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest,
     UpdateZoneRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class,
     add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
@@ -26,7 +26,7 @@ use crate::{
     drill_report, export, impedance_table, import, inspect, keepout_report, list_texts, move_footprint, open, outline_geometry,
     panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, split_track,
     stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_keepout, update_layer,
-    update_text, update_track, update_via, update_zone, zone_report,
+    update_slot, update_text, update_track, update_via, update_zone, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -2629,6 +2629,73 @@ fn tracks_split_at_a_point_and_validate_the_split_point() {
             .code,
         "board/layer-locked"
     );
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn slots_update_in_place_and_reject_coincident_endpoints() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    add_slot(handle, AddSlotRequest { net: Some("VCC".to_string()), from: [0.0, 0.0], to: [5.0, 0.0], width: 0.8 })
+        .expect("the slot is added");
+
+    let updated = update_slot(
+        handle,
+        UpdateSlotRequest {
+            id: "slot-1".to_string(),
+            net: Some("GND".to_string()),
+            from: Some([1.0, 1.0]),
+            to: Some([6.0, 1.0]),
+            width: Some(1.2),
+        },
+    )
+    .expect("every field updates in place");
+    assert_eq!(updated["object"]["id"], "slot-1");
+    assert_eq!(updated["object"]["net"], "GND");
+    assert_eq!(updated["object"]["from"], json!([1.0, 1.0]));
+    assert_eq!(updated["object"]["to"], json!([6.0, 1.0]));
+    assert_eq!(updated["object"]["width"], 1.2);
+    assert_eq!(updated["revision"], 5, "an in-place edit bumps the revision once");
+
+    assert_eq!(
+        update_slot(handle, UpdateSlotRequest { id: "slot-404".to_string(), width: Some(1.0), ..Default::default() })
+            .expect_err("a missing id is reported")
+            .code,
+        "object/not-found"
+    );
+    assert_eq!(
+        update_slot(handle, UpdateSlotRequest { id: "slot-1".to_string(), ..Default::default() })
+            .expect_err("an empty patch is rejected")
+            .code,
+        "session/argument-invalid"
+    );
+    assert_eq!(
+        update_slot(
+            handle,
+            UpdateSlotRequest { id: "slot-1".to_string(), net: Some("NOPE".to_string()), ..Default::default() }
+        )
+        .expect_err("an undeclared net is rejected")
+        .code,
+        "session/argument-invalid"
+    );
+    assert_eq!(
+        update_slot(handle, UpdateSlotRequest { id: "slot-1".to_string(), to: Some([1.0, 1.0]), ..Default::default() })
+            .expect_err("coincident endpoints are rejected")
+            .code,
+        "session/argument-invalid"
+    );
+    assert_eq!(
+        update_slot(handle, UpdateSlotRequest { id: "slot-1".to_string(), width: Some(0.0), ..Default::default() })
+            .expect_err("a zero width is rejected")
+            .code,
+        "session/argument-invalid"
+    );
+
+    let unchanged = update_slot(handle, UpdateSlotRequest { id: "slot-1".to_string(), width: Some(1.0), ..Default::default() })
+        .expect("the slot still updates after the rejected requests");
+    assert_eq!(unchanged["object"]["from"], json!([1.0, 1.0]), "a rejected request left the endpoints untouched");
+    assert_eq!(unchanged["object"]["net"], "GND");
     close(handle).expect("the board closes");
 }
 

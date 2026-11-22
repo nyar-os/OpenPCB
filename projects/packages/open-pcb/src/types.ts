@@ -805,6 +805,23 @@ export interface AddSlotOptions {
     readonly width: number;
 }
 
+/** Options of `board.updateSlot()`. At least one editable field is required. */
+export interface UpdateSlotOptions {
+    /** Slot id to update, for example `slot-1`. */
+    readonly id: ObjectId;
+    /** New declared net name. */
+    readonly net?: string;
+    /** New first endpoint of the slot centreline. */
+    readonly from?: readonly [number, number];
+    /** New second endpoint of the slot centreline. */
+    readonly to?: readonly [number, number];
+    /**
+     * New tool diameter, equal to the cut width, in millimetres. It changes the
+     * Excellon and drill-map input only; no other geometry is recomputed.
+     */
+    readonly width?: number;
+}
+
 /** Options of `board.stitchVias()`. */
 export interface StitchViasOptions {
     /** Declared net the stitching vias join. */
@@ -1252,6 +1269,7 @@ export interface Board {
     addVia(options: AddViaOptions): Promise<BoardEditResult>;
     updateVia(options: UpdateViaOptions): Promise<BoardEditResult>;
     addSlot(options: AddSlotOptions): Promise<BoardEditResult>;
+    updateSlot(options: UpdateSlotOptions): Promise<BoardEditResult>;
     deleteSlot(id: ObjectId): Promise<BoardEditResult>;
     stitchVias(options: StitchViasOptions): Promise<BoardEditResult>;
     deleteVia(id: ObjectId): Promise<BoardEditResult>;

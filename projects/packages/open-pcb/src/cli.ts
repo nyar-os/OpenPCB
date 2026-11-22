@@ -976,6 +976,57 @@ slot
     });
 
 slot
+    .command('update', 'cli.cmd.slot-update')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--net <name>', 'cli.opt.net')
+    .option('--from <x,y>', 'cli.opt.from')
+    .option('--to <x,y>', 'cli.opt.to')
+    .option('--width <mm>', 'cli.opt.slot-width')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        const net = text(options, 'net');
+        const fromText = text(options, 'from');
+        const from = pair(fromText);
+        if (fromText !== undefined && from === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--from <x,y>` needs two numbers' });
+            return 2;
+        }
+        const toText = text(options, 'to');
+        const to = pair(toText);
+        if (toText !== undefined && to === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--to <x,y>` needs two numbers' });
+            return 2;
+        }
+        const widthText = text(options, 'width');
+        const width = numberOption(widthText);
+        if (widthText !== undefined && width === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--width <mm>` must be a finite number' });
+            return 2;
+        }
+        if (net === undefined && from === undefined && to === undefined && width === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', {
+                message: 'an update needs `--net`, `--from`, `--to` or `--width`',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.updateSlot({ id, net, from, to, width });
+            ctx.emitResult(result, `updated ${result.object?.id ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+slot
     .command('delete', 'cli.cmd.slot-delete')
     .option('--id <id>', 'cli.opt.id')
     .actionCtx(async (options, _args, ctx) => {

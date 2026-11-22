@@ -606,6 +606,17 @@ fn board_add_slot(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Updates one routed slot in place.
+#[function]
+fn board_update_slot(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::UpdateSlotRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::update_slot(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Deletes one slot from an open board.
 #[function]
 fn board_delete_slot(ctx: CallContext) -> Result<JsValue> {
@@ -1042,6 +1053,12 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
             let handle = rpc_handle(value)?;
             let request: open_pcb_model::AddSlotRequest = serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
             open_pcb_model::add_slot(handle, request)
+        }
+        "board.updateSlot" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::UpdateSlotRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::update_slot(handle, request)
         }
         "board.deleteSlot" => {
             let handle = rpc_handle(value)?;
@@ -1492,6 +1509,7 @@ register_module![
     board_delete_track,
     board_delete_via,
     board_add_slot,
+    board_update_slot,
     board_delete_slot,
     board_add_differential_pair,
     board_delete_differential_pair,

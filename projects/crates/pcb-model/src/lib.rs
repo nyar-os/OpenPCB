@@ -48,7 +48,7 @@ pub use board::{
     AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest,
     ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest,
     SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest,
-    UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateTextRequest, UpdateTrackRequest,
+    UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest,
     UpdateViaRequest, UpdateZoneRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
@@ -752,6 +752,16 @@ pub fn add_slot(handle: u64, request: AddSlotRequest) -> Result<Value, ServiceEr
     let mut object = Value::Null;
     store::mutate(handle, |board| {
         object = board.add_slot(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Updates the net, endpoints or width of one plated routed slot.
+pub fn update_slot(handle: u64, request: UpdateSlotRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.update_slot(request)?;
         Ok(())
     })?;
     edit_result(handle, Some(object), None)

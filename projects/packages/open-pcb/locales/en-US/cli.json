@@ -31,6 +31,7 @@
             "via-delete": "Delete a via by id and write the document back in place",
             "slot": "Edit the plated routed slots of a board document",
             "slot-add": "Add a plated routed slot and write the document back in place",
+            "slot-update": "Update the net, endpoints or width of a slot in place",
             "slot-delete": "Delete a slot by id and write the document back in place",
             "zone": "Edit the copper pour regions of a board document",
             "zone-add": "Add a copper pour polygon and write the document back in place",
