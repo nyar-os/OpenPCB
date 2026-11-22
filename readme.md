@@ -80,7 +80,10 @@ SDK and studio shell share one native model:
   layer plus `F_SilkS`, `B_SilkS`, `F_Mask`, `B_Mask`, `F_Paste`, `B_Paste` and
   `Edge_Cuts`; every file carries Gerber X2 file and
   aperture attributes (`%TF.FileFunction`, `%TF.Part`, `%TF.FilePolarity` and
-  `%TA.AperFunction`); the two silkscreen files carry the legend
+  `%TA.AperFunction`); copper files also write
+  object attributes: each track and via declares its net (`%TO.N`), each pad
+  declares its net, component reference (`%TO.C`) and pin (`%TO.P`), and every
+  object block closes with `%TD*%`; the two silkscreen files carry the legend
   tracks the document holds, the mask files open every outer-layer pad by the
   document's solder-mask expansion while vias stay tented, and the paste files
   open a stencil window exactly the size of each outer-layer pad.
@@ -381,8 +384,10 @@ is UTF-8 JSON: `{ "format": "open-pcb-board", "version": 1, "document": { ... } 
   and PDF writers draw them, the Gerber writer emits them into `F_SilkS` and
   `B_SilkS`, and the `silkscreen-over-pad` check reads them. DRC treats a
   silkscreen track as legend rather than a copper rule violation.
-- Gerber output carries X2 file and aperture attributes only: it writes no
-  object attributes (`%TO`), no net attributes (`%TO.N`) and no component data.
+- Gerber object attributes cover tracks, vias and pads: copper pours carry no
+  `%TO.N`, and no part data beyond the component reference and pin is written.
+  Attribute values replace Gerber-reserved separators (`,`, `*`, `%`) with `_`.
+  File and aperture attributes are unchanged.
 - It does not rotate rectangular pad apertures in Gerber output.
 - Solder-mask openings are rectangular, follow the pad's outer copper side and
   add the document's expansion per side; vias stay tented and inner-layer pads

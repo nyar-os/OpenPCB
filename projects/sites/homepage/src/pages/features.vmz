@@ -95,6 +95,7 @@
             <ul>
                 <li>Gerber RS-274X, drill (Excellon), bill of materials, pick-and-place and SVG are written from the open revision.</li>
                 <li>Gerber writes F_Cu, B_Cu, F_SilkS and Edge_Cuts files into a directory; the outline supplies the edge cuts.</li>
+                <li>Copper Gerber objects carry X2 attributes: a net on every track and via, a net, component reference and pin on every pad, each block closed with <code>%TD*%</code>.</li>
                 <li>STEP, IPC-2581, KiCad and PDF are declared but not implemented.</li>
                 <li>An export reports its format, revision, path, byte count and, for Gerber, every artifact name and size.</li>
                 <li>Unsupported targets reject with <code>capability/not-implemented</code>; writers use board coordinates, never hand-written geometry.</li>

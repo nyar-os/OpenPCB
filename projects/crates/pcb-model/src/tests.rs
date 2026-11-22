@@ -2086,6 +2086,52 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
 }
 
 #[test]
+fn gerber_writes_x2_object_attributes_and_closes_each_block() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: Some("VCC".to_string()),
+        },
+    )
+    .expect("the pad is added");
+    let target = directory.join("gerber");
+    export(handle, "gbr", &target).expect("Gerber export writes a directory");
+
+    let copper = fs::read_to_string(target.join("F_Cu.gbr")).expect("the copper layer is readable");
+    assert!(copper.contains("%TF.FileFunction,Copper,L1,Top*%"), "the file attribute is preserved");
+    assert!(copper.contains("%TA.AperFunction,Conductor*%"), "the aperture attribute is preserved");
+    assert!(
+        copper.contains("%TO.N,VCC*%\nD10*\nX10000000Y10000000D02*\nX30000000Y10000000D01*\n%TD*%\n"),
+        "the track declares its net and closes the block: {copper}"
+    );
+    assert!(
+        copper.contains("%TO.N,VCC*%\n%TO.C,U1*%\n%TO.P,U1,1*%\nD11*\nX30000000Y20000000D03*\n%TD*%\n"),
+        "the pad declares its net, component and pin: {copper}"
+    );
+    assert!(
+        copper.contains("%TO.N,VCC*%\nD12*\nX20000000Y20000000D03*\n%TD*%\n"),
+        "the via declares its net and closes the block: {copper}"
+    );
+    assert_eq!(copper.matches("%TD*%").count(), 4, "the aperture block and each of the three objects close once");
+
+    let bottom = fs::read_to_string(target.join("B_Cu.gbr")).expect("the bottom copper layer is readable");
+    assert!(bottom.contains("%TO.N,VCC*%"), "a through via declares its net on every covered layer");
+    let silk = fs::read_to_string(target.join("F_SilkS.gbr")).expect("the silkscreen layer is readable");
+    assert!(!silk.contains("%TO."), "non-copper layers keep no object attributes");
+
+    close(handle).expect("the board closes");
+}
+
+#[test]
 fn drill_map_writes_holes_tool_legend_and_back_drill_marks() {
     let directory = TempDir::new();
     let handle = created();

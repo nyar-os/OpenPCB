@@ -242,6 +242,10 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
             assert.match(content, /%FSLAX46Y46\*%/);
             assert.match(content, /M02\*/);
         }
+        const frontCopper = fs.readFileSync(path.join(gerber, 'F_Cu.gbr'), 'utf8');
+        assert.match(frontCopper, /%TO\.N,VCC\*%/, 'copper objects declare their net');
+        assert.match(frontCopper, /%TD\*%/, 'object attribute blocks are closed');
+        assert.match(frontCopper, /%TA\.AperFunction,Conductor\*%/, 'file and aperture attributes stay');
 
         const vector = await board.export({ format: 'pdf', target: path.join(directory, 'blinker.pdf') });
         assert.ok(vector.bytes > 0);

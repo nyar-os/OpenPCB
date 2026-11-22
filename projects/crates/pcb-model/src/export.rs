@@ -142,7 +142,15 @@ impl Gerber {
     }
 
     fn draw(&mut self, definition: String, from: [f64; 2], to: [f64; 2]) {
+        self.draw_with(definition, from, to, &[]);
+    }
+
+    /// Draws one segment with optional X2 object attributes.
+    fn draw_with(&mut self, definition: String, from: [f64; 2], to: [f64; 2], attributes: &[String]) {
         let code = self.aperture(definition);
+        for attribute in attributes {
+            self.body.push_str(attribute);
+        }
         let _ = writeln!(
             self.body,
             "D{code}*\nX{}Y{}D02*\nX{}Y{}D01*",
@@ -151,11 +159,28 @@ impl Gerber {
             gerber_number(to[0]),
             gerber_number(to[1])
         );
+        self.close_attributes(attributes);
     }
 
     fn flash(&mut self, definition: String, at: [f64; 2]) {
+        self.flash_with(definition, at, &[]);
+    }
+
+    /// Flashes one aperture with optional X2 object attributes.
+    fn flash_with(&mut self, definition: String, at: [f64; 2], attributes: &[String]) {
         let code = self.aperture(definition);
+        for attribute in attributes {
+            self.body.push_str(attribute);
+        }
         let _ = writeln!(self.body, "D{code}*\nX{}Y{}D03*", gerber_number(at[0]), gerber_number(at[1]));
+        self.close_attributes(attributes);
+    }
+
+    /// Ends an object attribute block; Gerber X2 requires it after the object.
+    fn close_attributes(&mut self, attributes: &[String]) {
+        if !attributes.is_empty() {
+            self.body.push_str("%TD*%\n");
+        }
     }
 
     /// Writes one closed polygon as a `G36`/`G37` region.
@@ -179,12 +204,13 @@ impl Gerber {
         let _ = writeln!(self.body, "X{}Y{}D01*\nG37*", gerber_number(first[0]), gerber_number(first[1]));
     }
 
-    /// Renders the file with Gerber X2 file and aperture attributes.
+    /// Renders the file with Gerber X2 file, aperture and object attributes.
     ///
     /// The header declares the generation software, the shared coordinate
     /// origin, the file function, positive polarity and a single part. The
     /// aperture block carries one `.AperFunction` attribute derived from the
-    /// file function, then resets it with `%TD*%` before the draws.
+    /// file function, then resets it with `%TD*%` before the draws. Copper
+    /// objects carry their own `%TO` block, closed with `%TD*%` after the object.
     fn render(&self, file_function: &str) -> String {
         let mut out = String::new();
         let _ = writeln!(out, "%TF.GenerationSoftware,OpenPCB,open-pcb,{}*%", env!("CARGO_PKG_VERSION"));
@@ -231,27 +257,73 @@ fn gerber_name(layer: &str) -> String {
     format!("{}.gbr", layer.replace('.', "_"))
 }
 
+/// Builds one `%TO.<key>,<value>*%` line, or nothing when the value is empty.
+fn object_attribute(key: &str, value: &str) -> Option<String> {
+    if value.is_empty() {
+        return None;
+    }
+    Some(format!("%TO.{key},{}*%\n", attribute_value(value)))
+}
+
+/// Replaces characters the Gerber attribute grammar reserves as separators.
+fn attribute_value(value: &str) -> String {
+    value.chars().map(|character| if matches!(character, ',' | '*' | '%' | '\r' | '\n') { '_' } else { character }).collect()
+}
+
+/// Net attribute of a track, via or pad; empty when the object has no net.
+fn net_attributes(net: Option<&str>) -> Vec<String> {
+    net.and_then(|net| object_attribute("N", net)).into_iter().collect()
+}
+
+/// Net and component attributes of a pad.
+///
+/// The component reference and the pin number are written separately: `.C`
+/// carries the reference, `.P` carries the reference and the pin. A pad without
+/// a number keeps only the reference.
+fn pad_attributes(net: Option<&str>, reference: &str, pin: &str) -> Vec<String> {
+    let mut attributes = net_attributes(net);
+    if let Some(attribute) = object_attribute("C", reference) {
+        attributes.push(attribute);
+    }
+    let reference = attribute_value(reference);
+    let pin = attribute_value(pin);
+    if !reference.is_empty() && !pin.is_empty() {
+        attributes.push(format!("%TO.P,{reference},{pin}*%\n"));
+    }
+    attributes
+}
+
 /// Writes one copper layer: tracks as draws, pads and covered vias as flashes.
+///
+/// Each object carries its X2 attributes: tracks and vias declare their net, and
+/// a pad declares its net, component reference and pin. The block is closed with
+/// `%TD*%` after the object so attributes never leak into the next one.
 fn copper(board: &Board, layer: &str) -> String {
     let scale = board.millimetres();
     let mut gerber = Gerber::default();
     for track in board.tracks.iter().filter(|track| track.layer == layer) {
-        gerber.draw(
+        gerber.draw_with(
             format!("C,{:.6}", track.width * scale),
             [track.from[0] * scale, track.from[1] * scale],
             [track.to[0] * scale, track.to[1] * scale],
+            &net_attributes(track.net.as_deref()),
         );
     }
     for footprint in board.footprints.iter().filter(|footprint| footprint.layer == layer) {
         for pad in &footprint.pads {
-            gerber.flash(
+            gerber.flash_with(
                 format!("R,{:.6}X{:.6}", pad.w * scale, pad.h * scale),
                 [(footprint.x + pad.x) * scale, (footprint.y + pad.y) * scale],
+                &pad_attributes(pad.net.as_deref(), &footprint.ref_, &pad.number),
             );
         }
     }
     for via in board.vias.iter().filter(|via| board.via_covers(via, layer)) {
-        gerber.flash(format!("C,{:.6}", via.diameter * scale), [via.at[0] * scale, via.at[1] * scale]);
+        gerber.flash_with(
+            format!("C,{:.6}", via.diameter * scale),
+            [via.at[0] * scale, via.at[1] * scale],
+            &net_attributes(via.net.as_deref()),
+        );
     }
     for zone in board.zones.iter().filter(|zone| zone.layer == layer) {
         gerber.region(&zone.points, scale);
