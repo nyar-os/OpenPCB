@@ -8,6 +8,7 @@
  * its own parser.
  */
 
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -31,7 +32,26 @@ import type {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-const cli = createCli('open-pcb').locales(path.join(here, '..', 'locales')).intro('cli.intro');
+/**
+ * Locates the shipped `locales/` directory.
+ *
+ * The compiled entry sits at `dist/cli.js` in a build and at
+ * `dist-test/src/cli.js` in the test build, so the package root is found by
+ * walking up to the directory that holds `locales/locales.json`.
+ */
+function localesDirectory(): string {
+    let directory = here;
+    while (directory !== path.dirname(directory)) {
+        const candidate = path.join(directory, 'locales');
+        if (existsSync(path.join(candidate, 'locales.json'))) {
+            return candidate;
+        }
+        directory = path.dirname(directory);
+    }
+    return path.join(here, '..', 'locales');
+}
+
+const cli = createCli('open-pcb').locales(localesDirectory()).intro('cli.intro');
 
 // Exported for contract audits that import the built entry to inspect the
 // command tree. Nothing runs until the file is executed as the program entry.

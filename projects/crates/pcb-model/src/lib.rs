@@ -38,6 +38,7 @@ mod route;
 mod store;
 
 #[cfg(test)]
+#[path = "../tests/unit/model.rs"]
 mod tests;
 
 use std::{fs, path::Path};

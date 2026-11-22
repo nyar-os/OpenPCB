@@ -14,9 +14,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { boardFormats, formatFromPath, formatInfo, OpenPCB, OpenPCBError } from './index.js';
-import type { BoardInput } from './index.js';
-import { nativeBinding } from './native.js';
+import { boardFormats, formatFromPath, formatInfo, OpenPCB, OpenPCBError } from '../src/index.js';
+import type { BoardInput } from '../src/index.js';
+import { nativeBinding } from '../src/native.js';
 
 const installed = (() => {
     try {
@@ -616,7 +616,7 @@ test('sidecar history persists across sessions and is cleared on a new target', 
 
 test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pcb-cli-'));
-    const cli = fileURLToPath(new URL('./cli.js', import.meta.url));
+    const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
     const document = path.join(directory, 'blinker.opcb');
     const run = (...args: string[]): string => {
         const result = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
@@ -755,7 +755,7 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
 
 test('CLI splits tracks and updates slots in place', { skip: withAddon }, () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pcb-split-cli-'));
-    const cli = fileURLToPath(new URL('./cli.js', import.meta.url));
+    const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
     const document = path.join(directory, 'split.opcb');
     const run = (...args: string[]): string => {
         const result = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
