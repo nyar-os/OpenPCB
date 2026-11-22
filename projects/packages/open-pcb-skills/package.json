@@ -1,6 +1,6 @@
 {
     "name": "@wae/open-pcb-skills",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "description": "Agent skills for OpenPCB: board creation, DRC review, fabrication and assembly delivery",
     "license": "Apache-2.0",
     "type": "module",
