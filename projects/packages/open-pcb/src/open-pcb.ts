@@ -70,6 +70,8 @@ import type {
     UpdateFootprintOptions,
     UpdateLayerOptions,
     UpdatePadInput,
+    UpdateTrackOptions,
+    UpdateViaOptions,
 } from './types.js';
 
 /** Sidecar surface consumed by a board; provided only in `history: 'sidecar'` sessions. */
@@ -442,6 +444,10 @@ function attach(
             ensure();
             return commit((current) => service.addTrack(current, options));
         },
+        async updateTrack(options: UpdateTrackOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.updateTrack(current, options));
+        },
         async deleteTrack(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteTrack(current, id));
@@ -449,6 +455,10 @@ function attach(
         async addVia(options: AddViaOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.addVia(current, options));
+        },
+        async updateVia(options: UpdateViaOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.updateVia(current, options));
         },
         async addSlot(options: AddSlotOptions): Promise<BoardEditResult> {
             ensure();

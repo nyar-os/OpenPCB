@@ -204,6 +204,17 @@ fn board_add_track(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Updates the net, layer, width or endpoints of one track on an open board.
+#[function]
+fn board_update_track(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::UpdateTrackRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::update_track(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds one via to an open board.
 #[function]
 fn board_add_via(ctx: CallContext) -> Result<JsValue> {
@@ -212,6 +223,17 @@ fn board_add_via(ctx: CallContext) -> Result<JsValue> {
     let request: open_pcb_model::AddViaRequest =
         serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
     let value = open_pcb_model::add_via(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Updates the net, position, diameter or drill of one via on an open board.
+#[function]
+fn board_update_via(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::UpdateViaRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::update_via(handle, request).map_err(fail)?;
     respond(&ctx, &value)
 }
 
@@ -1300,7 +1322,9 @@ register_module![
     board_update_pad,
     board_delete_pad,
     board_add_track,
+    board_update_track,
     board_add_via,
+    board_update_via,
     board_stitch_vias,
     board_add_teardrops,
     board_set_via_back_drill,

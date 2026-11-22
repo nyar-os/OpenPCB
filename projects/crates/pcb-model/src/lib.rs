@@ -46,7 +46,8 @@ pub use board::{
     AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTrackRequest,
     AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest, ImpedanceRequest,
     ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
-    SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest, WidthRequest,
+    SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest, UpdatePadRequest,
+    UpdateTrackRequest, UpdateViaRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 pub use outline::OutlineGeometryRequest;
@@ -462,11 +463,31 @@ pub fn add_track(handle: u64, request: AddTrackRequest) -> Result<Value, Service
     edit_result(handle, Some(object), None)
 }
 
+/// Updates the net, layer, width or endpoints of one track on an open board.
+pub fn update_track(handle: u64, request: UpdateTrackRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.update_track(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
 /// Adds one via to an open board.
 pub fn add_via(handle: u64, request: AddViaRequest) -> Result<Value, ServiceError> {
     let mut object = Value::Null;
     store::mutate(handle, |board| {
         object = board.add_via(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Updates the net, position, diameter or drill of one via on an open board.
+pub fn update_via(handle: u64, request: UpdateViaRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.update_via(request)?;
         Ok(())
     })?;
     edit_result(handle, Some(object), None)

@@ -58,6 +58,8 @@ import type {
     UpdateFootprintOptions,
     UpdateLayerOptions,
     UpdatePadInput,
+    UpdateTrackOptions,
+    UpdateViaOptions,
 } from './types.js';
 
 /** Result of creating or opening a board. */
@@ -190,9 +192,21 @@ export function addTrack(handle: number, options: AddTrackOptions): BoardEditRes
     return decode<BoardEditResult>(() => binding('board.addTrack').board_add_track(handle, JSON.stringify(options)));
 }
 
+/** Updates the net, layer, width or endpoints of one track on an open board. */
+export function updateTrack(handle: number, options: UpdateTrackOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.updateTrack').board_update_track(handle, JSON.stringify(options)),
+    );
+}
+
 /** Adds one via to an open board. */
 export function addVia(handle: number, options: AddViaOptions): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.addVia').board_add_via(handle, JSON.stringify(options)));
+}
+
+/** Updates the net, position, diameter or drill of one via on an open board. */
+export function updateVia(handle: number, options: UpdateViaOptions): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.updateVia').board_update_via(handle, JSON.stringify(options)));
 }
 
 /** Adds one plated routed slot to an open board. */

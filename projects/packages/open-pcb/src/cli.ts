@@ -673,6 +673,59 @@ track
     });
 
 track
+    .command('update', 'cli.cmd.track-update')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--net <name>', 'cli.opt.net')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .option('--width <mm>', 'cli.opt.width')
+    .option('--from <x,y>', 'cli.opt.from')
+    .option('--to <x,y>', 'cli.opt.to')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        const net = text(options, 'net');
+        const layer = text(options, 'layer');
+        const widthText = text(options, 'width');
+        const width = numberOption(widthText);
+        if (widthText !== undefined && width === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--width <mm>` must be a finite number' });
+            return 2;
+        }
+        const fromText = text(options, 'from');
+        const from = pair(fromText);
+        if (fromText !== undefined && from === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--from <x,y>` needs two numbers' });
+            return 2;
+        }
+        const toText = text(options, 'to');
+        const to = pair(toText);
+        if (toText !== undefined && to === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--to <x,y>` needs two numbers' });
+            return 2;
+        }
+        if (net === undefined && layer === undefined && width === undefined && from === undefined && to === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', {
+                message: 'an update needs `--net`, `--layer`, `--width`, `--from` or `--to`',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.updateTrack({ id, net, layer, width, from, to });
+            ctx.emitResult(result, `updated ${result.object?.id ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+track
     .command('delete', 'cli.cmd.track-delete')
     .option('--id <id>', 'cli.opt.id')
     .actionCtx(async (options, _args, ctx) => {
@@ -734,6 +787,57 @@ via
                 toLayer: text(options, 'to-layer'),
             });
             ctx.emitResult(result, `added ${result.object?.id ?? 'via'} at ${at[0]},${at[1]}`);
+            return 0;
+        });
+        return 0;
+    });
+
+via
+    .command('update', 'cli.cmd.via-update')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--net <name>', 'cli.opt.net')
+    .option('--at <x,y>', 'cli.opt.at')
+    .option('--diameter <mm>', 'cli.opt.diameter')
+    .option('--drill <mm>', 'cli.opt.drill')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        const net = text(options, 'net');
+        const atText = text(options, 'at');
+        const at = pair(atText);
+        if (atText !== undefined && at === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--at <x,y>` needs two numbers' });
+            return 2;
+        }
+        const diameterText = text(options, 'diameter');
+        const diameter = numberOption(diameterText);
+        if (diameterText !== undefined && diameter === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--diameter <mm>` must be a finite number' });
+            return 2;
+        }
+        const drillText = text(options, 'drill');
+        const drill = numberOption(drillText);
+        if (drillText !== undefined && drill === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--drill <mm>` must be a finite number' });
+            return 2;
+        }
+        if (net === undefined && at === undefined && diameter === undefined && drill === undefined) {
+            ctx.fail('open-pcb.cli.number-invalid', {
+                message: 'an update needs `--net`, `--at`, `--diameter` or `--drill`',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.updateVia({ id, net, at, diameter, drill });
+            ctx.emitResult(result, `updated ${result.object?.id ?? id}`);
             return 0;
         });
         return 0;

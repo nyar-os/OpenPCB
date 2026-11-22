@@ -882,6 +882,36 @@ export interface UpdatePadInput {
     readonly net?: string;
 }
 
+/** Options of `board.updateTrack()`. At least one editable field is required. */
+export interface UpdateTrackOptions {
+    /** Track id to update, for example `track-1`. */
+    readonly id: ObjectId;
+    /** New declared net name. */
+    readonly net?: string;
+    /** New copper layer id. */
+    readonly layer?: string;
+    /** New trace width, in board units. */
+    readonly width?: number;
+    /** New segment start. */
+    readonly from?: readonly [number, number];
+    /** New segment end. */
+    readonly to?: readonly [number, number];
+}
+
+/** Options of `board.updateVia()`. At least one editable field is required. */
+export interface UpdateViaOptions {
+    /** Via id to update, for example `via-1`. */
+    readonly id: ObjectId;
+    /** New declared net name. */
+    readonly net?: string;
+    /** New via centre. */
+    readonly at?: readonly [number, number];
+    /** New copper diameter, in board units. */
+    readonly diameter?: number;
+    /** New finished drill diameter, in board units. */
+    readonly drill?: number;
+}
+
 /** Input of `board.deletePad()`. */
 export interface DeletePadInput {
     /** Footprint id that owns the pad, for example `fp-1`. */
@@ -1014,8 +1044,10 @@ export interface Board {
     updatePad(input: UpdatePadInput): Promise<BoardEditResult>;
     deletePad(input: DeletePadInput): Promise<BoardEditResult>;
     addTrack(options: AddTrackOptions): Promise<BoardEditResult>;
+    updateTrack(options: UpdateTrackOptions): Promise<BoardEditResult>;
     deleteTrack(id: ObjectId): Promise<BoardEditResult>;
     addVia(options: AddViaOptions): Promise<BoardEditResult>;
+    updateVia(options: UpdateViaOptions): Promise<BoardEditResult>;
     addSlot(options: AddSlotOptions): Promise<BoardEditResult>;
     deleteSlot(id: ObjectId): Promise<BoardEditResult>;
     stitchVias(options: StitchViasOptions): Promise<BoardEditResult>;

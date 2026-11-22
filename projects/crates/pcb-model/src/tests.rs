@@ -17,14 +17,15 @@ use crate::{
     AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
     ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, SetOutlineRequest,
     SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, UpdateFootprintRequest, UpdateLayerRequest,
-    WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot,
-    add_teardrops, add_test_point, add_track, add_via, add_waiver, add_zone, assign_net_class,
+    UpdateTrackRequest, UpdateViaRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout, add_layer, add_net,
+    add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_track, add_via, add_waiver, add_zone,
+    assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
     delete_severity, delete_slot, delete_test_point, delete_track, delete_via, delete_waiver, delete_zone, export,
     impedance_table, import, inspect, move_footprint, open, outline_geometry, panelize, redo, route, save, set_outline,
     set_rules, set_severity, set_stackup, set_via_back_drill, stackup_impedance, stackup_width, stitch_vias, store, summary,
-    undo, update_footprint, update_layer,
+    undo, update_footprint, update_layer, update_track, update_via,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -2231,6 +2232,140 @@ fn footprint_moves_updates_and_track_and_via_deletion() {
     assert_eq!(delete_track(handle, "track-1").expect("the track is deleted")["deleted"], "track-1");
     assert_eq!(delete_via(handle, "via-1").expect("the via is deleted")["deleted"], "via-1");
     assert_eq!(delete_track(handle, "track-1").expect_err("a missing track is reported").code, "object/not-found");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn tracks_update_in_place_and_validate_requests() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    add_layer(handle, AddLayerRequest { name: "Inner1".to_string(), kind: Some("copper".to_string()), color: None })
+        .expect("the layer is added");
+    let added = add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("VCC".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [0.0, 0.0],
+            to: [5.0, 0.0],
+        },
+    )
+    .expect("the track is routed");
+    assert_eq!(added["object"]["id"], "track-1");
+
+    let updated = update_track(
+        handle,
+        UpdateTrackRequest {
+            id: "track-1".to_string(),
+            width: Some(0.5),
+            layer: Some("Inner1".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the width and layer update in place");
+    assert_eq!(updated["object"]["width"], 0.5);
+    assert_eq!(updated["object"]["layer"], "Inner1");
+    assert_eq!(updated["object"]["net"], "VCC");
+    assert_eq!(updated["object"]["from"][0], 0.0);
+    assert_eq!(updated["revision"], 6, "an in-place edit bumps the revision once");
+
+    assert_eq!(
+        update_track(handle, UpdateTrackRequest { id: "track-404".to_string(), width: Some(0.3), ..Default::default() })
+            .expect_err("a missing id is reported")
+            .code,
+        "object/not-found"
+    );
+    assert_eq!(
+        update_track(handle, UpdateTrackRequest { id: "track-1".to_string(), ..Default::default() })
+            .expect_err("an empty patch is rejected")
+            .code,
+        "session/argument-invalid"
+    );
+    assert_eq!(
+        update_track(
+            handle,
+            UpdateTrackRequest { id: "track-1".to_string(), net: Some("NOPE".to_string()), ..Default::default() }
+        )
+        .expect_err("an undeclared net is rejected")
+        .code,
+        "session/argument-invalid"
+    );
+
+    update_layer(handle, UpdateLayerRequest { id: "Inner1".to_string(), locked: Some(true), ..Default::default() })
+        .expect("the old layer is locked");
+    assert_eq!(
+        update_track(handle, UpdateTrackRequest { id: "track-1".to_string(), width: Some(0.3), ..Default::default() })
+            .expect_err("a locked old layer rejects the edit")
+            .code,
+        "board/layer-locked"
+    );
+    update_layer(handle, UpdateLayerRequest { id: "Inner1".to_string(), locked: Some(false), ..Default::default() })
+        .expect("the old layer is unlocked");
+    update_layer(handle, UpdateLayerRequest { id: "B.Cu".to_string(), locked: Some(true), ..Default::default() })
+        .expect("the target layer is locked");
+    assert_eq!(
+        update_track(
+            handle,
+            UpdateTrackRequest { id: "track-1".to_string(), layer: Some("B.Cu".to_string()), ..Default::default() }
+        )
+        .expect_err("a locked target layer rejects the edit")
+        .code,
+        "board/layer-locked"
+    );
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn vias_update_in_place_and_validate_requests() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [2.0, 2.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+
+    let updated = update_via(
+        handle,
+        UpdateViaRequest { id: "via-1".to_string(), net: Some("GND".to_string()), drill: Some(0.25), ..Default::default() },
+    )
+    .expect("the net and drill update in place");
+    assert_eq!(updated["object"]["net"], "GND");
+    assert_eq!(updated["object"]["drill"], 0.25);
+    assert_eq!(updated["object"]["diameter"], 0.6);
+    assert_eq!(updated["object"]["at"][0], 2.0);
+    assert_eq!(updated["revision"], 5, "an in-place edit bumps the revision once");
+
+    assert_eq!(
+        update_via(handle, UpdateViaRequest { id: "via-404".to_string(), drill: Some(0.2), ..Default::default() })
+            .expect_err("a missing id is reported")
+            .code,
+        "object/not-found"
+    );
+    assert_eq!(
+        update_via(handle, UpdateViaRequest { id: "via-1".to_string(), ..Default::default() })
+            .expect_err("an empty patch is rejected")
+            .code,
+        "session/argument-invalid"
+    );
+    assert_eq!(
+        update_via(handle, UpdateViaRequest { id: "via-1".to_string(), net: Some("NOPE".to_string()), ..Default::default() })
+            .expect_err("an undeclared net is rejected")
+            .code,
+        "session/argument-invalid"
+    );
+
+    update_layer(handle, UpdateLayerRequest { id: "F.Cu".to_string(), locked: Some(true), ..Default::default() })
+        .expect("the copper layer is locked");
+    assert_eq!(
+        update_via(handle, UpdateViaRequest { id: "via-1".to_string(), drill: Some(0.2), ..Default::default() })
+            .expect_err("a locked layer rejects the edit")
+            .code,
+        "board/layer-locked"
+    );
     close(handle).expect("the board closes");
 }
 

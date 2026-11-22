@@ -16,7 +16,8 @@ Implemented:
 - Create, open, save, list, inspect, export, undo, redo and close a board.
 - Add nets, footprints, pads, tracks, vias and plated routed slots; record a
   back-drill depth and remaining stub on a through via; move, update and delete
-  footprints; add, update and delete their pads; delete tracks, vias and slots.
+  footprints; add, update and delete their pads; update, delete tracks, vias and
+  slots in place.
 - Add, rename, hide and lock layers; set a rectangular outline.
 - Report copper area per copper layer (`copper balance`) from tracks, vias, pads
   and pours, plus each layer's coverage and the imbalance across layers.
@@ -145,8 +146,10 @@ a format, check or target.
 | `open-pcb footprint pad update <file.opcb> --footprint <id> --number <n> [--x <mm>] [--y <mm>] [--w <mm>] [--h <mm>] [--net <name>]` | Update the geometry or net of a pad; at least one field is required. |
 | `open-pcb footprint pad delete <file.opcb> --footprint <id> --number <n>` | Delete a pad from a footprint. |
 | `open-pcb track add <file.opcb> --net <name> --layer <layer> --from <x,y> --to <x,y> --width <mm>` | Route one track segment in place. |
+| `open-pcb track update <file.opcb> --id <id> [--net <name>] [--layer <layer>] [--width <mm>] [--from <x,y>] [--to <x,y>]` | Update a track in place; at least one field is required. |
 | `open-pcb track delete <file.opcb> --id <id>` | Delete a track by id. |
 | `open-pcb via add <file.opcb> --net <name> --at <x,y> --diameter <mm> --drill <mm>` | Place a via in place. |
+| `open-pcb via update <file.opcb> --id <id> [--net <name>] [--at <x,y>] [--diameter <mm>] [--drill <mm>]` | Update a via in place; at least one field is required. |
 | `open-pcb via backdrill <file.opcb> --id <id> --depth <mm> --stub <mm>` | Record back-drill depth and remaining stub on a through via. Blind and buried vias are rejected. |
 | `open-pcb via delete <file.opcb> --id <id>` | Delete a via by id. |
 | `open-pcb slot add <file.opcb> [--net <name>] --from <x,y> --to <x,y> --width <mm>` | Add a plated routed slot; the width is the tool diameter and the endpoints must differ. |

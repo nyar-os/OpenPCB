@@ -1001,6 +1001,53 @@ impl Board {
         Ok(object)
     }
 
+    /// Updates the net, layer, width or endpoints of one track and returns its public shape.
+    pub(crate) fn update_track(&mut self, request: UpdateTrackRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .tracks
+            .iter()
+            .position(|track| track.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no track with id `{}`", request.id)))?;
+        self.editable_layer(&self.tracks[index].layer)?;
+        let layer = match request.layer {
+            Some(layer) => {
+                let layer = layer.trim().to_string();
+                if layer.is_empty() {
+                    return Err(crate::argument("a track needs a non-empty `layer`"));
+                }
+                self.editable_layer(&layer)?;
+                Some(layer)
+            }
+            None => None,
+        };
+        if request.net.is_none() && layer.is_none() && request.width.is_none() && request.from.is_none() && request.to.is_none()
+        {
+            return Err(crate::argument("a track update needs `net`, `layer`, `width`, `from` or `to`"));
+        }
+        let net = self.declared_net(request.net.as_deref())?;
+        let width = request.width.map(|width| positive(width, "width")).transpose()?;
+        let from = request.from.map(|from| finite_pair(from, "from")).transpose()?;
+        let to = request.to.map(|to| finite_pair(to, "to")).transpose()?;
+        let track = &mut self.tracks[index];
+        if net.is_some() {
+            track.net = net;
+        }
+        if let Some(layer) = layer {
+            track.layer = layer;
+        }
+        if let Some(width) = width {
+            track.width = width;
+        }
+        if let Some(from) = from {
+            track.from = from;
+        }
+        if let Some(to) = to {
+            track.to = to;
+        }
+        self.revision += 1;
+        Ok(json!(self.tracks[index].clone()))
+    }
+
     /// Adds linear teardrop copper at every pad-track junction.
     ///
     /// A teardrop is materialised as two ordinary copper tracks: from two
@@ -1185,6 +1232,38 @@ impl Board {
         self.vias.push(via);
         self.revision += 1;
         Ok(object)
+    }
+
+    /// Updates the net, position, diameter or drill of one via and returns its public shape.
+    pub(crate) fn update_via(&mut self, request: UpdateViaRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .vias
+            .iter()
+            .position(|via| via.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no via with id `{}`", request.id)))?;
+        self.editable_via(&self.vias[index])?;
+        if request.net.is_none() && request.at.is_none() && request.diameter.is_none() && request.drill.is_none() {
+            return Err(crate::argument("a via update needs `net`, `at`, `diameter` or `drill`"));
+        }
+        let net = self.declared_net(request.net.as_deref())?;
+        let at = request.at.map(|at| finite_pair(at, "at")).transpose()?;
+        let diameter = request.diameter.map(|diameter| positive(diameter, "diameter")).transpose()?;
+        let drill = request.drill.map(|drill| positive(drill, "drill")).transpose()?;
+        let via = &mut self.vias[index];
+        if net.is_some() {
+            via.net = net;
+        }
+        if let Some(at) = at {
+            via.at = at;
+        }
+        if let Some(diameter) = diameter {
+            via.diameter = diameter;
+        }
+        if let Some(drill) = drill {
+            via.drill = drill;
+        }
+        self.revision += 1;
+        Ok(self.via_value(&self.vias[index]))
     }
 
     /// Generates a stitching via fence along the inset board outline.
@@ -2758,6 +2837,49 @@ pub struct AddViaRequest {
     /// Copper layer the span ends on; omit both span fields for a through via.
     #[serde(default)]
     pub to_layer: Option<String>,
+}
+
+/// Request of [`crate::update_track`]. At least one editable field is required.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTrackRequest {
+    /// Track id to update.
+    pub id: String,
+    /// New declared net name.
+    #[serde(default)]
+    pub net: Option<String>,
+    /// New copper layer id.
+    #[serde(default)]
+    pub layer: Option<String>,
+    /// New trace width.
+    #[serde(default)]
+    pub width: Option<f64>,
+    /// New segment start.
+    #[serde(default)]
+    pub from: Option<[f64; 2]>,
+    /// New segment end.
+    #[serde(default)]
+    pub to: Option<[f64; 2]>,
+}
+
+/// Request of [`crate::update_via`]. At least one editable field is required.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateViaRequest {
+    /// Via id to update.
+    pub id: String,
+    /// New declared net name.
+    #[serde(default)]
+    pub net: Option<String>,
+    /// New via centre.
+    #[serde(default)]
+    pub at: Option<[f64; 2]>,
+    /// New copper diameter.
+    #[serde(default)]
+    pub diameter: Option<f64>,
+    /// New finished drill diameter.
+    #[serde(default)]
+    pub drill: Option<f64>,
 }
 
 /// Request of [`crate::add_slot`].
