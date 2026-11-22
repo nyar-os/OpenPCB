@@ -56,10 +56,10 @@ pnpm run check:rust     # fmt check, clippy -D warnings, crate tests
 pnpm typecheck          # tsc --noEmit across packages
 ```
 
-The `@wae/open-pcb` test script compiles the package and runs
-`node --test dist/smoke.test.js`. The smoke test needs a native addon for the
-current host, so build and stage the addon before running it from a clean
-checkout.
+The `@wae/open-pcb` test script compiles `src` and `tests` with
+`tsconfig.test.json` and runs `node --test dist-test/tests/smoke.test.js`. The
+smoke test needs a native addon for the current host, so build and stage the
+addon before running it from a clean checkout.
 
 `check:rust` runs:
 
