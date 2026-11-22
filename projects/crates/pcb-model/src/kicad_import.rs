@@ -513,11 +513,13 @@ fn track(node: &Node, layers: &BTreeSet<String>, nets: &BTreeMap<u32, String>, l
     Some(Track { id: String::new(), net, layer, width, from, to, teardrop: false })
 }
 
-/// Parses one through, blind or buried via; micro and unknown types are refused.
+/// Parses one through, blind, buried or micro via; unknown types are refused.
 ///
 /// The layer pair is read from `(layers ...)`: exactly two distinct copper
 /// layers are required, and they are reordered by stack position. An outer pair
-/// imports as a through via, any other pair keeps its endpoint ids.
+/// imports as a through via, any other pair keeps its endpoint ids. A `micro`
+/// type keeps its type only when the pair is adjacent and touches an outer
+/// layer; any other micro span is reported instead of approximated.
 fn via(node: &Node, copper: &[String], nets: &BTreeMap<u32, String>, losses: &mut Vec<Loss>) -> Option<Via> {
     let values = body(node)?;
     let Some(at) = child(values, "at").and_then(point2)
@@ -531,16 +533,18 @@ fn via(node: &Node, copper: &[String], nets: &BTreeMap<u32, String>, losses: &mu
         loss(losses, "kicad/via-invalid", "a via has a non-positive size or drill".to_string());
         return None;
     }
-    if let Some(kind) = child(values, "type").and_then(|node| body(node)?.first()).and_then(text)
-        && !matches!(kind, "through" | "blind" | "buried")
-    {
-        loss(
-            losses,
-            "kicad/via-type",
-            format!("via type `{kind}` is not stored; only through, blind and buried vias are imported"),
-        );
-        return None;
-    }
+    let micro = match child(values, "type").and_then(|node| body(node)?.first()).and_then(text) {
+        None | Some("through") | Some("blind") | Some("buried") => false,
+        Some("micro") => true,
+        Some(kind) => {
+            loss(
+                losses,
+                "kicad/via-type",
+                format!("via type `{kind}` is not stored; only through, blind, buried and micro vias are imported"),
+            );
+            return None;
+        }
+    };
     let mut span: Vec<String> = Vec::new();
     for layer in child(values, "layers").map(text_values).unwrap_or_default() {
         if !span.contains(&layer) {
@@ -558,6 +562,14 @@ fn via(node: &Node, copper: &[String], nets: &BTreeMap<u32, String>, losses: &mu
         return None;
     };
     let (low, high) = if first < second { (first, second) } else { (second, first) };
+    if micro && !(high == low + 1 && (low == 0 || high + 1 == copper.len())) {
+        loss(
+            losses,
+            "kicad/via-layer-span",
+            "a micro via must span two adjacent copper layers with one outer layer".to_string(),
+        );
+        return None;
+    }
     let (from, to) = (copper[low].clone(), copper[high].clone());
     let (from_layer, to_layer) = if from == "F.Cu" && to == "B.Cu" { (None, None) } else { (Some(from), Some(to)) };
     let net = match child(values, "net").and_then(net_number) {
@@ -570,7 +582,7 @@ fn via(node: &Node, copper: &[String], nets: &BTreeMap<u32, String>, losses: &mu
             }
         },
     };
-    Some(Via { id: String::new(), net, at, diameter, drill, from_layer, to_layer, back_drill: None })
+    Some(Via { id: String::new(), net, at, diameter, drill, from_layer, to_layer, micro, back_drill: None })
 }
 
 /// Edge.Cuts geometry collected before the outline is decided.

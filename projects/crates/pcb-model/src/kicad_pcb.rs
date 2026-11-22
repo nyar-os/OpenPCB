@@ -68,15 +68,17 @@ pub(crate) fn write(board: &Board) -> String {
     for via in &board.vias {
         let from = via.from_layer.as_deref().unwrap_or("F.Cu");
         let to = via.to_layer.as_deref().unwrap_or("B.Cu");
+        let kind = if via.micro { " (type micro)" } else { "" };
         let _ = writeln!(
             out,
-            "  (via (at {}) (size {}) (drill {}) (layers \"{}\" \"{}\") (net {}))",
+            "  (via (at {}) (size {}) (drill {}) (layers \"{}\" \"{}\") (net {}){})",
             point(via.at, scale),
             mm(via.diameter * scale),
             mm(via.drill * scale),
             sexpr(&kicad_layer_name(board, from)),
             sexpr(&kicad_layer_name(board, to)),
-            net_number(board, via.net.as_deref())
+            net_number(board, via.net.as_deref()),
+            kind
         );
     }
 

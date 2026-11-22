@@ -212,7 +212,7 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["vias"]["through"], "supported");
     assert_eq!(matrix["vias"]["blind"], "supported");
     assert_eq!(matrix["vias"]["buried"], "supported");
-    assert_eq!(matrix["vias"]["micro"], "unsupported");
+    assert_eq!(matrix["vias"]["micro"], "supported");
     assert_eq!(matrix["differentialPairs"], "supported");
     assert_eq!(matrix["backDrill"], "supported");
     assert_eq!(matrix["teardrops"]["linear"], "supported");
@@ -1788,6 +1788,7 @@ fn drc_flags_via_rules_and_netlist() {
         drill: 0.0,
         from_layer: None,
         to_layer: None,
+        micro: false,
         back_drill: None,
     });
     board.vias.push(Via {
@@ -1798,6 +1799,7 @@ fn drc_flags_via_rules_and_netlist() {
         drill: 0.3,
         from_layer: None,
         to_layer: None,
+        micro: false,
         back_drill: None,
     });
     board.footprints.push(Footprint {
@@ -4027,6 +4029,7 @@ fn via_spans_reject_invalid_arguments_and_locked_layers() {
         drill: 0.3,
         from_layer: Some("F.Cu".to_string()),
         to_layer: None,
+        micro: false,
         back_drill: None,
     });
     let directory = TempDir::new();
@@ -4044,12 +4047,239 @@ fn via_spans_reject_invalid_arguments_and_locked_layers() {
         drill: 0.3,
         from_layer: Some("B.Cu".to_string()),
         to_layer: Some("F.Cu".to_string()),
+        micro: false,
         back_drill: None,
     });
     let reversed_path = directory.join("reversed-span.opcb");
     fs::write(&reversed_path, serde_json::to_string(&Document::new(reversed)).expect("the document serializes"))
         .expect("the document is written");
     assert_eq!(open(&reversed_path).expect_err("a reversed span is rejected").code, "format/invalid");
+}
+
+#[test]
+fn micro_vias_round_trip_and_reject_illegal_spans() {
+    let handle = created();
+    inner_layers(handle, &["In1.Cu", "In2.Cu"]);
+
+    let micro = add_via(
+        handle,
+        AddViaRequest {
+            at: [1.0, 1.0],
+            diameter: 0.3,
+            drill: 0.15,
+            from_layer: Some("F.Cu".to_string()),
+            to_layer: Some("In1.Cu".to_string()),
+            kind: Some("micro".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the micro via is placed");
+    assert_eq!(micro["object"]["kind"], "micro");
+    assert_eq!(micro["object"]["fromLayer"], "F.Cu");
+    assert_eq!(micro["object"]["toLayer"], "In1.Cu");
+
+    add_via(
+        handle,
+        AddViaRequest {
+            at: [2.0, 2.0],
+            diameter: 0.3,
+            drill: 0.15,
+            from_layer: Some("In2.Cu".to_string()),
+            to_layer: Some("B.Cu".to_string()),
+            kind: Some("micro".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the micro via on the back outer layer is placed");
+
+    for (from, to) in [(Some("F.Cu"), Some("In2.Cu")), (Some("In1.Cu"), Some("In2.Cu")), (None, None)] {
+        let error = add_via(
+            handle,
+            AddViaRequest {
+                at: [3.0, 3.0],
+                diameter: 0.3,
+                drill: 0.15,
+                from_layer: from.map(str::to_string),
+                to_layer: to.map(str::to_string),
+                kind: Some("micro".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect_err("an illegal micro span is rejected");
+        assert_eq!(error.code, "via/micro-span", "{from:?} -> {to:?}");
+    }
+
+    assert_eq!(
+        add_via(
+            handle,
+            AddViaRequest {
+                at: [3.0, 3.0],
+                diameter: 0.3,
+                drill: 0.15,
+                from_layer: Some("F.Cu".to_string()),
+                to_layer: Some("In1.Cu".to_string()),
+                kind: Some("blind".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect_err("only micro is accepted as an explicit type")
+        .code,
+        "session/argument-invalid"
+    );
+
+    let blind = add_via(
+        handle,
+        AddViaRequest {
+            at: [4.0, 4.0],
+            diameter: 0.3,
+            drill: 0.15,
+            from_layer: Some("F.Cu".to_string()),
+            to_layer: Some("In1.Cu".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the blind via is placed");
+    let blind_id = blind["object"]["id"].as_str().expect("the via id").to_string();
+    let updated =
+        update_via(handle, UpdateViaRequest { id: blind_id.clone(), kind: Some("micro".to_string()), ..Default::default() })
+            .expect("the blind via becomes micro");
+    assert_eq!(updated["object"]["kind"], "micro");
+
+    let through = add_via(handle, AddViaRequest { at: [5.0, 5.0], diameter: 0.3, drill: 0.15, ..Default::default() })
+        .expect("the through via is placed");
+    let through_id = through["object"]["id"].as_str().expect("the via id").to_string();
+    assert_eq!(
+        update_via(handle, UpdateViaRequest { id: through_id, kind: Some("micro".to_string()), ..Default::default() })
+            .expect_err("a through span cannot become micro")
+            .code,
+        "via/micro-span"
+    );
+    assert_eq!(
+        update_via(handle, UpdateViaRequest { id: blind_id, kind: Some("buried".to_string()), ..Default::default() })
+            .expect_err("only micro is accepted as an explicit type")
+            .code,
+        "session/argument-invalid"
+    );
+
+    let directory = TempDir::new();
+    let path = directory.join("micro.opcb");
+    save(handle, &path, false).expect("the board saves");
+    let value: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the document is readable")).expect("the document is JSON");
+    let vias = value["document"]["vias"].as_array().expect("vias is an array");
+    let flags: Vec<bool> = vias.iter().map(|via| via["micro"].as_bool().unwrap_or(false)).collect();
+    assert_eq!(flags, [true, true, true, false], "micro flags persist and a through via omits the field");
+    assert!(vias[3].get("micro").is_none(), "a through via keeps the historical document shape");
+    close(handle).expect("the board closes");
+
+    let reopened = open(&path).expect("the document reopens");
+    let reopened_handle = handle_of(&reopened);
+    let kinds =
+        store::read(reopened_handle, |board| board.vias.iter().map(|via| board.via_kind(via).to_string()).collect::<Vec<_>>())
+            .expect("the board is readable");
+    assert_eq!(kinds, ["micro", "micro", "micro", "through"]);
+    close(reopened_handle).expect("the reopened board closes");
+}
+
+#[test]
+fn drill_report_lists_micro_vias_as_holes() {
+    let handle = created();
+    inner_layers(handle, &["In1.Cu"]);
+    add_via(
+        handle,
+        AddViaRequest {
+            at: [10.0, 10.0],
+            diameter: 0.3,
+            drill: 0.15,
+            from_layer: Some("F.Cu".to_string()),
+            to_layer: Some("In1.Cu".to_string()),
+            kind: Some("micro".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the micro via is placed");
+    add_via(handle, AddViaRequest { at: [20.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the through via is placed");
+
+    let report = drill_report(handle).expect("the drill report is built");
+    assert_eq!(report["holeCount"], 2, "the micro via is a hole like any other via");
+    assert_eq!(report["vias"]["micro"], 1);
+    assert_eq!(report["vias"]["through"], 1);
+    let holes = report["holes"].as_array().expect("holes is an array");
+    let micro = holes.iter().find(|hole| hole["at"][0].as_f64() == Some(10.0)).expect("the micro hole is listed");
+    assert_eq!(micro["kind"], "micro");
+    assert_eq!(micro["diameter"], 0.15);
+    assert!(micro["tool"].as_u64().is_some_and(|tool| tool > 0), "the micro hole owns a tool");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn kicad_import_keeps_legal_micro_spans_and_reports_illegal_ones() {
+    let directory = TempDir::new();
+    let path = directory.join("micro.kicad_pcb");
+    let text = "(kicad_pcb (version 20221018) (generator open-pcb)\n\
+        (layers (0 \"F.Cu\" signal) (1 \"In1.Cu\" signal) (2 \"In2.Cu\" signal) (31 \"B.Cu\" signal))\n\
+        (net 0 \"\")\n\
+        (via (at 1 1) (size 0.3) (drill 0.15) (layers \"F.Cu\" \"In1.Cu\") (type micro))\n\
+        (via (at 2 2) (size 0.3) (drill 0.15) (layers \"In2.Cu\" \"B.Cu\") (type micro))\n\
+        (via (at 3 3) (size 0.3) (drill 0.15) (layers \"F.Cu\" \"In2.Cu\") (type micro))\n\
+        (via (at 4 4) (size 0.3) (drill 0.15) (layers \"In1.Cu\" \"In2.Cu\") (type micro)))\n";
+    fs::write(&path, text).expect("the fixture is written");
+    let imported = import(&path).expect("the annotated board imports");
+    assert_eq!(imported["document"]["counts"]["vias"], 2, "only legal micro spans are imported");
+    let codes: Vec<&str> =
+        imported["lossCodes"].as_array().expect("codes are listed").iter().filter_map(Value::as_str).collect();
+    assert_eq!(codes, ["kicad/via-layer-span"]);
+    let imported_handle = handle_of(&imported);
+    let (spans, kinds) = store::read(imported_handle, |board| {
+        let spans = board.vias.iter().map(|via| (via.from_layer.clone(), via.to_layer.clone())).collect::<Vec<_>>();
+        (spans, board.vias.iter().map(|via| board.via_kind(via).to_string()).collect::<Vec<_>>())
+    })
+    .expect("the imported board is readable");
+    assert_eq!(
+        spans,
+        [(Some("F.Cu".to_string()), Some("In1.Cu".to_string())), (Some("In2.Cu".to_string()), Some("B.Cu".to_string()))]
+    );
+    assert_eq!(kinds, ["micro", "micro"]);
+    close(imported_handle).expect("the imported board closes");
+}
+
+#[test]
+fn kicad_export_writes_the_micro_token_and_reimports_it() {
+    let directory = TempDir::new();
+    let handle = created();
+    inner_layers(handle, &["In1.Cu"]);
+    add_via(
+        handle,
+        AddViaRequest {
+            at: [1.0, 1.0],
+            diameter: 0.3,
+            drill: 0.15,
+            from_layer: Some("F.Cu".to_string()),
+            to_layer: Some("In1.Cu".to_string()),
+            kind: Some("micro".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("the micro via is placed");
+    add_via(handle, AddViaRequest { at: [2.0, 2.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the through via is placed");
+
+    let target = directory.join("micro.kicad_pcb");
+    export(handle, "kicad_pcb", &target).expect("KiCad export writes");
+    let text = fs::read_to_string(&target).expect("the KiCad board is readable");
+    assert_eq!(text.matches("(type micro)").count(), 1, "only the micro via carries the token: {text}");
+    assert!(text.contains("(layers \"F.Cu\" \"In1.Cu\")"), "the micro span is written: {text}");
+    close(handle).expect("the board closes");
+
+    let imported = import(&target).expect("the exported board imports");
+    assert!(imported["losses"].as_array().expect("losses is an array").is_empty(), "the round trip loses nothing");
+    let imported_handle = handle_of(&imported);
+    let kinds =
+        store::read(imported_handle, |board| board.vias.iter().map(|via| board.via_kind(via).to_string()).collect::<Vec<_>>())
+            .expect("the imported board is readable");
+    assert_eq!(kinds, ["micro", "through"]);
+    close(imported_handle).expect("the imported board closes");
 }
 
 #[test]
@@ -4114,6 +4344,7 @@ fn unrouted_respects_the_via_layer_span() {
             drill: 0.3,
             from_layer: Some("F.Cu".to_string()),
             to_layer: Some("In1.Cu".to_string()),
+            ..Default::default()
         },
     )
     .expect("the blind via is placed");
@@ -4268,7 +4499,7 @@ fn kicad_import_round_trips_blind_and_buried_vias() {
 }
 
 #[test]
-fn kicad_import_refuses_micro_and_malformed_via_spans() {
+fn kicad_import_reports_micro_spans_and_unknown_via_types() {
     let directory = TempDir::new();
     let path = directory.join("via-types.kicad_pcb");
     let text = "(kicad_pcb (version 20221018) (generator open-pcb)\n\
@@ -4285,7 +4516,7 @@ fn kicad_import_refuses_micro_and_malformed_via_spans() {
     assert_eq!(imported["document"]["counts"]["vias"], 3, "only the valid spans are imported");
     let codes: Vec<&str> =
         imported["lossCodes"].as_array().expect("codes are listed").iter().filter_map(Value::as_str).collect();
-    assert_eq!(codes, ["kicad/via-type", "kicad/via-layer-span"]);
+    assert_eq!(codes, ["kicad/via-layer-span", "kicad/via-type"]);
     let imported_handle = handle_of(&imported);
     let spans = store::read(imported_handle, |board| {
         board.vias.iter().map(|via| (via.from_layer.clone(), via.to_layer.clone())).collect::<Vec<_>>()
@@ -4798,6 +5029,7 @@ fn back_drill_is_validated_exported_and_round_tripped() {
             drill: 0.3,
             from_layer: Some("F.Cu".to_string()),
             to_layer: Some("In1.Cu".to_string()),
+            ..Default::default()
         },
     )
     .expect("the blind via is placed");

@@ -561,7 +561,7 @@ fn import_holes(features: &[(String, &Element)], board: &mut Board, scale: f64, 
             };
             let id = format!("via-{}", board.next_via);
             board.next_via += 1;
-            vias.push(Via { id, net, at, diameter, drill, from_layer, to_layer, back_drill });
+            vias.push(Via { id, net, at, diameter, drill, from_layer, to_layer, micro: false, back_drill });
         }
     }
     board.vias.extend(vias);

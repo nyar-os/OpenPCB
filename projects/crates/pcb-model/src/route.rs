@@ -281,6 +281,7 @@ pub(crate) fn run(board: &mut Board, options: RouteOptions) -> Result<(Value, bo
             drill: via.drill,
             from_layer: None,
             to_layer: None,
+            micro: false,
             back_drill: None,
         });
     }

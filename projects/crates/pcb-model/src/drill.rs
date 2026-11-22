@@ -36,10 +36,12 @@ pub(crate) fn report(board: &Board) -> Value {
     let mut through = 0;
     let mut blind = 0;
     let mut buried = 0;
+    let mut micro = 0;
     let mut back_drilled = 0;
     for via in &board.vias {
         let diameter = round6(via.drill * scale);
         match board.via_kind(via) {
+            "micro" => micro += 1,
             "blind" => blind += 1,
             "buried" => buried += 1,
             _ => through += 1,
@@ -76,7 +78,7 @@ pub(crate) fn report(board: &Board) -> Value {
         "holeCount": holes.len(),
         "slotCount": slots.len(),
         "backDrilled": back_drilled,
-        "vias": { "through": through, "blind": blind, "buried": buried },
+        "vias": { "through": through, "blind": blind, "buried": buried, "micro": micro },
         "holes": holes,
         "slots": slots,
     })

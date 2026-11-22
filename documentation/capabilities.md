@@ -66,7 +66,7 @@ via-in-pad
 | Capability | Level |
 |------------|-------|
 | Through, blind and buried vias | `supported` |
-| Micro vias | `unsupported` |
+| Micro vias | `supported` |
 | Differential pairs | `supported` |
 | Back drill | `supported` |
 | Teardrops | `linear` supported; `arc` unsupported |
@@ -133,8 +133,10 @@ ipc2581/back-drill-invalid              ipc2581/units-unknown
 ```
 
 Both readers keep copper layers, nets, footprints and pads, tracks, through,
-blind and buried vias and a rectangular profile. Micro vias imported from KiCad
-stay in the ledger instead of being approximated.
+blind and buried vias and a rectangular profile. KiCad also imports a micro via
+when its span bridges two adjacent copper layers and one end is an outer layer;
+any other micro span stays in the ledger under `kicad/via-layer-span` instead of
+being approximated.
 
 ## Unsupported boundaries
 
@@ -214,6 +216,10 @@ stay in the ledger instead of being approximated.
   size; there is no paste expansion rule and mask-defined shapes are not written.
 - Pad drills are not stored. `annular-ring` evaluates vias only, and the drill
   map and Excellon file list via drills and routed slots, never pad drills.
+- A micro via is a typed via, not a smaller drill: it must bridge two adjacent
+  copper layers and at least one end must be `F.Cu` or `B.Cu`. Other spans are
+  rejected with `via/micro-span`, and the drill report, Excellon file and drill
+  map treat the via as an ordinary plated hole.
 - Plated routed slots live in `.opcb` and reach the Excellon file and drill map
   only. Gerber, IPC-2581, KiCad PCB, SVG, PDF and PNG output do not carry them,
   and the router and DRC checks do not treat a slot as copper or as a hole.

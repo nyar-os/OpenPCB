@@ -195,7 +195,7 @@ pub fn capabilities() -> Value {
             "through": "supported",
             "blind": "supported",
             "buried": "supported",
-            "micro": "unsupported",
+            "micro": "supported",
         },
         "differentialPairs": "supported",
         "backDrill": "supported",

@@ -82,6 +82,10 @@ assuming a format, check or export target works.
 - **One editable board document.** Layers, stackup, footprints, pads, nets,
   tracks, vias, slots, pours, keepouts, text items, net classes and test points
   share one revision counter and one JSON document.
+- **Vias for every span.** Through, blind and buried vias derive their span from
+  the copper stack, and micro vias are a stored type that must bridge two
+  adjacent layers with `F.Cu` or `B.Cu` at one end. KiCad PCB exchange keeps the
+  `micro` type, and the drill data treats it as an ordinary plated hole.
 - **Routing that states its result.** A deterministic two-layer autorouter
   connects nets with at least two pads, treats applicable copper keepouts as
   hard obstacles, and returns unrouted edges rather than approximating them.

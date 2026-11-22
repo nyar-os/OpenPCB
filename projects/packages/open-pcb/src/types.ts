@@ -384,7 +384,7 @@ export interface DrillReport {
     readonly holeCount: number;
     readonly slotCount: number;
     readonly backDrilled: number;
-    readonly vias: Readonly<Record<'through' | 'blind' | 'buried', number>>;
+    readonly vias: Readonly<Record<'through' | 'blind' | 'buried' | 'micro', number>>;
     readonly holes: readonly DrillHole[];
     readonly slots: readonly DrillSlot[];
 }
@@ -846,6 +846,12 @@ export interface AddViaOptions {
     readonly fromLayer?: string;
     /** Copper layer the span ends on; must sit below `fromLayer` in the stack. */
     readonly toLayer?: string;
+    /**
+     * Explicit via type. Only `micro` is accepted: the span must bridge two
+     * adjacent copper layers with one end on `F.Cu` or `B.Cu`. Omit it to let
+     * the span decide through, blind or buried.
+     */
+    readonly kind?: 'micro';
 }
 
 /** Options of `board.addSlot()`. */
@@ -1224,6 +1230,8 @@ export interface UpdateViaOptions {
     readonly diameter?: number;
     /** New finished drill diameter, in board units. */
     readonly drill?: number;
+    /** Mark the via as a micro via; its existing span must already be legal. */
+    readonly kind?: 'micro';
 }
 
 /** Input of `board.deletePad()`. */

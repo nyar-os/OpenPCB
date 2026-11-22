@@ -167,9 +167,11 @@ pub(crate) struct PlacedPad<'a> {
 /// One via.
 ///
 /// A via without `from_layer`/`to_layer` spans the whole copper stack; vias
-/// that set both endpoints are blind or buried. The document stores the span
-/// in snake_case and omits it for through vias, so documents written before
-/// blind and buried vias existed reopen unchanged.
+/// that set both endpoints are blind or buried. The `micro` flag types a via
+/// whose span bridges two adjacent copper layers with one outer layer. The
+/// document stores the span in snake_case and omits it for through vias, so
+/// documents written before blind, buried and micro vias existed reopen
+/// unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Via {
     /// Stable via id.
@@ -188,6 +190,13 @@ pub(crate) struct Via {
     /// Copper layer the span ends on, for a blind or buried via.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) to_layer: Option<String>,
+    /// Whether this via is a micro via.
+    ///
+    /// A micro via bridges two adjacent copper layers and one end must be an
+    /// outer layer. Documents written before micro vias existed omit the flag
+    /// and reopen as through, blind or buried vias.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) micro: bool,
     /// Back-drill information, when the via barrel is back drilled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) back_drill: Option<BackDrill>,
@@ -795,8 +804,35 @@ impl Board {
         self.copper_stack().iter().position(|id| *id == layer).is_some_and(|index| low <= index && index <= high)
     }
 
-    /// Classifies one via as `through`, `blind` or `buried` by its endpoints.
+    /// Whether one layer pair is a legal micro-via span.
+    ///
+    /// A micro via bridges two adjacent copper layers, and at least one end
+    /// must be an outer layer (`F.Cu` or `B.Cu`). A missing endpoint is read as
+    /// the whole stack, so an omitted pair is legal only on a two-layer board.
+    pub(crate) fn micro_span(&self, from_layer: Option<&str>, to_layer: Option<&str>) -> bool {
+        let stack = self.copper_stack();
+        if stack.is_empty() {
+            return false;
+        }
+        let (low, high) = match (from_layer, to_layer) {
+            (None, None) => (0, stack.len() - 1),
+            (Some(from), Some(to)) => {
+                let (Some(low), Some(high)) = (stack.iter().position(|id| *id == from), stack.iter().position(|id| *id == to))
+                else {
+                    return false;
+                };
+                (low, high)
+            }
+            _ => return false,
+        };
+        low < high && high == low + 1 && (low == 0 || high + 1 == stack.len())
+    }
+
+    /// Classifies one via as `through`, `blind`, `buried` or `micro`.
     pub(crate) fn via_kind(&self, via: &Via) -> &'static str {
+        if via.micro {
+            return "micro";
+        }
         let stack = self.copper_stack();
         let (Some((low, high)), false) = (self.via_span(via), stack.is_empty())
         else {
@@ -1262,7 +1298,9 @@ impl Board {
     ///
     /// Omitting both `fromLayer` and `toLayer` places a through via. Setting
     /// both places a blind or buried via; the span is validated against the
-    /// declared copper stack before anything is written.
+    /// declared copper stack before anything is written. `kind: "micro"` marks
+    /// a micro via, which must bridge two adjacent copper layers with one end
+    /// on an outer layer.
     pub(crate) fn add_via(&mut self, request: AddViaRequest) -> Result<Value, ServiceError> {
         let (from_layer, to_layer) = match (request.from_layer, request.to_layer) {
             (None, None) => (None, None),
@@ -1283,6 +1321,15 @@ impl Board {
         if stack.is_empty() {
             return Err(crate::argument("the board declares no copper layers"));
         }
+        let micro = match request.kind.as_deref() {
+            None => false,
+            Some(kind) if kind.eq_ignore_ascii_case("micro") => true,
+            Some(kind) => {
+                return Err(crate::argument(format!(
+                    "`{kind}` is not a via kind; use `micro` or omit it and let the span decide"
+                )));
+            }
+        };
         let (low, high) = match (&from_layer, &to_layer) {
             (Some(from), Some(to)) => {
                 let low = stack
@@ -1300,6 +1347,12 @@ impl Board {
             }
             _ => (0, stack.len() - 1),
         };
+        if micro && !(high == low + 1 && (low == 0 || high + 1 == stack.len())) {
+            return Err(ServiceError::new(
+                "via/micro-span",
+                "a micro via must span two adjacent copper layers with one outer layer",
+            ));
+        }
         let span = if from_layer.is_none() && to_layer.is_none() {
             ["F.Cu", "B.Cu"].iter().map(|id| (*id).to_string()).collect::<Vec<_>>()
         }
@@ -1318,14 +1371,17 @@ impl Board {
         let drill = positive(request.drill, "drill")?;
         let id = format!("via-{}", self.next_via);
         self.next_via += 1;
-        let via = Via { id, net, at, diameter, drill, from_layer, to_layer, back_drill: None };
+        let via = Via { id, net, at, diameter, drill, from_layer, to_layer, micro, back_drill: None };
         let object = self.via_value(&via);
         self.vias.push(via);
         self.revision += 1;
         Ok(object)
     }
 
-    /// Updates the net, position, diameter or drill of one via and returns its public shape.
+    /// Updates the net, position, diameter, drill or type of one via and returns its public shape.
+    ///
+    /// `kind: "micro"` marks the via as a micro via; its existing span must
+    /// already bridge two adjacent copper layers with one outer layer.
     pub(crate) fn update_via(&mut self, request: UpdateViaRequest) -> Result<Value, ServiceError> {
         let index = self
             .vias
@@ -1333,8 +1389,28 @@ impl Board {
             .position(|via| via.id == request.id)
             .ok_or_else(|| ServiceError::new("object/not-found", format!("no via with id `{}`", request.id)))?;
         self.editable_via(&self.vias[index])?;
-        if request.net.is_none() && request.at.is_none() && request.diameter.is_none() && request.drill.is_none() {
-            return Err(crate::argument("a via update needs `net`, `at`, `diameter` or `drill`"));
+        let micro = match request.kind.as_deref() {
+            None => None,
+            Some(kind) if kind.eq_ignore_ascii_case("micro") => Some(true),
+            Some(kind) => {
+                return Err(crate::argument(format!(
+                    "`{kind}` is not a via kind; use `micro` or omit it and let the span decide"
+                )));
+            }
+        };
+        if request.net.is_none()
+            && request.at.is_none()
+            && request.diameter.is_none()
+            && request.drill.is_none()
+            && micro.is_none()
+        {
+            return Err(crate::argument("a via update needs `net`, `at`, `diameter`, `drill` or `kind`"));
+        }
+        if micro.is_some() && !self.micro_span(self.vias[index].from_layer.as_deref(), self.vias[index].to_layer.as_deref()) {
+            return Err(ServiceError::new(
+                "via/micro-span",
+                "a micro via must span two adjacent copper layers with one outer layer",
+            ));
         }
         let net = self.declared_net(request.net.as_deref())?;
         let at = request.at.map(|at| finite_pair(at, "at")).transpose()?;
@@ -1352,6 +1428,9 @@ impl Board {
         }
         if let Some(drill) = drill {
             via.drill = drill;
+        }
+        if let Some(micro) = micro {
+            via.micro = micro;
         }
         self.revision += 1;
         Ok(self.via_value(&self.vias[index]))
@@ -1418,6 +1497,7 @@ impl Board {
                 drill,
                 from_layer: None,
                 to_layer: None,
+                micro: false,
                 back_drill: None,
             });
         }
@@ -2765,6 +2845,12 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
                 )));
             }
         }
+        if via.micro && !board.micro_span(via.from_layer.as_deref(), via.to_layer.as_deref()) {
+            return Err(ServiceError::new(
+                "via/micro-span",
+                format!("via `{}` is a micro via but does not span two adjacent copper layers with one outer layer", via.id),
+            ));
+        }
         checks(via.at[0], &format!("via `{}` at.x", via.id))?;
         checks(via.at[1], &format!("via `{}` at.y", via.id))?;
         sizes(via.diameter, &format!("via `{}` diameter", via.id))?;
@@ -3336,6 +3422,9 @@ pub struct AddViaRequest {
     /// Copper layer the span ends on; omit both span fields for a through via.
     #[serde(default)]
     pub to_layer: Option<String>,
+    /// Explicit via type; only `micro` is accepted, or omit it and let the span decide.
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 /// Request of [`crate::update_track`]. At least one editable field is required.
@@ -3391,6 +3480,9 @@ pub struct UpdateViaRequest {
     /// New finished drill diameter.
     #[serde(default)]
     pub drill: Option<f64>,
+    /// New via type; only `micro` is accepted.
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 /// Request of [`crate::add_slot`].

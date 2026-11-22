@@ -189,23 +189,28 @@ open-pcb track delete <file> --id <id>
 
 ```bash
 open-pcb via add <file> --at <x,y> --diameter <mm> --drill <mm>
-    [--net <name>] [--from-layer <layer>] [--to-layer <layer>]
+    [--net <name>] [--from-layer <layer>] [--to-layer <layer>] [--type micro]
 ```
 
 `--at`, a positive `--diameter` and a positive `--drill` are required. The layer
-span defaults to a through via.
+span defaults to a through via. `--type micro` marks a micro via: the span must
+bridge two adjacent copper layers with `F.Cu` or `B.Cu` at one end, otherwise
+the command fails with `via/micro-span`. `--type` accepts only `micro`; omit it
+and the span decides through, blind or buried.
 
 ### `via update`, `delete`, `backdrill`
 
 ```bash
-open-pcb via update <file> --id <id> [--net <name>] [--at <x,y>] [--diameter <mm>] [--drill <mm>]
+open-pcb via update <file> --id <id> [--net <name>] [--at <x,y>] [--diameter <mm>] [--drill <mm>] [--type micro]
 open-pcb via delete <file> --id <id>
 open-pcb via backdrill <file> --id <id> [--depth <mm>] [--stub <mm>]
 ```
 
-An update needs at least one of `--net`, `--at`, `--diameter` or `--drill`.
-`backdrill` needs `--depth` or `--stub`; `--depth` is greater than zero and
-`--stub` is non-negative.
+An update needs at least one of `--net`, `--at`, `--diameter`, `--drill` or
+`--type`. A `--type micro` update keeps the existing span and rejects it with
+`via/micro-span` when that span is not two adjacent copper layers with one outer
+layer. `backdrill` needs `--depth` or `--stub`; `--depth` is greater than zero
+and `--stub` is non-negative.
 
 ## Slots
 

@@ -125,6 +125,7 @@
             "to-layer": "Bottom copper layer of a blind or buried via",
             "name": "Net or layer name",
             "kind": "Layer kind: copper, silkscreen, soldermask, assembly or mechanical",
+            "type": "Via type: micro. Omit it and the span decides through, blind or buried",
             "color": "Layer CSS colour, for example #c87533",
             "visible": "Layer visibility as true or false",
             "locked": "Layer lock state as true or false",

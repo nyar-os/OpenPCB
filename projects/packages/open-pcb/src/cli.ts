@@ -813,6 +813,7 @@ via
     .option('--drill <mm>', 'cli.opt.drill')
     .option('--from-layer <layer>', 'cli.opt.from-layer')
     .option('--to-layer <layer>', 'cli.opt.to-layer')
+    .option('--type <type>', 'cli.opt.type')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         if (file === undefined) {
@@ -834,6 +835,11 @@ via
             ctx.fail('open-pcb.cli.drill-required', { message: '`--drill <mm>` must be greater than zero' });
             return 2;
         }
+        const kind = text(options, 'type');
+        if (kind !== undefined && kind !== 'micro') {
+            ctx.fail('open-pcb.cli.type-invalid', { message: '`--type` accepts only `micro`' });
+            return 2;
+        }
         await withBoard(file, async (board) => {
             const result = await board.addVia({
                 net: text(options, 'net'),
@@ -842,6 +848,7 @@ via
                 drill,
                 fromLayer: text(options, 'from-layer'),
                 toLayer: text(options, 'to-layer'),
+                kind,
             });
             ctx.emitResult(result, `added ${result.object?.id ?? 'via'} at ${at[0]},${at[1]}`);
             return 0;
@@ -856,6 +863,7 @@ via
     .option('--at <x,y>', 'cli.opt.at')
     .option('--diameter <mm>', 'cli.opt.diameter')
     .option('--drill <mm>', 'cli.opt.drill')
+    .option('--type <type>', 'cli.opt.type')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         const id = text(options, 'id');
@@ -886,14 +894,19 @@ via
             ctx.fail('open-pcb.cli.number-invalid', { message: '`--drill <mm>` must be a finite number' });
             return 2;
         }
-        if (net === undefined && at === undefined && diameter === undefined && drill === undefined) {
+        const kind = text(options, 'type');
+        if (kind !== undefined && kind !== 'micro') {
+            ctx.fail('open-pcb.cli.type-invalid', { message: '`--type` accepts only `micro`' });
+            return 2;
+        }
+        if (net === undefined && at === undefined && diameter === undefined && drill === undefined && kind === undefined) {
             ctx.fail('open-pcb.cli.number-invalid', {
-                message: 'an update needs `--net`, `--at`, `--diameter` or `--drill`',
+                message: 'an update needs `--net`, `--at`, `--diameter`, `--drill` or `--type`',
             });
             return 2;
         }
         await withBoard(file, async (board) => {
-            const result = await board.updateVia({ id, net, at, diameter, drill });
+            const result = await board.updateVia({ id, net, at, diameter, drill, kind });
             ctx.emitResult(result, `updated ${result.object?.id ?? id}`);
             return 0;
         });
