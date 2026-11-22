@@ -47,6 +47,12 @@ const PDF_MARGIN_PT: f64 = 28.34646;
 /// Preview renderers this build can produce without writing a file.
 pub(crate) const SUPPORTED_PREVIEWS: &[&str] = &["svg"];
 
+/// Gap between a footprint's pad bounding box and its silkscreen outline.
+const SILK_MARGIN: f64 = 0.8;
+
+/// Cap height of a footprint reference designator, in millimetres.
+const REFERENCE_SIZE: f64 = 1.6;
+
 /// Writes one export target and returns its report.
 pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, ServiceError> {
     if format == "gbr" {
@@ -890,29 +896,39 @@ fn pdf(board: &Board) -> Result<Vec<u8>, ServiceError> {
         origin_y: max[1] + (page_height - board_height) / (2.0 * PT_PER_MM),
         width: page_width,
         height: page_height,
+        y_up: true,
     };
-    build_drawing(board, &layout, None)
+    build_drawing(board, &layout, None, true)
         .to_pdf()
         .map_err(|error| crate::invalid(format!("cannot render the PDF preview: {error}")))
 }
 
-/// Maps board millimetres onto a drawing canvas with Y pointing down.
+/// Maps board millimetres onto a drawing canvas.
+///
+/// Board documents use the KiCad convention of Y pointing down. SVG and the
+/// raster canvas share that direction, while PDF pages count Y upwards, so the
+/// layout records which way its target grows instead of always flipping.
 struct Layout {
     scale: f64,
     origin_x: f64,
     origin_y: f64,
     width: f64,
     height: f64,
+    y_up: bool,
 }
 
 impl Layout {
     fn point(&self, x: f64, y: f64) -> DrawPoint {
-        DrawPoint::new((x - self.origin_x) * self.scale, (self.origin_y - y) * self.scale)
+        let y = if self.y_up { self.origin_y - y } else { y - self.origin_y };
+        DrawPoint::new((x - self.origin_x) * self.scale, y * self.scale)
     }
 }
 
 /// Lowers the board onto a `document-drawing` canvas.
-fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>) -> Drawing {
+///
+/// `with_text_items` adds silkscreen text items; the SVG preview appends them
+/// itself so it can keep their rotation, while the PDF writer takes them here.
+fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>, with_text_items: bool) -> Drawing {
     let scale = board.millimetres();
     let mut drawing = Drawing::new(Size::new(layout.width, layout.height));
     if let Some(background) = background {
@@ -934,7 +950,7 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>) -> D
     }
     for zone in &board.zones {
         let points = zone.points.iter().map(|point| layout.point(point[0] * scale, point[1] * scale)).collect();
-        let mut style = Style::fill(layer_color_value(board, &zone.layer));
+        let mut style = fill_style(layer_color_value(board, &zone.layer));
         style.opacity = 0.35;
         drawing.push(Element::new(Shape::Polygon { points }, style));
     }
@@ -950,19 +966,53 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>) -> D
     for footprint in &board.footprints {
         let color = layer_color_value(board, &footprint.layer);
         for pad in &footprint.pads {
-            let points =
-                pad_corners(footprint, pad).iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect();
-            drawing.push(Element::new(Shape::Polygon { points }, Style::fill(color)));
+            let corners = pad_corners(footprint, pad);
+            let points = corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect();
+            drawing.push(Element::new(Shape::Polygon { points }, fill_style(color)));
+            if let Some(drill) = pad.drill.filter(|drill| *drill > 0.0) {
+                let center = pad_center(footprint, pad);
+                drawing.push(Element::new(
+                    Shape::Circle {
+                        center: layout.point(center[0] * scale, center[1] * scale),
+                        radius: (drill * scale * layout.scale / 2.0).max(0.1),
+                    },
+                    fill_style(DRILL_COLOR),
+                ));
+            }
         }
+        let Some((min, max)) = footprint_silk(footprint)
+        else {
+            continue;
+        };
+        let silk = layer_color_value(board, silk_layer(&footprint.layer));
+        let corners = [[min[0], min[1]], [max[0], min[1]], [max[0], max[1]], [min[0], max[1]]];
+        drawing.push(Element::new(
+            Shape::Polygon {
+                points: corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect(),
+            },
+            Style::stroke(silk, 0.15 * layout.scale),
+        ));
+        drawing.push(Element::new(
+            Shape::Text {
+                at: layout.point(min[0] * scale, (min[1] - 0.6) * scale),
+                text: footprint.ref_.clone(),
+                size: REFERENCE_SIZE * layout.scale,
+            },
+            fill_style(silk),
+        ));
     }
     for via in &board.vias {
+        let center = layout.point(via.at[0] * scale, via.at[1] * scale);
         drawing.push(Element::new(
-            Shape::Circle {
-                center: layout.point(via.at[0] * scale, via.at[1] * scale),
-                radius: via.diameter * scale * layout.scale / 2.0,
-            },
-            Style::fill(layer_color_value(board, "F.Cu")),
+            Shape::Circle { center, radius: via.diameter * scale * layout.scale / 2.0 },
+            fill_style(layer_color_value(board, "F.Cu")),
         ));
+        if via.drill > 0.0 {
+            drawing.push(Element::new(
+                Shape::Circle { center, radius: (via.drill * scale * layout.scale / 2.0).max(0.1) },
+                fill_style(DRILL_COLOR),
+            ));
+        }
     }
     for slot in &board.slots {
         drawing.push(Element::new(
@@ -973,7 +1023,62 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>) -> D
             Style::stroke(layer_color_value(board, "F.Cu"), slot.width * scale * layout.scale),
         ));
     }
+    if with_text_items {
+        for text in &board.texts {
+            drawing.push(Element::new(
+                Shape::Text {
+                    at: layout.point(text.at[0] * scale, text.at[1] * scale),
+                    text: text.text.clone(),
+                    size: text.size * scale * layout.scale,
+                },
+                fill_style(layer_color_value(board, &text.layer)),
+            ));
+        }
+    }
     drawing
+}
+
+/// Filled paint with no outline.
+///
+/// `Style::fill` keeps the library's default 1-unit black stroke, which turns
+/// every pad, zone and via into a black-ringed blob. Copper and silkscreen are
+/// single-colour areas, so a preview wants the fill alone.
+fn fill_style(color: Color) -> Style {
+    Style { stroke: None, fill: Some(color), ..Style::default() }
+}
+
+/// Colour of a drilled hole in every preview writer.
+const DRILL_COLOR: Color = Color::rgb(12, 20, 16);
+
+/// Centre of one pad in board coordinates, with the footprint rotation folded in.
+fn pad_center(footprint: &crate::board::Footprint, pad: &crate::board::Pad) -> [f64; 2] {
+    let angle = footprint.rotation.to_radians();
+    let (sin, cos) = (angle.sin(), angle.cos());
+    [footprint.x + pad.x * cos - pad.y * sin, footprint.y + pad.x * sin + pad.y * cos]
+}
+
+/// Silkscreen outline of one footprint in board units: its pad bounding box
+/// grown by [`SILK_MARGIN`].
+fn footprint_silk(footprint: &crate::board::Footprint) -> Option<([f64; 2], [f64; 2])> {
+    if footprint.pads.is_empty() {
+        return None;
+    }
+    let mut min = [f64::INFINITY, f64::INFINITY];
+    let mut max = [f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for pad in &footprint.pads {
+        for corner in pad_corners(footprint, pad) {
+            min[0] = min[0].min(corner[0]);
+            min[1] = min[1].min(corner[1]);
+            max[0] = max[0].max(corner[0]);
+            max[1] = max[1].max(corner[1]);
+        }
+    }
+    Some(([min[0] - SILK_MARGIN, min[1] - SILK_MARGIN], [max[0] + SILK_MARGIN, max[1] + SILK_MARGIN]))
+}
+
+/// Silkscreen layer of the side a footprint is placed on.
+fn silk_layer(layer: &str) -> &'static str {
+    if layer.starts_with("B.") { "B.SilkS" } else { "F.SilkS" }
 }
 
 /// Returns the four rotated corners of one pad in board units.
@@ -1054,42 +1159,19 @@ fn drawing_bounds(board: &Board) -> ([f64; 2], [f64; 2]) {
 /// Renders the composite and reports the canvas size the same viewBox used.
 pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceError> {
     let scale = board.millimetres();
-    let mut min = [f64::INFINITY, f64::INFINITY];
-    let mut max = [f64::NEG_INFINITY, f64::NEG_INFINITY];
-    if let Some(outline) = board.outline {
-        include(&mut min, &mut max, outline.from[0] * scale, outline.from[1] * scale);
-        include(&mut min, &mut max, outline.to[0] * scale, outline.to[1] * scale);
-    }
-    for track in &board.tracks {
-        for point in [track.from, track.to] {
-            include(&mut min, &mut max, point[0] * scale, point[1] * scale);
-        }
-    }
-    for footprint in &board.footprints {
-        for pad in &footprint.pads {
-            let x = (footprint.x + pad.x) * scale;
-            let y = (footprint.y + pad.y) * scale;
-            include(&mut min, &mut max, x - pad.w * scale / 2.0, y - pad.h * scale / 2.0);
-            include(&mut min, &mut max, x + pad.w * scale / 2.0, y + pad.h * scale / 2.0);
-        }
-    }
-    for via in &board.vias {
-        include(&mut min, &mut max, via.at[0] * scale, via.at[1] * scale);
-    }
-    for slot in &board.slots {
-        let radius = slot.width / 2.0;
-        include(&mut min, &mut max, (slot.from[0] - radius) * scale, (slot.from[1] - radius) * scale);
-        include(&mut min, &mut max, (slot.to[0] + radius) * scale, (slot.to[1] + radius) * scale);
-    }
-    for zone in &board.zones {
-        for point in &zone.points {
-            include(&mut min, &mut max, point[0] * scale, point[1] * scale);
-        }
-    }
+    let (mut min, mut max) = drawing_bounds(board);
     for text in &board.texts {
         let width = text.text.chars().count() as f64 * text.size * 0.6;
-        include(&mut min, &mut max, text.at[0] * scale, text.at[1] * scale);
+        include(&mut min, &mut max, text.at[0] * scale, (text.at[1] - text.size) * scale);
         include(&mut min, &mut max, (text.at[0] + width) * scale, (text.at[1] + text.size) * scale);
+    }
+    for footprint in &board.footprints {
+        let Some((silk_min, silk_max)) = footprint_silk(footprint)
+        else {
+            continue;
+        };
+        include(&mut min, &mut max, silk_min[0] * scale, (silk_min[1] - REFERENCE_SIZE - 0.6) * scale);
+        include(&mut min, &mut max, silk_max[0] * scale, silk_max[1] * scale);
     }
     if !min[0].is_finite() || !min[1].is_finite() || !max[0].is_finite() || !max[1].is_finite() {
         min = [0.0, 0.0];
@@ -1098,8 +1180,8 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
     let margin = 5.0;
     let width = (max[0] - min[0]).max(1.0) + margin * 2.0;
     let height = (max[1] - min[1]).max(1.0) + margin * 2.0;
-    let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: max[1] + margin, width, height };
-    let drawing = build_drawing(board, &layout, Some(Color::rgb(14, 26, 20)));
+    let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: min[1] - margin, width, height, y_up: false };
+    let drawing = build_drawing(board, &layout, Some(Color::rgb(14, 26, 20)), false);
     let mut content = drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the SVG preview: {error}")))?;
     if !board.texts.is_empty()
         && let Some(index) = content.rfind("</svg>")
@@ -1107,7 +1189,7 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
         let mut group = String::from("<g class=\"board-text\">");
         for text in &board.texts {
             let x = (text.at[0] * scale - layout.origin_x) * layout.scale;
-            let y = (layout.origin_y - text.at[1] * scale) * layout.scale;
+            let y = (text.at[1] * scale - layout.origin_y) * layout.scale;
             let _ = write!(
                 group,
                 "<text x=\"{x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"{:.3}\" fill=\"{}\" transform=\"rotate({:.3} {x:.3} {y:.3})\">{}</text>",
@@ -1168,10 +1250,10 @@ const PNG_OUTLINE: [u8; 3] = [217, 180, 74];
 const PNG_FRONT: [u8; 3] = [200, 117, 51];
 /// Back copper colour.
 const PNG_BACK: [u8; 3] = [47, 111, 176];
-/// Pad colour.
-const PNG_PAD: [u8; 3] = [200, 200, 200];
-/// Via colour.
-const PNG_VIA: [u8; 3] = [20, 20, 20];
+/// Silkscreen colour.
+const PNG_SILK: [u8; 3] = [230, 230, 230];
+/// Drilled-hole colour.
+const PNG_DRILL: [u8; 3] = [12, 20, 16];
 /// Monotonic suffix for the temporary file the encoder writes before the
 /// atomic rename, so concurrent exports never collide.
 static PNG_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1233,10 +1315,10 @@ fn png(board: &Board, path: &Path) -> Result<Value, ServiceError> {
     for footprint in &board.footprints {
         let angle = footprint.rotation.to_radians();
         let (sin, cos) = (angle.sin(), angle.cos());
+        let color = if footprint.layer.starts_with("B.") { PNG_BACK } else { PNG_FRONT };
         for pad in &footprint.pads {
             pads += 1;
-            let center = view
-                .point([(footprint.x + pad.x * cos - pad.y * sin) * scale, (footprint.x + pad.x * sin + pad.y * cos) * scale]);
+            let center = view.point(pad_center(footprint, pad).map(|value| value * scale));
             let half_w = (cos.abs() * pad.w + sin.abs() * pad.h) / 2.0 * scale * scale_px;
             let half_h = (sin.abs() * pad.w + cos.abs() * pad.h) / 2.0 * scale * scale_px;
             let x0 = (center[0] - half_w).floor() as i32;
@@ -1246,20 +1328,57 @@ fn png(board: &Board, path: &Path) -> Result<Value, ServiceError> {
             for y in y0..=y1 {
                 for x in x0..=x1 {
                     let dx = (x as f64 + 0.5 - center[0]) / scale_px;
-                    let dy = -(y as f64 + 0.5 - center[1]) / scale_px;
+                    let dy = (y as f64 + 0.5 - center[1]) / scale_px;
                     let local_x = dx * cos + dy * sin;
                     let local_y = -dx * sin + dy * cos;
                     if local_x.abs() <= pad.w / 2.0 + 1e-9 && local_y.abs() <= pad.h / 2.0 + 1e-9 {
-                        canvas.set(x, y, PNG_PAD);
+                        canvas.set(x, y, color);
                     }
                 }
             }
+            if let Some(drill) = pad.drill.filter(|drill| *drill > 0.0) {
+                canvas.circle(center, (drill * scale * scale_px / 2.0).max(0.5), PNG_DRILL);
+            }
         }
+        let Some((min, max)) = footprint_silk(footprint)
+        else {
+            continue;
+        };
+        let corners = [
+            view.point([min[0] * scale, min[1] * scale]),
+            view.point([max[0] * scale, min[1] * scale]),
+            view.point([max[0] * scale, max[1] * scale]),
+            view.point([min[0] * scale, max[1] * scale]),
+        ];
+        for index in 0..corners.len() {
+            canvas.line(corners[index], corners[(index + 1) % corners.len()], 0.6, PNG_SILK);
+        }
+        draw_text(
+            &mut canvas,
+            view.point([min[0] * scale, (min[1] - 0.6) * scale]),
+            &footprint.ref_,
+            REFERENCE_SIZE * scale * scale_px,
+            PNG_SILK,
+        );
     }
 
     for via in &board.vias {
+        let center = view.point([via.at[0] * scale, via.at[1] * scale]);
         let radius = (via.diameter * scale * scale_px / 2.0).max(0.5);
-        canvas.circle(view.point([via.at[0] * scale, via.at[1] * scale]), radius, PNG_VIA);
+        canvas.circle(center, radius, PNG_FRONT);
+        if via.drill > 0.0 {
+            canvas.circle(center, (via.drill * scale * scale_px / 2.0).max(0.5), PNG_DRILL);
+        }
+    }
+
+    for text in &board.texts {
+        draw_text(
+            &mut canvas,
+            view.point([text.at[0] * scale, text.at[1] * scale]),
+            &text.text,
+            text.size * scale * scale_px,
+            PNG_SILK,
+        );
     }
 
     let mut rgba = Vec::with_capacity(canvas.data.len() / 3 * 4);
@@ -1298,7 +1417,8 @@ fn png(board: &Board, path: &Path) -> Result<Value, ServiceError> {
     }))
 }
 
-/// Maps board millimetres onto image pixels with the Y axis pointing down.
+/// Maps board millimetres onto image pixels with the same Y direction as the
+/// document, so a board placed with small Y near the top renders near the top.
 struct View {
     scale: f64,
     offset_x: f64,
@@ -1307,7 +1427,7 @@ struct View {
 
 impl View {
     fn point(&self, point: [f64; 2]) -> [f64; 2] {
-        [point[0] * self.scale + self.offset_x, PNG_HEIGHT as f64 - 1.0 - (point[1] * self.scale + self.offset_y)]
+        [point[0] * self.scale + self.offset_x, point[1] * self.scale + self.offset_y]
     }
 }
 
@@ -1377,4 +1497,86 @@ fn pixel_segment_distance(point: [f64; 2], start: [f64; 2], end: [f64; 2]) -> f6
     let t = (((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length).clamp(0.0, 1.0);
     let closest = [start[0] + t * dx, start[1] + t * dy];
     ((point[0] - closest[0]).powi(2) + (point[1] - closest[1]).powi(2)).sqrt()
+}
+
+/// Draws one line of silkscreen text with the built-in 5×7 font.
+///
+/// `baseline` is the left end of the baseline in pixels and glyphs grow upwards
+/// from it. Characters the font does not know are skipped, so a legend in a
+/// script the font lacks leaves a gap instead of drawing noise.
+fn draw_text(canvas: &mut Canvas, baseline: [f64; 2], text: &str, height: f64, color: [u8; 3]) {
+    let unit = (height / 7.0).round().max(1.0);
+    let mut x = baseline[0];
+    for character in text.chars() {
+        let Some(rows) = glyph(character)
+        else {
+            x += 6.0 * unit;
+            continue;
+        };
+        for (row, bits) in rows.iter().enumerate() {
+            for column in 0..5 {
+                if bits & (0b10000 >> column) == 0 {
+                    continue;
+                }
+                let left = (x + column as f64 * unit).round() as i32;
+                let top = (baseline[1] - 7.0 * unit + row as f64 * unit).round() as i32;
+                for dy in 0..unit as i32 {
+                    for dx in 0..unit as i32 {
+                        canvas.set(left + dx, top + dy, color);
+                    }
+                }
+            }
+        }
+        x += 6.0 * unit;
+    }
+}
+
+/// 5×7 bitmap of one character; bit 4 is the leftmost column of a row.
+fn glyph(character: char) -> Option<[u8; 7]> {
+    let rows = match character.to_ascii_uppercase() {
+        '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
+        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+        '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
+        '3' => [0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110],
+        '4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
+        '5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
+        '6' => [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
+        '7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
+        '8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
+        '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
+        'A' => [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
+        'B' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
+        'C' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
+        'D' => [0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110],
+        'E' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
+        'F' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
+        'G' => [0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111],
+        'H' => [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
+        'I' => [0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+        'J' => [0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100],
+        'K' => [0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001],
+        'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
+        'M' => [0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001],
+        'N' => [0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
+        'O' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+        'P' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
+        'Q' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101],
+        'R' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001],
+        'S' => [0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110],
+        'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
+        'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+        'V' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
+        'W' => [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001],
+        'X' => [0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001],
+        'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
+        'Z' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111],
+        '-' => [0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000],
+        '.' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100],
+        '_' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b11111],
+        '/' => [0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000],
+        ':' => [0b00000, 0b01100, 0b01100, 0b00000, 0b01100, 0b01100, 0b00000],
+        ' ' => [0; 7],
+        _ => return None,
+    };
+    Some(rows)
 }

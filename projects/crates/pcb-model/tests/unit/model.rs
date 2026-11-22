@@ -5741,3 +5741,64 @@ fn pads_without_drills_add_no_fabrication_output() {
     assert_eq!(report["padHoles"], json!([]));
     close(handle).expect("the board closes");
 }
+
+#[test]
+fn svg_preview_draws_footprints_and_keeps_board_y_down() {
+    let directory = TempDir::new();
+    let handle = created();
+    set_outline(handle, SetOutlineRequest { from: [2.0, 2.0], to: [60.0, 40.0] }).expect("the outline is set");
+    for (reference, y) in [("A1", 10.0), ("A2", 30.0)] {
+        let footprint = add_footprint(
+            handle,
+            AddFootprintRequest {
+                reference: Some(reference.to_string()),
+                value: Some("X".to_string()),
+                footprint: Some("0603".to_string()),
+                x: Some(20.0),
+                y: Some(y),
+                rotation: Some(0.0),
+                layer: None,
+            },
+        )
+        .expect("the footprint is placed");
+        let id = footprint["object"]["id"]
+            .as_str()
+            .or_else(|| footprint["id"].as_str())
+            .expect("the footprint id is present")
+            .to_string();
+        for (index, offset) in [-1.0, 1.0].into_iter().enumerate() {
+            add_pad(
+                handle,
+                AddPadRequest {
+                    footprint: id.clone(),
+                    number: (index + 1).to_string(),
+                    x: offset,
+                    y: 0.0,
+                    w: 1.2,
+                    h: 1.4,
+                    net: None,
+                    drill: None,
+                },
+            )
+            .expect("the pad is added");
+        }
+    }
+
+    let path = directory.join("preview.svg");
+    export(handle, "svg", &path).expect("the SVG preview writes");
+    let svg = fs::read_to_string(&path).expect("the SVG is readable");
+    assert!(svg.contains(">A1</text>"), "the reference designator is drawn; got {svg}");
+    assert!(svg.contains(">A2</text>"), "the second reference is drawn; got {svg}");
+    assert!(svg.contains("stroke=\"#e6e6e6\""), "a silkscreen outline is drawn; got {svg}");
+    assert!(!svg.contains("fill=\"#c87533\" stroke=\"#000000\""), "pads are solid copper instead of black-ringed; got {svg}");
+
+    let y_of = |reference: &str| -> f64 {
+        let marker = format!(">{reference}</text>");
+        let end = svg.find(&marker).expect("the reference text exists");
+        let start = svg[..end].rfind("<text").expect("the text start exists");
+        let value = svg[start..end].split("y=\"").nth(1).expect("a y attribute exists");
+        value.split('"').next().expect("the y value exists").parse().expect("y is a number")
+    };
+    assert!(y_of("A1") < y_of("A2"), "a smaller board Y must stay higher in the preview");
+    close(handle).expect("the board closes");
+}

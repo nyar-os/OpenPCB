@@ -146,8 +146,9 @@ being approximated.
 ### Import and export
 
 - STEP is neither imported nor exported.
-- PNG is a fixed 1024 × 768 top-down raster. It does not render silkscreen text,
-  copper pours or a live viewport.
+- PNG is a fixed 1024 × 768 top-down raster. It draws copper, silkscreen
+  outlines and text through a built-in 5 × 7 font, but has no viewport and no
+  anti-aliasing.
 - There is no interactive board viewport. SVG is a writer, not a viewer.
 - Classification is not a support claim. An extension can be listed in the
   format registry while its entry stays `unsupported`.
@@ -273,8 +274,11 @@ being approximated.
 
 - Silkscreen text is a stored item with text, layer, position, rotation, size and
   thickness. `text add|update|delete|list` and `Board.addText()` manage it. The
-  SVG preview and the KiCad PCB writer draw it; the Gerber silkscreen files, PDF,
-  IPC-2581 and PNG writers do not.
+  SVG and PDF writers draw it, and the PNG raster draws it with a built-in
+  5 × 7 font; the Gerber silkscreen files and IPC-2581 writer do not.
+- Every preview outlines each footprint with a silkscreen rectangle around its
+  pad bounding box and prints the reference designator above it. The outline is
+  derived from the pads, not read from the footprint file.
 - The `silkscreen` check warns `silkscreen/no-reference-text` when no text item
   matches a footprint reference, and still checks pad placement against the
   outline.

@@ -96,26 +96,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         parts.push(footprint);
     }
 
+    // Every endpoint below sits on a pad centre or a via, so the composite
+    // preview shows closed copper rather than floating segments.
     let tracks = [
-        ([36.4, 28.8], [14.4, 44.0], "F.Cu", "SIG"),
-        ([43.6, 31.2], [58.4, 44.0], "F.Cu", "VCC"),
-        ([43.6, 28.8], [60.4, 16.0], "B.Cu", "SIG"),
-        ([36.4, 31.2], [21.6, 16.0], "B.Cu", "VCC"),
-        ([18.4, 44.0], [30.0, 52.0], "F.Cu", "SIG"),
-        ([30.0, 52.0], [60.0, 52.0], "F.Cu", "SIG"),
-        ([60.0, 52.0], [63.6, 44.0], "F.Cu", "SIG"),
-        ([16.4, 16.0], [16.4, 52.0], "B.Cu", "VCC"),
+        ([36.4, 28.8], [36.4, 44.0], "F.Cu", "VCC"),
+        ([36.4, 44.0], [58.4, 44.0], "F.Cu", "VCC"),
+        ([36.4, 31.2], [18.4, 31.2], "B.Cu", "VCC"),
+        ([18.4, 31.2], [18.4, 16.0], "B.Cu", "VCC"),
+        ([61.6, 44.0], [66.0, 44.0], "F.Cu", "VCC"),
+        ([66.0, 44.0], [66.0, 40.0], "F.Cu", "VCC"),
+        ([66.0, 40.0], [50.0, 40.0], "F.Cu", "VCC"),
+        ([39.0, 28.8], [39.0, 25.0], "F.Cu", "SIG"),
+        ([39.0, 25.0], [14.4, 25.0], "F.Cu", "SIG"),
+        ([14.4, 25.0], [14.4, 44.0], "F.Cu", "SIG"),
+        ([43.8, 28.8], [60.4, 28.8], "F.Cu", "SIG"),
+        ([60.4, 28.8], [60.4, 16.0], "F.Cu", "SIG"),
+        ([41.4, 31.2], [41.4, 40.0], "B.Cu", "SIG"),
+        ([41.4, 40.0], [26.0, 40.0], "B.Cu", "SIG"),
     ];
     for (from, to, layer, net) in tracks {
         add_track(handle, AddTrackRequest { net: Some(net.into()), layer: layer.into(), width: 0.5, from, to })?;
     }
 
-    for at in [[30.0, 20.0], [50.0, 20.0], [50.0, 40.0], [26.0, 40.0]] {
-        add_via(handle, AddViaRequest { net: Some("SIG".into()), at, diameter: 1.4, drill: 0.7, ..Default::default() })?;
+    for (at, net) in [([26.0, 40.0], "SIG"), ([50.0, 40.0], "VCC")] {
+        add_via(handle, AddViaRequest { net: Some(net.into()), at, diameter: 1.4, drill: 0.7, ..Default::default() })?;
     }
 
     for (text, at) in
-        [("U1", [37.0, 35.0]), ("R1", [14.0, 40.5]), ("R2", [60.0, 20.0]), ("C1", [58.0, 40.5]), ("D1", [18.0, 20.0])]
+        [("MCU", [37.0, 35.0]), ("10k", [12.0, 47.8]), ("1k", [60.0, 20.8]), ("100n", [56.0, 47.8]), ("LED", [17.0, 20.8])]
     {
         add_text(
             handle,
