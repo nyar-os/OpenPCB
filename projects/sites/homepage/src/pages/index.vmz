@@ -21,44 +21,57 @@
                     </Link>
                 </div>
             </div>
-            <div class="studio" aria-hidden="true">
-                <div class="studio__titlebar">
-                    <span class="studio__dots"><i></i><i></i><i></i></span>
-                    <span class="studio__mark">P</span>
-                    <span class="studio__name">OpenPCB Studio</span>
-                    <span class="studio__doc">no board open</span>
-                    <span class="studio__rev">unsaved</span>
+            <div class="sheet" aria-hidden="true">
+                <div class="sheet__head">
+                    <span class="sheet__no">SHEET 01 / 01</span>
+                    <span class="sheet__file">demo-board.svg</span>
+                    <span class="sheet__rev">EXPORT</span>
                 </div>
-                <div class="studio__toolbar">
-                    <span class="studio__group"><b>File</b><i></i><i></i><i></i><i></i></span>
-                    <span class="studio__group"><b>Document</b><i></i></span>
-                    <span class="studio__group"><b>View</b><i></i><i></i><i></i></span>
-                    <span class="studio__pill">Preview</span>
+                <div class="sheet__draw">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 82 62" role="img" aria-label="Exported OpenPCB board">
+                        <rect x="0" y="0" width="82" height="62" fill="#0e1a14"></rect>
+                        <path d="M5 57 L77 57 L77 5 L5 5 Z" fill="none" stroke="#d9b44a" stroke-width="0.15"></path>
+                        <line x1="37.4" y1="32.2" x2="15.4" y2="17" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="44.6" y1="29.8" x2="59.4" y2="17" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="44.6" y1="32.2" x2="61.4" y2="45" stroke="#2f6fb0" stroke-width="0.5"></line>
+                        <line x1="37.4" y1="29.8" x2="22.6" y2="45" stroke="#2f6fb0" stroke-width="0.5"></line>
+                        <line x1="19.4" y1="17" x2="31" y2="9" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="31" y1="9" x2="61" y2="9" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="61" y1="9" x2="64.6" y2="17" stroke="#c87533" stroke-width="0.5"></line>
+                        <line x1="17.4" y1="45" x2="17.4" y2="9" stroke="#2f6fb0" stroke-width="0.5"></line>
+                        <path d="M36.65 32.7 L38.15 32.7 L38.15 31.7 L36.65 31.7 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M39.05 32.7 L40.55 32.7 L40.55 31.7 L39.05 31.7 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M41.45 32.7 L42.95 32.7 L42.95 31.7 L41.45 31.7 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M43.85 32.7 L45.35 32.7 L45.35 31.7 L43.85 31.7 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M36.65 30.3 L38.15 30.3 L38.15 29.3 L36.65 29.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M39.05 30.3 L40.55 30.3 L40.55 29.3 L39.05 29.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M41.45 30.3 L42.95 30.3 L42.95 29.3 L41.45 29.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M43.85 30.3 L45.35 30.3 L45.35 29.3 L43.85 29.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M14.8 17.7 L16 17.7 L16 16.3 L14.8 16.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M18 17.7 L19.2 17.7 L19.2 16.3 L18 16.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M60.8 45.7 L62 45.7 L62 44.3 L60.8 44.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M64 45.7 L65.2 45.7 L65.2 44.3 L64 44.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M58.8 17.7 L60 17.7 L60 16.3 L58.8 16.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M62 17.7 L63.2 17.7 L63.2 16.3 L62 16.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M18.8 45.7 L20 45.7 L20 44.3 L18.8 44.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <path d="M22 45.7 L23.2 45.7 L23.2 44.3 L22 44.3 Z" fill="#c87533" stroke="#000000" stroke-width="1"></path>
+                        <ellipse cx="31" cy="41" rx="0.7" ry="0.7" fill="#c87533" stroke="#000000" stroke-width="1"></ellipse>
+                        <ellipse cx="51" cy="41" rx="0.7" ry="0.7" fill="#c87533" stroke="#000000" stroke-width="1"></ellipse>
+                        <ellipse cx="51" cy="21" rx="0.7" ry="0.7" fill="#c87533" stroke="#000000" stroke-width="1"></ellipse>
+                        <ellipse cx="27" cy="21" rx="0.7" ry="0.7" fill="#c87533" stroke="#000000" stroke-width="1"></ellipse>
+                        <g class="board-text" fill="#e6e6e6" font-family="monospace" font-size="2">
+                            <text x="38" y="26">U1</text>
+                            <text x="15" y="20.5">R1</text>
+                            <text x="61" y="41">R2</text>
+                            <text x="59" y="20.5">C1</text>
+                            <text x="19" y="41">D1</text>
+                        </g>
+                    </svg>
                 </div>
-                <div class="studio__body">
-                    <div class="studio__rail">
-                        <span class="studio__rail-label">Layers</span>
-                        <i></i>
-                        <i></i>
-                        <i></i>
-                        <span class="studio__rail-label">Targets</span>
-                        <i></i>
-                        <i></i>
-                    </div>
-                    <div class="studio__canvas">
-                        <div class="studio__ruler studio__ruler--h"></div>
-                        <div class="studio__ruler studio__ruler--v"></div>
-                        <div class="studio__grid">
-                            <span class="studio__empty">No board open</span>
-                        </div>
-                    </div>
+                <div class="sheet__foot">
+                    <span>open-pcb export demo.opcb --format svg</span>
+                    <span>5 footprints · 8 tracks · 4 vias</span>
                 </div>
-                <div class="studio__statusbar">
-                    <span>Native host attached</span>
-                    <span class="studio__spacer"></span>
-                    <span>zoom 100%</span>
-                </div>
-                <div class="studio__chip">one board model</div>
             </div>
         </section>
 
@@ -239,10 +252,14 @@
 <style>
 .hero {
     display: grid;
-    grid-template-columns: 1.05fr 0.95fr;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
     gap: 48px;
     align-items: center;
     padding: 40px 0 8px;
+}
+
+.hero > * {
+    min-width: 0;
 }
 
 .hero h1 {
@@ -263,221 +280,77 @@
     gap: 12px;
 }
 
-.studio {
-    position: relative;
-    margin-bottom: 12px;
+.sheet {
+    min-width: 0;
     border: 1px solid var(--opb-line);
     border-radius: calc(var(--opb-radius) + 2px);
     background: var(--opb-surface);
     box-shadow: 0 20px 44px rgba(20, 33, 43, 0.12);
+    overflow: hidden;
 }
 
-.studio__titlebar {
+.sheet__head {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 8px 10px;
+    gap: 10px;
+    padding: 7px 11px;
     border-bottom: 1px solid var(--opb-line);
-}
-
-.studio__dots {
-    display: inline-flex;
-    gap: 4px;
-    margin-right: 2px;
-}
-
-.studio__dots i {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--opb-line);
-}
-
-.studio__mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 19px;
-    height: 19px;
-    border-radius: 5px;
-    background: var(--opb-accent);
-    color: #f6faff;
+    background: var(--opb-surface-2);
+    color: var(--opb-muted);
+    font-family: "Cascadia Code", "Consolas", monospace;
     font-size: 10px;
-    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
 
-.studio__name {
+.sheet__no {
     color: var(--opb-ink);
-    font-size: 11px;
     font-weight: 600;
 }
 
-.studio__doc {
+.sheet__file {
     overflow: hidden;
-    color: var(--opb-muted);
-    font-size: 10.5px;
     text-overflow: ellipsis;
     white-space: nowrap;
+    letter-spacing: 0.02em;
+    text-transform: none;
 }
 
-.studio__rev {
+.sheet__rev {
     margin-left: auto;
     padding: 1px 7px;
     border: 1px solid var(--opb-line);
     border-radius: 999px;
-    color: var(--opb-muted);
-    font-family: "Cascadia Code", "Consolas", monospace;
-    font-size: 9px;
+    background: var(--opb-surface);
+    color: var(--opb-ink);
+    white-space: nowrap;
 }
 
-.studio__toolbar {
+.sheet__draw {
+    background: #0e1a14;
+}
+
+.sheet__draw svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.sheet__foot {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
+    justify-content: space-between;
     gap: 12px;
-    padding: 6px 10px 8px;
-    border-bottom: 1px solid var(--opb-line);
-    background: var(--opb-surface);
-}
-
-.studio__group {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-}
-
-.studio__group b {
-    margin-right: 2px;
-    color: var(--opb-muted);
-    font-size: 8px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
-
-.studio__group i {
-    display: block;
-    width: 22px;
-    height: 14px;
-    border: 1px solid var(--opb-line);
-    border-radius: 4px;
-    background: var(--opb-surface);
-}
-
-.studio__pill {
-    margin-left: auto;
-    padding: 2px 8px;
-    border: 1px solid var(--opb-line);
-    border-radius: 999px;
-    color: var(--opb-muted);
-    font-size: 9px;
-}
-
-.studio__body {
-    display: grid;
-    grid-template-columns: 74px minmax(0, 1fr);
-    height: 224px;
-}
-
-.studio__rail {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 9px;
-    border-right: 1px solid var(--opb-line);
-    background: var(--opb-surface-2);
-}
-
-.studio__rail-label {
-    color: var(--opb-muted);
-    font-size: 8px;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-}
-
-.studio__rail i {
-    display: block;
-    height: 18px;
-    border: 1px solid var(--opb-line);
-    border-radius: 4px;
-    background: var(--opb-surface);
-}
-
-.studio__canvas {
-    position: relative;
-    min-width: 0;
-    padding: 18px 0 0 18px;
-    background: var(--opb-bg);
-}
-
-.studio__ruler--h {
-    position: absolute;
-    top: 0;
-    right: 0;
-    left: 18px;
-    height: 18px;
-    border-bottom: 1px solid var(--opb-line);
-    background:
-        repeating-linear-gradient(90deg, var(--opb-line) 0 1px, transparent 1px 28px),
-        var(--opb-surface-2);
-}
-
-.studio__ruler--v {
-    position: absolute;
-    top: 18px;
-    bottom: 0;
-    left: 0;
-    width: 18px;
-    border-right: 1px solid var(--opb-line);
-    background:
-        repeating-linear-gradient(180deg, var(--opb-line) 0 1px, transparent 1px 28px),
-        var(--opb-surface-2);
-}
-
-.studio__grid {
-    display: grid;
-    place-items: center;
-    height: 100%;
-    background:
-        linear-gradient(rgba(21, 115, 71, 0.08) 1px, transparent 1px) 0 0 / 18px 18px,
-        linear-gradient(90deg, rgba(21, 115, 71, 0.08) 1px, transparent 1px) 0 0 / 18px 18px;
-}
-
-.studio__empty {
-    padding: 6px 13px;
-    border: 1px solid var(--opb-line);
-    border-radius: 999px;
-    background: var(--opb-surface);
-    color: var(--opb-muted);
-    font-size: 11px;
-}
-
-.studio__statusbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 10px;
+    padding: 6px 11px;
     border-top: 1px solid var(--opb-line);
+    background: var(--opb-surface-2);
     color: var(--opb-muted);
-    font-size: 9.5px;
-    font-variant-numeric: tabular-nums;
-}
-
-.studio__spacer {
-    flex: 1;
-}
-
-.studio__chip {
-    position: absolute;
-    right: 14px;
-    bottom: -11px;
-    padding: 3px 10px;
-    border: 1px solid var(--opb-line);
-    border-radius: 999px;
-    background: var(--opb-surface);
-    color: var(--opb-copper);
     font-family: "Cascadia Code", "Consolas", monospace;
     font-size: 9.5px;
-    box-shadow: 0 4px 10px rgba(20, 33, 43, 0.08);
+}
+
+.sheet__foot span:last-child {
+    white-space: nowrap;
 }
 
 .works-section {
@@ -640,10 +513,6 @@
     .steps {
         grid-template-columns: repeat(2, 1fr);
     }
-
-    .studio__body {
-        height: 200px;
-    }
 }
 
 @media (max-width: 620px) {
@@ -663,21 +532,16 @@
         grid-template-columns: 1fr;
     }
 
-    .studio__body {
-        grid-template-columns: 58px minmax(0, 1fr);
-        height: 176px;
-    }
-
-    .studio__doc {
-        display: none;
-    }
-
     .cta-band {
         padding: 22px 18px;
     }
 
     .cta-band h2 {
         font-size: 21px;
+    }
+
+    .sheet__foot span:last-child {
+        display: none;
     }
 }
 </style>

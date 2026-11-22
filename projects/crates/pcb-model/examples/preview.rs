@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use open_pcb_model::{
-    AddFootprintRequest, AddNetRequest, AddPadRequest, AddTrackRequest, AddViaRequest, CreateRequest, SetOutlineRequest,
-    add_footprint, add_net, add_pad, add_track, add_via, create, export, set_outline,
+    AddFootprintRequest, AddNetRequest, AddPadRequest, AddTextRequest, AddTrackRequest, AddViaRequest, CreateRequest,
+    SetOutlineRequest, add_footprint, add_net, add_pad, add_text, add_track, add_via, create, export, set_outline,
 };
 use serde_json::Value;
 
@@ -110,6 +110,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for at in [[30.0, 20.0], [50.0, 20.0], [50.0, 40.0], [26.0, 40.0]] {
         add_via(handle, AddViaRequest { net: Some("SIG".into()), at, diameter: 1.4, drill: 0.7, ..Default::default() })?;
+    }
+
+    for (text, at) in
+        [("U1", [37.0, 35.0]), ("R1", [14.0, 40.5]), ("R2", [60.0, 20.0]), ("C1", [58.0, 40.5]), ("D1", [18.0, 20.0])]
+    {
+        add_text(
+            handle,
+            AddTextRequest { text: text.into(), layer: "F.SilkS".into(), at, rotation: None, size: Some(2.0), thickness: None },
+        )?;
     }
 
     for format in ["svg", "pdf", "png"] {
