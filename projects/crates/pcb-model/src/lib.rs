@@ -57,8 +57,8 @@ pub use board::{
     AssignNetClassRequest, DeletePadRequest, ImpedanceReportRequest, ImpedanceRequest, ImpedanceTableRequest,
     MoveFootprintRequest, RouteOptions, RouteStyle, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest,
     SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest, UpdateKeepoutRequest, UpdateLayerRequest,
-    UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest,
-    WidthRequest,
+    UpdateNetClassRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest,
+    UpdateZoneRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 pub use outline::OutlineGeometryRequest;
@@ -550,6 +550,16 @@ pub fn add_net_class(handle: u64, request: AddNetClassRequest) -> Result<Value, 
     let mut object = Value::Null;
     store::mutate(handle, |board| {
         object = board.add_net_class(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Updates the name or routing targets of one net class on an open board.
+pub fn update_net_class(handle: u64, request: UpdateNetClassRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.update_net_class(request)?;
         Ok(())
     })?;
     edit_result(handle, Some(object), None)

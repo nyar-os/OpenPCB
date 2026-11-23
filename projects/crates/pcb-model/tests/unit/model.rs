@@ -18,10 +18,10 @@ use crate::{
     AssignNetClassRequest, CreateRequest, ImpedanceReportRequest, ImpedanceRequest, ImpedanceTableRequest,
     MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, RouteStyle, SetOutlineRequest,
     SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest,
-    UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest,
-    UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair, add_fiducial, add_footprint, add_keepout,
-    add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via,
-    add_waiver, add_zone, assign_net_class,
+    UpdateKeepoutRequest, UpdateLayerRequest, UpdateNetClassRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest,
+    UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair, add_fiducial, add_footprint,
+    add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track,
+    add_via, add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_fiducial, delete_footprint, delete_keepout,
     delete_net_class, delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver,
@@ -29,7 +29,7 @@ use crate::{
     keepout_report, list_fiducials, list_texts, move_footprint, net_audit, net_lengths, open, outline_geometry, panelize, redo,
     route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, split_track, stackup_impedance,
     stackup_width, stitch_vias, store, summary, testpoint_coverage, undo, update_footprint, update_keepout, update_layer,
-    update_pad, update_slot, update_text, update_track, update_via, update_zone, zone_audit, zone_report,
+    update_net_class, update_pad, update_slot, update_text, update_track, update_via, update_zone, zone_audit, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1266,6 +1266,100 @@ fn net_classes_apply_clearance_and_width_targets() {
     assert_eq!(listed["netClasses"][0]["nets"], serde_json::json!(["VCC", "GND"]));
     delete_net_class(reopened, "netclass-1").expect("the class is deleted");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["netClasses"], 0);
+    close(reopened).expect("the board closes");
+}
+
+#[test]
+fn net_classes_update_partially_and_keep_assignments() {
+    let directory = TempDir::new();
+    let path = directory.join("class-update.opcb");
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the power net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the ground net is declared");
+    add_net_class(
+        handle,
+        AddNetClassRequest {
+            name: "Power".to_string(),
+            width: Some(0.4),
+            clearance: Some(0.3),
+            via_diameter: Some(0.8),
+            via_drill: Some(0.4),
+        },
+    )
+    .expect("the class is declared");
+    add_net_class(handle, AddNetClassRequest { name: "Signal".to_string(), ..Default::default() })
+        .expect("a second class is declared");
+    assign_net_class(handle, AssignNetClassRequest { net: "VCC".to_string(), class: "Power".to_string() })
+        .expect("the power net joins the class");
+    assign_net_class(handle, AssignNetClassRequest { net: "GND".to_string(), class: "netclass-1".to_string() })
+        .expect("the ground net joins the class");
+    let revision = |board: u64| summary(board).expect("the board is listed")["revision"].as_u64().expect("a revision");
+    let before = revision(handle);
+
+    let empty = update_net_class(handle, UpdateNetClassRequest { id: "netclass-1".to_string(), ..Default::default() })
+        .expect_err("an update needs one field");
+    assert_eq!(empty.code, "session/argument-invalid");
+    assert_eq!(revision(handle), before, "a rejected update writes nothing");
+
+    let updated = update_net_class(
+        handle,
+        UpdateNetClassRequest {
+            id: "netclass-1".to_string(),
+            name: Some("PowerRail".to_string()),
+            width: Some(0.5),
+            ..Default::default()
+        },
+    )
+    .expect("the class is updated");
+    assert_eq!(updated["object"]["id"], "netclass-1");
+    assert_eq!(updated["object"]["name"], "PowerRail");
+    assert_eq!(updated["object"]["width"], 0.5);
+    assert_eq!(updated["object"]["clearance"], 0.3, "an omitted clearance is kept");
+    assert_eq!(updated["object"]["viaDiameter"], 0.8, "an omitted diameter is kept");
+    assert_eq!(updated["object"]["nets"], serde_json::json!(["VCC", "GND"]), "a rename keeps the assignments");
+    assert_eq!(revision(handle), before + 1, "a successful update bumps the revision once");
+
+    let duplicate = update_net_class(
+        handle,
+        UpdateNetClassRequest { id: "netclass-1".to_string(), name: Some("Signal".to_string()), ..Default::default() },
+    )
+    .expect_err("class names stay unique");
+    assert_eq!(duplicate.code, "session/argument-invalid");
+    let blank = update_net_class(
+        handle,
+        UpdateNetClassRequest { id: "netclass-1".to_string(), name: Some("   ".to_string()), ..Default::default() },
+    )
+    .expect_err("a blank name is rejected");
+    assert_eq!(blank.code, "session/argument-invalid");
+    let zero = update_net_class(
+        handle,
+        UpdateNetClassRequest { id: "netclass-1".to_string(), width: Some(0.0), ..Default::default() },
+    )
+    .expect_err("a zero width is rejected");
+    assert_eq!(zero.code, "session/argument-invalid");
+    let infinite = update_net_class(
+        handle,
+        UpdateNetClassRequest { id: "netclass-1".to_string(), clearance: Some(f64::INFINITY), ..Default::default() },
+    )
+    .expect_err("a non-finite clearance is rejected");
+    assert_eq!(infinite.code, "session/argument-invalid");
+    let missing = update_net_class(
+        handle,
+        UpdateNetClassRequest { id: "netclass-9".to_string(), width: Some(0.5), ..Default::default() },
+    )
+    .expect_err("the class must exist");
+    assert_eq!(missing.code, "object/not-found");
+    assert_eq!(revision(handle), before + 1, "each rejected update keeps the revision");
+
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    let listed = summary(reopened).expect("the board is listed");
+    assert_eq!(listed["netClasses"][0]["name"], "PowerRail");
+    assert_eq!(listed["netClasses"][0]["width"], 0.5);
+    assert_eq!(listed["netClasses"][0]["clearance"], 0.3);
+    assert_eq!(listed["netClasses"][0]["nets"], serde_json::json!(["VCC", "GND"]));
+    assert_eq!(listed["netClasses"][1]["name"], "Signal");
     close(reopened).expect("the board closes");
 }
 

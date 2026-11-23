@@ -2236,6 +2236,65 @@ impl Board {
         Ok(object)
     }
 
+    /// Updates the name or routing targets of one net class and returns its public shape.
+    ///
+    /// Omitted fields keep their current value, so at least one field is
+    /// required. A field cannot be cleared: the wire shape carries absent
+    /// options only, and `null` reads back as absent, so clearing would need a
+    /// flag this surface does not have. Net membership is stored on the class
+    /// itself, so a rename keeps every assignment.
+    pub(crate) fn update_net_class(&mut self, request: UpdateNetClassRequest) -> Result<Value, ServiceError> {
+        let index = self
+            .net_classes
+            .iter()
+            .position(|class| class.id == request.id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no net class with id `{}`", request.id)))?;
+        if request.name.is_none()
+            && request.width.is_none()
+            && request.clearance.is_none()
+            && request.via_diameter.is_none()
+            && request.via_drill.is_none()
+        {
+            return Err(crate::argument("a net class update needs `name`, `width`, `clearance`, `viaDiameter` or `viaDrill`"));
+        }
+        let name = match request.name {
+            Some(name) => {
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return Err(crate::argument("a net class needs a non-empty `name`"));
+                }
+                if self.net_classes.iter().enumerate().any(|(other, class)| other != index && class.name == name) {
+                    return Err(crate::argument(format!("net class `{name}` is already declared")));
+                }
+                Some(name)
+            }
+            None => None,
+        };
+        let width = request.width.map(|value| positive(value, "width")).transpose()?;
+        let clearance = request.clearance.map(|value| positive(value, "clearance")).transpose()?;
+        let via_diameter = request.via_diameter.map(|value| positive(value, "viaDiameter")).transpose()?;
+        let via_drill = request.via_drill.map(|value| positive(value, "viaDrill")).transpose()?;
+        let class = &mut self.net_classes[index];
+        if let Some(name) = name {
+            class.name = name;
+        }
+        if width.is_some() {
+            class.width = width;
+        }
+        if clearance.is_some() {
+            class.clearance = clearance;
+        }
+        if via_diameter.is_some() {
+            class.via_diameter = via_diameter;
+        }
+        if via_drill.is_some() {
+            class.via_drill = via_drill;
+        }
+        let object = class.to_value();
+        self.revision += 1;
+        Ok(object)
+    }
+
     /// Removes one net class by id and returns the removed id.
     pub(crate) fn delete_net_class(&mut self, id: &str) -> Result<String, ServiceError> {
         let index = self
@@ -3546,6 +3605,29 @@ pub struct AddNetClassRequest {
     #[serde(default)]
     pub via_diameter: Option<f64>,
     /// Minimum via finished drill, in board units.
+    #[serde(default)]
+    pub via_drill: Option<f64>,
+}
+
+/// Request of [`crate::update_net_class`]. At least one editable field is required.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateNetClassRequest {
+    /// Net class id to update.
+    pub id: String,
+    /// New class name, unique on the board.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// New target trace width, in board units.
+    #[serde(default)]
+    pub width: Option<f64>,
+    /// New minimum copper clearance for nets in the class, in board units.
+    #[serde(default)]
+    pub clearance: Option<f64>,
+    /// New minimum via copper diameter, in board units.
+    #[serde(default)]
+    pub via_diameter: Option<f64>,
+    /// New minimum via finished drill, in board units.
     #[serde(default)]
     pub via_drill: Option<f64>,
 }
