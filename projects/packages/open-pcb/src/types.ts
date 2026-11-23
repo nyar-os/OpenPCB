@@ -279,11 +279,20 @@ export interface NetLengthTotals {
     readonly vias: number;
 }
 
+/** One declared net in the longest-net ranking. Lengths use document units. */
+export interface NetLengthRankingEntry {
+    readonly name: string;
+    /** Summed track centreline length, in document units. */
+    readonly length: number;
+}
+
 /** Result of `board.netLengths()`. */
 export interface NetLengthsReport {
     readonly report: 'open-pcb-net-lengths';
     readonly revision: number;
     readonly nets: readonly NetLengthEntry[];
+    /** The same nets ordered by length, longest first, ties by name. */
+    readonly ranking: readonly NetLengthRankingEntry[];
     readonly totals: NetLengthTotals;
 }
 

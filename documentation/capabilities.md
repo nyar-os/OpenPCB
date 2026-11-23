@@ -96,7 +96,7 @@ counterpart warns `drc/diffpair-unpaired`.
 | Pad drills (stored, circular only) and their fabrication output | `supported` |
 | Plated routed slots and the drill report | `supported` |
 | Copper area and balance report | `supported` |
-| Routed net-length report (`lengths`, `Board.netLengths`) | `supported` |
+| Routed net-length report with longest-net ranking (`lengths`, `Board.netLengths`) | `supported` |
 | Panelization (`panel`, `Board.panelize`) | `supported` |
 | Polygon outline geometry (`Board.outlineGeometry`, SDK only) | `supported` |
 | Net classes (checks and opt-in routing targets) | `supported` |
@@ -272,7 +272,9 @@ being approximated.
 - The net-length report sums straight track segments in document units, so a
   routed net reports its exact centreline length. It counts the vias assigned to
   a net without measuring their barrels, lists only declared nets, and reports
-  zeros for a declared net with no copper.
+  zeros for a declared net with no copper. Alongside the declaration-ordered
+  `nets` array it ranks the same nets by length in `ranking`, longest first;
+  equal rounded lengths fall back to the net name, so the order is deterministic.
 - The copper balance report sums feature areas, so overlapping copper counts once
   per feature rather than once as a union. Coverage and imbalance need a
   rectangular outline; without one the report still lists per-layer areas.

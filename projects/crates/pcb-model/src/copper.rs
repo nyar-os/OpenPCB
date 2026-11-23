@@ -72,9 +72,12 @@ pub(crate) fn zones(board: &Board) -> Value {
 /// Only nets declared in the document are listed, in declaration order. A net
 /// with no copper reports zeros. Copper without a declared net is not reported.
 /// Tracks are straight segments, so each length is the exact sum of its segment
-/// lengths in document units; vias are counted, not measured.
+/// lengths in document units; vias are counted, not measured. The `ranking`
+/// array orders the same nets by length, longest first; equal rounded lengths
+/// fall back to the net name so the order is deterministic.
 pub(crate) fn net_lengths(board: &Board) -> Value {
     let mut nets: Vec<Value> = Vec::with_capacity(board.nets.len());
+    let mut ranking: Vec<(f64, &str)> = Vec::with_capacity(board.nets.len());
     let mut total_tracks = 0usize;
     let mut total_length = 0.0;
     let mut total_vias = 0usize;
@@ -86,17 +89,22 @@ pub(crate) fn net_lengths(board: &Board) -> Value {
         total_tracks += tracks.len();
         total_length += length;
         total_vias += vias;
+        let length = round6(length);
+        ranking.push((length, net.name.as_str()));
         nets.push(json!({
             "name": net.name,
             "tracks": tracks.len(),
-            "length": round6(length),
+            "length": length,
             "vias": vias,
         }));
     }
+    ranking.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+    let ranking: Vec<Value> = ranking.iter().map(|(length, name)| json!({ "name": name, "length": length })).collect();
     json!({
         "report": "open-pcb-net-lengths",
         "revision": board.revision,
         "nets": nets,
+        "ranking": ranking,
         "totals": {
             "tracks": total_tracks,
             "length": round6(total_length),

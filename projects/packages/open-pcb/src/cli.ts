@@ -2042,7 +2042,9 @@ cli.command('lengths', 'cli.cmd.lengths').actionCtx(async (options, _args, ctx) 
     await withBoard(file, async (board) => {
         const report = await board.netLengths();
         const nets = report.nets.map((net) => `${net.name}=${net.length}`).join(' ') || 'none';
-        ctx.emitResult(report, `nets=${report.nets.length} total=${report.totals.length} ${nets}`);
+        const longest = report.ranking[0];
+        const ranking = longest === undefined ? 'longest=none' : `longest=${longest.name}(${longest.length})`;
+        ctx.emitResult(report, `nets=${report.nets.length} total=${report.totals.length} ${nets} ${ranking}`);
         return 0;
     });
     return 0;

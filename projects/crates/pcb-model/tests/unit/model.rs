@@ -6326,10 +6326,83 @@ fn net_lengths_sum_track_segments_and_count_vias() {
     assert_eq!(nets[1]["vias"], 0);
     assert_eq!(nets[2]["name"], "SPARE");
     assert_eq!(nets[2]["length"], 0.0);
+    let ranking = report["ranking"].as_array().expect("ranking is an array");
+    assert_eq!(ranking.len(), 3);
+    assert_eq!(ranking[0]["name"], "VCC", "the routed net ranks first");
+    assert_eq!(ranking[0]["length"], 7.0);
+    assert_eq!(ranking[1]["name"], "GND", "equal zero lengths fall back to the net name");
+    assert_eq!(ranking[2]["name"], "SPARE");
     assert_eq!(report["totals"]["tracks"], 2);
     assert_eq!(report["totals"]["length"], 7.0);
     assert_eq!(report["totals"]["vias"], 1);
     close(handle).expect("the board closes");
+}
+
+#[test]
+fn net_lengths_rank_nets_longest_first_read_only_and_deterministically() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "A".to_string() }).expect("A is declared");
+    add_net(handle, AddNetRequest { name: "B".to_string() }).expect("B is declared");
+    add_net(handle, AddNetRequest { name: "C".to_string() }).expect("C is declared");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("A".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [0.0, 0.0],
+            to: [3.0, 0.0],
+        },
+    )
+    .expect("A is routed by 3 mm");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("B".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [0.0, 1.0],
+            to: [10.0, 1.0],
+        },
+    )
+    .expect("B is routed by 10 mm");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("C".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [0.0, 2.0],
+            to: [3.0, 2.0],
+        },
+    )
+    .expect("C is routed by 3 mm");
+
+    let first = net_lengths(handle).expect("the report is produced");
+    let ranking = first["ranking"].as_array().expect("ranking is an array");
+    assert_eq!(ranking.len(), 3, "every declared net is ranked");
+    assert_eq!(ranking[0]["name"], "B", "the longest net ranks first");
+    assert_eq!(ranking[0]["length"], 10.0);
+    assert_eq!(ranking[1]["name"], "A", "equal lengths fall back to the net name");
+    assert_eq!(ranking[1]["length"], 3.0);
+    assert_eq!(ranking[2]["name"], "C");
+    assert_eq!(ranking[2]["length"], 3.0);
+    assert_eq!(first["nets"][0]["name"], "A", "the nets array keeps declaration order");
+
+    let second = net_lengths(handle).expect("the report is produced again");
+    assert_eq!(
+        serde_json::to_string(&first).expect("the first report serializes"),
+        serde_json::to_string(&second).expect("the second report serializes"),
+        "repeated reports are byte-identical"
+    );
+
+    let revision = summary(handle).expect("the board is listed")["revision"].clone();
+    assert_eq!(first["revision"], revision, "the report leaves the revision alone");
+    assert_eq!(summary(handle).expect("the board is still listed")["revision"], revision, "a read never bumps the revision");
+
+    close(handle).expect("the board closes");
+    let missing = net_lengths(handle).expect_err("a closed handle is rejected");
+    assert_eq!(missing.code, "board/not-found");
 }
 
 #[test]

@@ -311,7 +311,10 @@ back-drilled count. `holeCount` and `holes` keep their historical via-only
 meaning; `padHoleCount` and `padHoles` list drilled pads, and a tool entry gains
 `padHoles` when it also cuts pads.
 `lengths` prints one entry per declared net with its track count, summed track
-centreline length in document units and via count, plus the totals.
+centreline length in document units and via count, plus the totals and the
+longest-net ranking. The JSON `ranking` array orders the declared nets by length,
+longest first, with equal lengths ordered by net name; the summary prints the
+top entry as `longest=<net>(<length>)`.
 
 ```bash
 open-pcb route board.opcb --net VCC --width 0.25
