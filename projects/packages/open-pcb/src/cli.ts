@@ -1224,6 +1224,23 @@ zone
         return 0;
     });
 
+zone.command('audit', 'cli.cmd.zone-audit').actionCtx(async (options, _args, ctx) => {
+    const file = input(options);
+    if (file === undefined) {
+        ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+        return 2;
+    }
+    await withBoard(file, async (board) => {
+        const report = await board.zoneAudit();
+        ctx.emitResult(
+            report,
+            `zones=${report.zoneCount} connected=${report.connectedCount} isolated=${report.isolatedCount} unassigned=${report.unassignedCount} isolatedArea=${report.isolatedArea}mm2 status=${report.status}`,
+        );
+        return 0;
+    });
+    return 0;
+});
+
 const textItem = cli.command('text', 'cli.cmd.text');
 textItem
     .command('add', 'cli.cmd.text-add')
@@ -1376,6 +1393,24 @@ drill
         });
         return 0;
     });
+
+const fab = cli.command('fab', 'cli.cmd.fab');
+fab.command('manifest', 'cli.cmd.fab-manifest').actionCtx(async (options, _args, ctx) => {
+    const file = input(options);
+    if (file === undefined) {
+        ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+        return 2;
+    }
+    await withBoard(file, async (board) => {
+        const report = await board.fabManifest();
+        ctx.emitResult(
+            report,
+            `files=${report.fileCount} copper=${report.copperLayers.length} outline=${report.outline ? 'yes' : 'no'} tools=${report.drill.tools} placements=${report.assembly.placements} status=${report.status} issues=${report.issues.length}`,
+        );
+        return 0;
+    });
+    return 0;
+});
 
 const keepout = cli.command('keepout', 'cli.cmd.keepout');
 keepout
