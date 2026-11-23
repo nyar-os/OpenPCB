@@ -411,6 +411,16 @@ test('routing follows net-class width, clearance and via targets when enabled', 
         assert.match(viaText, /\(width 0\.4\)/, 'routed tracks use the class width');
         assert.match(viaText, /\(size 0\.8\) \(drill 0\.4\)/, 'vias use the class diameter and drill');
 
+        const renamed = await viaBoard.updateNetClass({ id: 'netclass-1', name: 'PWR-RAIL', width: 0.5 });
+        assert.equal(renamed.object?.name, 'PWR-RAIL');
+        assert.equal(renamed.board.netClasses[0].width, 0.5);
+        assert.equal(renamed.board.netClasses[0].clearance, 0.3, 'an omitted clearance is kept');
+        assert.deepEqual(renamed.board.netClasses[0].nets, ['PWR'], 'a rename keeps the assignment');
+        await assert.rejects(
+            viaBoard.updateNetClass({ id: 'netclass-9', width: 0.5 }),
+            (error: unknown) => error instanceof OpenPCBError && error.code === 'object/not-found',
+        );
+
         const clearanceBoard = await routingBoard(pcb);
         await clearanceBoard.addTrack({ layer: 'F.Cu', width: 0.25, from: [5, 10.55], to: [25, 10.55] });
         await clearanceBoard.addNetClass({ name: 'RF', clearance: 0.05 });

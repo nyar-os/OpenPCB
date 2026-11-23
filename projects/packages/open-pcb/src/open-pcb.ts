@@ -85,6 +85,7 @@ import type {
     UpdateFootprintOptions,
     UpdateKeepoutOptions,
     UpdateLayerOptions,
+    UpdateNetClassOptions,
     UpdatePadInput,
     UpdateSlotOptions,
     UpdateTextOptions,
@@ -587,6 +588,10 @@ function attach(
         async addNetClass(options: AddNetClassOptions): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.addNetClass(current, options));
+        },
+        async updateNetClass(options: UpdateNetClassOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.updateNetClass(current, options));
         },
         async deleteNetClass(id: string): Promise<BoardEditResult> {
             ensure();

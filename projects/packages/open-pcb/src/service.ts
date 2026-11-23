@@ -73,6 +73,7 @@ import type {
     UpdateFootprintOptions,
     UpdateKeepoutOptions,
     UpdateLayerOptions,
+    UpdateNetClassOptions,
     UpdatePadInput,
     UpdateSlotOptions,
     UpdateTextOptions,
@@ -351,6 +352,13 @@ export function keepoutReport(handle: number): KeepoutAreaReport {
 export function addNetClass(handle: number, options: AddNetClassOptions): BoardEditResult {
     return decode<BoardEditResult>(() =>
         binding('board.addNetClass').board_add_net_class(handle, JSON.stringify(options)),
+    );
+}
+
+/** Updates the name or targets of one net class on an open board. */
+export function updateNetClass(handle: number, options: UpdateNetClassOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.updateNetClass').board_update_net_class(handle, JSON.stringify(options)),
     );
 }
 

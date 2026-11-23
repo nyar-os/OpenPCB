@@ -1353,6 +1353,22 @@ export interface AddNetClassOptions {
     readonly viaDrill?: number;
 }
 
+/** Options of `board.updateNetClass()`. At least one field is required. */
+export interface UpdateNetClassOptions {
+    /** Net class id to update. */
+    readonly id: ObjectId;
+    /** New class name, unique on the board. */
+    readonly name?: string;
+    /** New target trace width, in board units. */
+    readonly width?: number;
+    /** New minimum copper clearance for nets in the class, in board units. */
+    readonly clearance?: number;
+    /** New minimum via copper diameter, in board units. */
+    readonly viaDiameter?: number;
+    /** New minimum via finished drill, in board units. */
+    readonly viaDrill?: number;
+}
+
 /** Options of `board.assignNetClass()`. */
 export interface AssignNetClassOptions {
     /** Declared net name to assign. */
@@ -1826,6 +1842,7 @@ export interface Board {
     deleteKeepout(id: ObjectId): Promise<BoardEditResult>;
     keepoutReport(): Promise<KeepoutAreaReport>;
     addNetClass(options: AddNetClassOptions): Promise<BoardEditResult>;
+    updateNetClass(options: UpdateNetClassOptions): Promise<BoardEditResult>;
     deleteNetClass(id: ObjectId): Promise<BoardEditResult>;
     assignNetClass(options: AssignNetClassOptions): Promise<BoardEditResult>;
     addTestPoint(options: AddTestPointOptions): Promise<BoardEditResult>;

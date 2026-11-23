@@ -270,6 +270,17 @@ fn board_add_net_class(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Updates the name or routing targets of one net class on an open board.
+#[function]
+fn board_update_net_class(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::UpdateNetClassRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::update_net_class(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Deletes one net class from an open board.
 #[function]
 fn board_delete_net_class(ctx: CallContext) -> Result<JsValue> {
@@ -1095,6 +1106,12 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
                 serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
             open_pcb_model::add_net_class(handle, request)
         }
+        "board.updateNetClass" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::UpdateNetClassRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::update_net_class(handle, request)
+        }
         "board.deleteNetClass" => {
             let handle = rpc_handle(value)?;
             let id = rpc_text(value, "id")?;
@@ -1604,6 +1621,7 @@ register_module![
     board_delete_keepout,
     board_keepout_report,
     board_add_net_class,
+    board_update_net_class,
     board_delete_net_class,
     board_assign_net_class,
     board_add_test_point,
