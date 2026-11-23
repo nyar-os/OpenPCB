@@ -91,11 +91,11 @@ assuming a format, check or export target works.
   hard obstacles, and returns unrouted edges rather than approximating them.
   Opt in to net-class targets and each net routes with its class width,
   clearance and via values.
-- **Checks before fabrication.** Twenty-one checks cover DRC, connectivity,
+- **Checks before fabrication.** Twenty-five checks cover DRC, connectivity,
   clearance, annular rings, track width, unrouted nets, stackup, outline,
   silkscreen, courtyard, netlist, hole spacing, copper and hole edge clearance,
   silkscreen over pads, differential pairs, dangling copper, net classes,
-  keepouts and via-in-pad.
+  keepouts, via-in-pad, pad overlap and solder-mask apertures.
 - **Fabrication and assembly outputs.** Write Gerber RS-274X with X2 object
   attributes, Excellon drill and drill maps that include via, pad and routed-slot
   holes, BOM, pick-and-place, placement JSON, test-point CSV and IPC-D-356A

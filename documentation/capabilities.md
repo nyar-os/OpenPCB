@@ -57,7 +57,7 @@ outline          silkscreen         courtyard          netlist
 hole-to-hole     hole-to-track      hole-to-pad        copper-to-edge
 edge-clearance   silkscreen-over-pad diffpair          dangling-copper
 netclass         keepout            via-in-pad         pad-overlap
-testpoints
+solder-mask      testpoints
 ```
 
 `annular_rings` and `annular-ring` are both accepted spellings.
@@ -80,6 +80,15 @@ also infers pairs from net names for nets that no declared pair covers. Two nets
 form an inferred pair when they share a base name and end in `_P`/`_N` or
 `+`/`-`; skew above 0.5 mm warns `drc/diffpair-skew`, and a half without a
 counterpart warns `drc/diffpair-unpaired`.
+
+`solder-mask` measures the mask apertures of outer-layer pads. Each opening is
+the pad's rotated copper box grown by the document's solder-mask expansion per
+side; vias stay tented and inner-layer pads open no mask. Two openings of
+different nets that overlap or touch report `drc/solder-mask-bridge` as an
+error, because no mask separates the nets; a web narrower than 0.1 mm reports
+`drc/solder-mask-sliver` as a warning. Pads of the same net are skipped, so a
+thermal or merged same-net opening stays clean, and a web at exactly 0.1 mm is
+accepted.
 
 ## Feature matrix
 
@@ -105,6 +114,8 @@ counterpart warns `drc/diffpair-unpaired`.
 | Copper area and balance report | `supported` |
 | Routed net-length report with longest-net ranking (`lengths`, `Board.netLengths`) | `supported` |
 | Panelization (`panel`, `Board.panelize`) | `supported` |
+| Solder-mask aperture check (`solder-mask`) | `supported` |
+| Panel tooling holes and breakaway report (`panel`) | `supported` |
 | Polygon outline geometry (`Board.outlineGeometry`, SDK only) | `supported` |
 | Net classes (checks and opt-in routing targets) | `supported` |
 | Test points | `supported` |
@@ -183,9 +194,15 @@ being approximated.
   polygon, or measures the stored rectangle. It does not replace the stored
   outline, and arc segments are rejected.
 - `Board.panelize` arrays the rectangular outline, reports the panel outline,
-  placements, seam lines, tab placeholders, areas and utilization, and writes no
+  placements, seam lines, tab placeholders, board and panel areas, utilization,
+  the breakaway area and four optional rail tooling holes, and writes no
   fabrication file. Gap defaults to 0, rail to 0, tab style to `v-cut`, mouse-bite
-  width to 5 and tab spacing to 20.
+  width to 5 and tab spacing to 20. `breakaway.area` is the panel area minus
+  every board area and equals `railArea + gapArea`; `breakaway.percent` is that
+  share of the panel area. Tooling holes need a positive rail: the diameter and
+  inset must keep every hole inside the rail band, and the inset defaults to
+  half the rail. Tooling holes are report geometry only and reach no fabrication
+  file.
 - Via stitching follows the rectangular outline only, places through vias and
   skips positions that already hold a via. It does not test the new vias against
   existing copper, use a polygon outline or choose a net by itself.
@@ -274,6 +291,13 @@ being approximated.
   different nets that share copper report `drc/pad-overlap`; a shared edge is
   contact, not overlap, so tangent pads in one footprint stay clean. A pad with
   no net and a pad with one count as different nets.
+- `solder-mask` reads the apertures the mask writer implies: each outer pad's
+  rotated copper box grown by the document expansion per side. Openings of
+  different nets that overlap or touch report `drc/solder-mask-bridge`, and a
+  web below 0.1 mm reports `drc/solder-mask-sliver`; same-net openings and inner
+  copper are not compared. The Gerber mask writer still emits an unrotated
+  rectangle per pad, so a rotated pad is measured by the check's rotated box
+  rather than by the written aperture.
 - `diffpair` infers pairs from net naming only: one shared base name with `_P`
   and `_N` (or `+` and `-`). Length is the sum of straight track segments, so
   via barrels and copper inside pads are not counted. An inferred pair uses the

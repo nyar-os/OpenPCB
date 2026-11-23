@@ -87,7 +87,8 @@ open-pcb inspect <file> [--checks <list>]
 ```
 
 `--checks` is a comma-separated list. Omitting it runs every supported check.
-Exit code is `1` when `passed` is false.
+Exit code is `1` when `passed` is false. `solder-mask` reports merged mask
+openings of different nets as errors and mask webs under 0.1 mm as warnings.
 
 ```bash
 open-pcb inspect board.opcb --checks drc,connectivity,unrouted
@@ -328,18 +329,29 @@ open-pcb stitch board.opcb --net GND --spacing 5 --inset 1
 ```bash
 open-pcb panel <file> --columns <count> --rows <count> [--gap-x <mm>] [--gap-y <mm>]
     [--rail <mm>] [--tab v-cut|mouse-bite|none] [--tab-width <mm>] [--tab-spacing <mm>]
+    [--tooling-hole <mm>] [--tooling-inset <mm>]
 ```
 
 `panel` arrays the rectangular outline and reports the panel outline, every
-placement, seam lines, tab placeholders, the board and panel areas and the
-utilization. `--columns` and `--rows` are positive integers. `--gap-x` and
-`--gap-y` default to 0, `--rail` to 0 and `--tab` to `v-cut`. Mouse-bite tabs
-default to a width of 5 mm and a spacing of 20 mm, need a positive gap wherever
-boards meet, and need a width no larger than the spacing. The report writes no
-fabrication file.
+placement, seam lines, tab placeholders, the board and panel areas, the
+utilization, the breakaway area and any tooling holes. `--columns` and `--rows`
+are positive integers. `--gap-x` and `--gap-y` default to 0, `--rail` to 0 and
+`--tab` to `v-cut`. Mouse-bite tabs default to a width of 5 mm and a spacing of
+20 mm, need a positive gap wherever boards meet, and need a width no larger
+than the spacing. The report writes no fabrication file.
+
+`breakaway.area` is the panel area minus every board area, split into
+`breakaway.railArea` and `breakaway.gapArea`, and `breakaway.percent` is its
+share of the panel area. `--tooling-hole` places four holes with that finished
+diameter in the rails and needs a positive `--rail`; `--tooling-inset` sets the
+distance from the panel edge to a hole centre and defaults to half the rail.
+The diameter and inset must keep every hole inside the rail, otherwise the
+command fails. `toolingHoles` lists corner, position and diameter; the summary
+appends `breakaway=<area>mm2` and, when holes exist, `tooling=<count>`.
 
 ```bash
 open-pcb panel board.opcb --columns 2 --rows 2 --gap-x 5 --gap-y 5 --rail 2 --tab mouse-bite
+open-pcb panel board.opcb --columns 2 --rows 2 --rail 3 --tooling-hole 2 --tooling-inset 1.5
 ```
 
 ## Layers and outline
