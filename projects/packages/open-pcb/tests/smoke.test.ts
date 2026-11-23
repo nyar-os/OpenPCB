@@ -681,6 +681,7 @@ test('net audit and test point coverage report class gaps and probe coverage', {
     assert.deepEqual(audit.issues.map((issue) => issue.code), [
         'net/clearance-below-class',
         'net/width-below-class',
+        'net/width-below-class',
     ]);
     assert.equal(audit.nets[0].class, 'Power');
     assert.equal(audit.nets[0].widthStatus, 'below');
