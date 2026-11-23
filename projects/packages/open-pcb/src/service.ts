@@ -35,6 +35,7 @@ import type {
     DrillReport,
     ExportReport,
     ExportTarget,
+    FabManifestReport,
     FiducialListReport,
     FiducialReport,
     ImportReport,
@@ -77,6 +78,7 @@ import type {
     UpdateViaOptions,
     UpdateZoneOptions,
     ZoneAreaReport,
+    ZoneAuditReport,
 } from './types.js';
 
 /** Result of creating or opening a board. */
@@ -282,6 +284,16 @@ export function updateZone(handle: number, options: UpdateZoneOptions): BoardEdi
 /** Reports the area and perimeter of every copper pour region. */
 export function zoneReport(handle: number): ZoneAreaReport {
     return decode<ZoneAreaReport>(() => binding('board.zoneReport').board_zone_report(handle));
+}
+
+/** Reports the connectivity of every copper pour region. */
+export function zoneAudit(handle: number): ZoneAuditReport {
+    return decode<ZoneAuditReport>(() => binding('board.zoneAudit').board_zone_audit(handle));
+}
+
+/** Reports the planned fabrication files and their consistency findings. */
+export function fabManifest(handle: number): FabManifestReport {
+    return decode<FabManifestReport>(() => binding('board.fabManifest').board_fab_manifest(handle));
 }
 
 /** Adds one silkscreen text item to an open board. */

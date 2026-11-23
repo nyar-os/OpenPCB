@@ -41,6 +41,8 @@ export interface NativeBinding {
     board_update_zone(handle: number, requestJson: string): string;
     board_delete_zone(handle: number, id: string): string;
     board_zone_report(handle: number): string;
+    board_zone_audit(handle: number): string;
+    board_fab_manifest(handle: number): string;
     board_add_text(handle: number, requestJson: string): string;
     board_update_text(handle: number, requestJson: string): string;
     board_delete_text(handle: number, id: string): string;

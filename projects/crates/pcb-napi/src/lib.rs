@@ -777,6 +777,22 @@ fn board_net_lengths(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Reports the connectivity of every copper pour region.
+#[function]
+fn board_zone_audit(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::zone_audit(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Reports the planned fabrication files and their consistency issues.
+#[function]
+fn board_fab_manifest(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::fab_manifest(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Builds the panelization report of one open board.
 #[function]
 fn board_panelize(ctx: CallContext) -> Result<JsValue> {
@@ -1560,6 +1576,8 @@ register_module![
     board_delete_zone,
     board_update_zone,
     board_zone_report,
+    board_zone_audit,
+    board_fab_manifest,
     board_drill_report,
     board_add_text,
     board_update_text,

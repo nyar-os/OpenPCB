@@ -593,6 +593,55 @@ test('zones, silkscreen text and drill reports round trip through the SDK', { sk
     await pcb.dispose();
 });
 
+test('pour audit and fabrication manifest report islands and planned files', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+    const board = await pcb.create({ title: 'Audit' });
+    assert.equal((await board.addNet({ name: 'GND' })).object?.name, 'GND');
+    await board.addNet({ name: 'VCC' });
+    await board.addFootprint({ reference: 'U1', x: 5, y: 5 });
+    await board.addPad({ footprint: 'fp-1', number: '1', x: 0, y: 0, w: 1, h: 1, net: 'GND' });
+    await board.addVia({ net: 'GND', at: [5, 5], diameter: 0.6, drill: 0.3 });
+    await board.addZone({ layer: 'F.Cu', net: 'GND', points: [[0, 0], [10, 0], [10, 10], [0, 10]] });
+    await board.addZone({ layer: 'F.Cu', net: 'VCC', points: [[20, 20], [30, 20], [30, 30], [20, 30]] });
+    await board.addZone({ layer: 'F.Cu', points: [[40, 40], [50, 40], [50, 50], [40, 50]] });
+    await board.setOutline({ from: [0, 0], to: [60, 60] });
+
+    const audit = await board.zoneAudit();
+    assert.equal(audit.report, 'open-pcb-zone-audit');
+    assert.equal(audit.zoneCount, 3);
+    assert.equal(audit.connectedCount, 1);
+    assert.equal(audit.isolatedCount, 1);
+    assert.equal(audit.unassignedCount, 1);
+    assert.equal(audit.totalArea, 300);
+    assert.equal(audit.isolatedArea, 100);
+    assert.equal(audit.layers[0].layer, 'F.Cu');
+    assert.equal(audit.zones[0].status, 'connected');
+    assert.deepEqual(audit.zones[0].anchors, { pads: 1, vias: 1, tracks: 0 });
+    assert.equal(audit.zones[1].status, 'isolated');
+    assert.equal(audit.zones[2].status, 'unassigned');
+    assert.deepEqual(audit.issues.map((issue) => issue.code), ['zone/isolated', 'zone/unassigned-net']);
+
+    const manifest = await board.fabManifest();
+    assert.equal(manifest.report, 'open-pcb-fab-manifest');
+    assert.equal(manifest.status, 'pass');
+    assert.equal(manifest.outline, true);
+    assert.equal(manifest.fileCount, 9);
+    assert.deepEqual(manifest.copperLayers, ['F.Cu', 'B.Cu']);
+    assert.equal(manifest.files[0].name, 'F_Cu.gbr');
+    assert.equal(manifest.files[0].function, 'Copper,L1,Top');
+    assert.equal(manifest.files[8].kind, 'profile');
+    assert.equal(manifest.drill.tools, 1);
+    assert.equal(manifest.drill.holes, 1);
+    assert.equal(manifest.assembly.placements, 1);
+
+    const matrix = await pcb.capabilities();
+    assert.equal(matrix.zoneAudit, 'supported');
+    assert.equal(matrix.fabManifest, 'supported');
+
+    await board.close();
+    await pcb.dispose();
+});
+
 test('panelization reports the grid, seams, tabs and utilization', { skip: withAddon }, async () => {
     const pcb = new OpenPCB();
     const board = await pcb.create();

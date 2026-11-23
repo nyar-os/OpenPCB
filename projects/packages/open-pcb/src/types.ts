@@ -459,6 +459,120 @@ export interface DrillReport {
     readonly slots: readonly DrillSlot[];
 }
 
+/** One file the Gerber writer plans to emit. */
+export interface FabManifestFile {
+    /** File name inside the Gerber directory. */
+    readonly name: string;
+    /** Gerber X2 `%TF.FileFunction` value the writer declares. */
+    readonly function: string;
+    readonly kind: 'copper' | 'silkscreen' | 'soldermask' | 'paste' | 'profile';
+    /** Source copper or silkscreen layer id; `null` for the profile. */
+    readonly layer: string | null;
+    /** Objects the file would draw: tracks, pads, vias or pours. */
+    readonly objects: number;
+}
+
+/** Drill tools and hits the Excellon file would carry. */
+export interface FabManifestDrill {
+    readonly tools: number;
+    readonly holes: number;
+    readonly slots: number;
+    readonly padHoles: number;
+}
+
+/** Assembly rows the pick-and-place and BOM writers would emit. */
+export interface FabManifestAssembly {
+    readonly placements: number;
+    readonly bomGroups: number;
+}
+
+/** One manifest consistency finding. */
+export interface FabManifestIssue {
+    readonly code: string;
+    readonly severity: 'info' | 'warning' | 'error';
+    /** File name or layer the finding names; empty for a board-level finding. */
+    readonly objectId: string;
+    readonly message: string;
+}
+
+/** Result of `board.fabManifest()`. Nothing is written. */
+export interface FabManifestReport {
+    readonly report: 'open-pcb-fab-manifest';
+    readonly revision: number;
+    readonly units: 'mm';
+    readonly status: 'pass' | 'warn' | 'error';
+    /** Whether the board has an outline; Gerber export needs one. */
+    readonly outline: boolean;
+    readonly fileCount: number;
+    /** Copper layer ids in stack order. */
+    readonly copperLayers: readonly string[];
+    readonly files: readonly FabManifestFile[];
+    readonly drill: FabManifestDrill;
+    readonly assembly: FabManifestAssembly;
+    readonly issues: readonly FabManifestIssue[];
+}
+
+/** Objects that connect one pour to its net. */
+export interface ZoneAuditAnchors {
+    readonly pads: number;
+    readonly vias: number;
+    readonly tracks: number;
+}
+
+/** One copper pour region in the connectivity audit. */
+export interface ZoneAuditEntry {
+    readonly id: ObjectId;
+    readonly layer: LayerId;
+    readonly net: string | null;
+    readonly vertices: number;
+    /** Enclosed pour area, in square millimetres. */
+    readonly area: number;
+    /** Polygon perimeter, in millimetres. */
+    readonly perimeter: number;
+    /** Same-net copper the pour touches on its own layer. */
+    readonly anchors: ZoneAuditAnchors;
+    readonly status: 'connected' | 'isolated' | 'unassigned';
+}
+
+/** Per-layer totals of the copper pour audit. */
+export interface ZoneAuditLayer {
+    readonly layer: LayerId;
+    readonly zones: number;
+    readonly connected: number;
+    readonly isolated: number;
+    readonly unassigned: number;
+    /** Enclosed pour area, in square millimetres. */
+    readonly area: number;
+    readonly isolatedArea: number;
+}
+
+/** One pour audit finding. */
+export interface ZoneAuditIssue {
+    readonly code: string;
+    readonly severity: 'info' | 'warning' | 'error';
+    readonly objectId: string;
+    readonly layer: string;
+    readonly net: string | null;
+    readonly message: string;
+}
+
+/** Result of `board.zoneAudit()`. */
+export interface ZoneAuditReport {
+    readonly report: 'open-pcb-zone-audit';
+    readonly revision: number;
+    readonly units: 'mm2';
+    readonly status: 'pass' | 'warn';
+    readonly zoneCount: number;
+    readonly connectedCount: number;
+    readonly isolatedCount: number;
+    readonly unassignedCount: number;
+    readonly totalArea: number;
+    readonly isolatedArea: number;
+    readonly layers: readonly ZoneAuditLayer[];
+    readonly zones: readonly ZoneAuditEntry[];
+    readonly issues: readonly ZoneAuditIssue[];
+}
+
 /** Tab style used between adjacent boards in a panel. */
 export type PanelTabStyle = 'v-cut' | 'mouse-bite' | 'none';
 
@@ -628,6 +742,10 @@ export interface BoardCapabilities {
     readonly texts: SupportLevel;
     /** Whether a copper pour area and perimeter report can be produced. */
     readonly zoneReport: SupportLevel;
+    /** Whether a copper pour connectivity and isolated-island report can be produced. */
+    readonly zoneAudit: SupportLevel;
+    /** Whether a fabrication file manifest with consistency findings can be produced. */
+    readonly fabManifest: SupportLevel;
     /** Whether a drill tool and hole report can be produced. */
     readonly drillReport: SupportLevel;
     /** Whether copper keepout regions can be declared and checked. */
@@ -1567,6 +1685,8 @@ export interface Board {
     updateZone(options: UpdateZoneOptions): Promise<BoardEditResult>;
     deleteZone(id: ObjectId): Promise<BoardEditResult>;
     zoneReport(): Promise<ZoneAreaReport>;
+    zoneAudit(): Promise<ZoneAuditReport>;
+    fabManifest(): Promise<FabManifestReport>;
     addText(options: AddTextOptions): Promise<BoardEditResult>;
     updateText(options: UpdateTextOptions): Promise<BoardEditResult>;
     deleteText(id: ObjectId): Promise<BoardEditResult>;

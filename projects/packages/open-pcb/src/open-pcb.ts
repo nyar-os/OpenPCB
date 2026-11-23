@@ -44,6 +44,7 @@ import type {
     DrillReport,
     ExportOptions,
     ExportReport,
+    FabManifestReport,
     FiducialListReport,
     FiducialReport,
     ImpedanceOptions,
@@ -89,6 +90,7 @@ import type {
     UpdateViaOptions,
     UpdateZoneOptions,
     ZoneAreaReport,
+    ZoneAuditReport,
 } from './types.js';
 
 /** Sidecar surface consumed by a board; provided only in `history: 'sidecar'` sessions. */
@@ -535,6 +537,14 @@ function attach(
         async zoneReport(): Promise<ZoneAreaReport> {
             ensure();
             return service.zoneReport(handle);
+        },
+        async zoneAudit(): Promise<ZoneAuditReport> {
+            ensure();
+            return service.zoneAudit(handle);
+        },
+        async fabManifest(): Promise<FabManifestReport> {
+            ensure();
+            return service.fabManifest(handle);
         },
         async addText(options: AddTextOptions): Promise<BoardEditResult> {
             ensure();
