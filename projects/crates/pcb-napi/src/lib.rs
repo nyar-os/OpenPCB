@@ -750,6 +750,17 @@ fn stackup_impedance_table(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Reports the impedance of every routed net and declared differential pair.
+#[function]
+fn stackup_impedance_report(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::ImpedanceReportRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::impedance_report(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Reports copper area per layer and the coverage imbalance across them.
 #[function]
 fn board_copper_balance(ctx: CallContext) -> Result<JsValue> {
@@ -1592,6 +1603,7 @@ register_module![
     stackup_impedance,
     stackup_width,
     stackup_impedance_table,
+    stackup_impedance_report,
     board_copper_balance,
     board_net_lengths,
     board_panelize,

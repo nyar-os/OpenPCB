@@ -40,6 +40,8 @@ import type {
     ImportReport,
     ImpedanceOptions,
     ImpedanceReport,
+    ImpedanceReportOptions,
+    ImpedanceSummaryReport,
     ImpedanceTableOptions,
     ImpedanceTableReport,
     ImpedanceWidthOptions,
@@ -520,6 +522,13 @@ export function impedanceWidth(handle: number, options: ImpedanceWidthOptions): 
 export function impedanceTable(handle: number, options: ImpedanceTableOptions = {}): ImpedanceTableReport {
     return decode<ImpedanceTableReport>(() =>
         binding('board.impedanceTable').stackup_impedance_table(handle, JSON.stringify(options)),
+    );
+}
+
+/** Reports the impedance of every routed net and declared differential pair. */
+export function impedanceReport(handle: number, options: ImpedanceReportOptions = {}): ImpedanceSummaryReport {
+    return decode<ImpedanceSummaryReport>(() =>
+        binding('board.impedanceReport').stackup_impedance_report(handle, JSON.stringify(options)),
     );
 }
 

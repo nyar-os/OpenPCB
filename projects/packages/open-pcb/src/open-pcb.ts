@@ -48,6 +48,8 @@ import type {
     FiducialReport,
     ImpedanceOptions,
     ImpedanceReport,
+    ImpedanceReportOptions,
+    ImpedanceSummaryReport,
     ImpedanceTableOptions,
     ImpedanceTableReport,
     ImpedanceWidthOptions,
@@ -679,6 +681,10 @@ function attach(
         async impedanceTable(options: ImpedanceTableOptions = {}): Promise<ImpedanceTableReport> {
             ensure();
             return service.impedanceTable(handle, options);
+        },
+        async impedanceReport(options: ImpedanceReportOptions = {}): Promise<ImpedanceSummaryReport> {
+            ensure();
+            return service.impedanceReport(handle, options);
         },
         async copperBalance(): Promise<CopperBalanceReport> {
             ensure();

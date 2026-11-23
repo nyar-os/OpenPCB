@@ -81,6 +81,7 @@ export interface NativeBinding {
     stackup_impedance(handle: number, requestJson: string): string;
     stackup_width(handle: number, requestJson: string): string;
     stackup_impedance_table(handle: number, requestJson: string): string;
+    stackup_impedance_report(handle: number, requestJson: string): string;
     board_copper_balance(handle: number): string;
     board_net_lengths(handle: number): string;
     board_panelize(handle: number, requestJson: string): string;

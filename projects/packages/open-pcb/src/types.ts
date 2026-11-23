@@ -75,6 +75,7 @@ export type InspectCheck =
     | 'netlist'
     | 'hole-to-hole'
     | 'hole-to-track'
+    | 'hole-to-pad'
     | 'copper-to-edge'
     | 'edge-clearance'
     | 'silkscreen-over-pad'
@@ -233,6 +234,64 @@ export interface ImpedanceTableReport {
     readonly dielectricHeight: number;
     readonly dielectricConstant: number;
     readonly rows: readonly ImpedanceTableRow[];
+}
+
+/** Options of `board.impedanceReport()`. */
+export interface ImpedanceReportOptions {
+    /** Trace structure; `auto` (default) selects the geometry from each copper layer. */
+    readonly structure?: ImpedanceStructure | 'auto';
+    /** Overrides the stored dielectric height. */
+    readonly dielectricHeight?: number;
+    /** Overrides the stored dielectric constant. */
+    readonly dielectricConstant?: number;
+    /** Overrides the stored copper thickness. */
+    readonly copperThickness?: number;
+}
+
+/** One declared net and the impedance range of its copper tracks. */
+export interface ImpedanceNetRow {
+    readonly net: string;
+    readonly tracks: number;
+    /** Trace widths of the measured tracks, in millimetres. */
+    readonly widthMin: number;
+    readonly widthMax: number;
+    /** Impedances of the measured tracks, in ohms. */
+    readonly impedanceMin: number;
+    readonly impedanceMax: number;
+    /** Structures used by the measured tracks, sorted. */
+    readonly structures: readonly string[];
+}
+
+/** One declared differential pair and its computed pair impedances. */
+export interface ImpedancePairRow {
+    readonly id: string;
+    readonly positive: string;
+    readonly negative: string;
+    /** Target trace width, in millimetres. */
+    readonly width: number;
+    /** Target edge-to-edge gap, in millimetres. */
+    readonly gap: number;
+    readonly structure: string;
+    readonly impedance: number;
+    /** Odd-mode impedance of each half, in ohms. */
+    readonly oddImpedance?: number;
+    /** Even-mode impedance of each half, in ohms. */
+    readonly evenImpedance?: number;
+}
+
+/** Result of `board.impedanceReport()`. */
+export interface ImpedanceSummaryReport {
+    readonly revision: number;
+    readonly units: 'mm';
+    /** The requested structure, or `auto` when the geometry follows each layer. */
+    readonly structure: ImpedanceStructure | 'auto';
+    readonly copperThickness: number;
+    readonly dielectricHeight: number;
+    readonly dielectricConstant: number;
+    readonly netCount: number;
+    readonly pairCount: number;
+    readonly nets: readonly ImpedanceNetRow[];
+    readonly pairs: readonly ImpedancePairRow[];
 }
 
 /** Copper area of one copper layer, in square millimetres. */
@@ -576,6 +635,8 @@ export interface BoardCapabilities {
     readonly impedance: SupportLevel;
     /** Whether a target-impedance trace-width table can be produced. */
     readonly impedanceTable: SupportLevel;
+    /** Whether a per-net and per-pair impedance report can be produced. */
+    readonly impedanceReport: SupportLevel;
 }
 
 /** Options of `OpenPCB.create()`. */
@@ -1512,6 +1573,7 @@ export interface Board {
     impedance(options: ImpedanceOptions): Promise<ImpedanceReport>;
     impedanceWidth(options: ImpedanceWidthOptions): Promise<ImpedanceWidthReport>;
     impedanceTable(options?: ImpedanceTableOptions): Promise<ImpedanceTableReport>;
+    impedanceReport(options?: ImpedanceReportOptions): Promise<ImpedanceSummaryReport>;
     copperBalance(): Promise<CopperBalanceReport>;
     netLengths(): Promise<NetLengthsReport>;
     panelize(options: PanelizeOptions): Promise<PanelizeReport>;
