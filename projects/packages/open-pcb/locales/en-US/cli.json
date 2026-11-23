@@ -179,6 +179,8 @@
             "tab": "Tab style: v-cut, mouse-bite or none",
             "tab-width": "Length of one mouse-bite tab along its seam, in millimetres",
             "tab-spacing": "Distance between tab centres along a seam, in millimetres",
+            "tooling-hole": "Finished diameter of the four rail tooling holes, in millimetres",
+            "tooling-inset": "Distance from the panel edge to a tooling-hole centre, in millimetres",
             "code": "Stable finding code, for example drc/track-width-too-small",
             "object": "Object id the waiver is narrowed to; omit to cover every object",
             "reason": "Why the finding was accepted",

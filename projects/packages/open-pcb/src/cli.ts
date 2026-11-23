@@ -2160,6 +2160,8 @@ cli
     .option('--tab <style>', 'cli.opt.tab')
     .option('--tab-width <mm>', 'cli.opt.tab-width')
     .option('--tab-spacing <mm>', 'cli.opt.tab-spacing')
+    .option('--tooling-hole <mm>', 'cli.opt.tooling-hole')
+    .option('--tooling-inset <mm>', 'cli.opt.tooling-inset')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         const columns = countOption(text(options, 'columns'));
@@ -2169,6 +2171,8 @@ cli
         const tab = panelTabStyle(text(options, 'tab'));
         const tabWidth = numberOption(text(options, 'tab-width'));
         const tabSpacing = numberOption(text(options, 'tab-spacing'));
+        const toolingHole = numberOption(text(options, 'tooling-hole'));
+        const toolingInset = numberOption(text(options, 'tooling-inset'));
         if (file === undefined) {
             ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
             return 2;
@@ -2181,13 +2185,25 @@ cli
             ctx.fail('open-pcb.cli.number-invalid', { message: '`--rows <count>` must be a positive integer' });
             return 2;
         }
-        const lengths = { 'gap-x': gaps.gapX, 'gap-y': gaps.gapY, rail, 'tab-width': tabWidth, 'tab-spacing': tabSpacing };
+        const lengths = {
+            'gap-x': gaps.gapX,
+            'gap-y': gaps.gapY,
+            rail,
+            'tab-width': tabWidth,
+            'tab-spacing': tabSpacing,
+            'tooling-hole': toolingHole,
+            'tooling-inset': toolingInset,
+        };
         for (const key of Object.keys(lengths) as (keyof typeof lengths)[]) {
             const value = lengths[key];
             if (text(options, key) !== undefined && (value === undefined || value < 0)) {
                 ctx.fail('open-pcb.cli.number-invalid', { message: `\`--${key} <mm>\` must not be negative` });
                 return 2;
             }
+        }
+        if (toolingHole !== undefined && toolingHole === 0) {
+            ctx.fail('open-pcb.cli.number-invalid', { message: '`--tooling-hole <mm>` must be greater than zero' });
+            return 2;
         }
         if (text(options, 'tab') !== undefined && tab === undefined) {
             ctx.fail('open-pcb.cli.tab-invalid', { message: '`--tab` must be v-cut, mouse-bite or none' });
@@ -2203,12 +2219,16 @@ cli
                 tab,
                 tabWidth,
                 tabSpacing,
+                toolingHole,
+                toolingHoleInset: toolingInset,
             });
             ctx.emitResult(
                 report,
                 `panel ${report.columns}x${report.rows} boards=${report.boardCount}`
                     + ` size=${report.panelSize.width}x${report.panelSize.height}mm tab=${report.tab}`
-                    + ` tabs=${report.tabCount} utilization=${report.utilizationPercent}%`,
+                    + ` tabs=${report.tabCount} utilization=${report.utilizationPercent}%`
+                    + ` breakaway=${report.breakaway.area}mm2`
+                    + (report.toolingHoleCount > 0 ? ` tooling=${report.toolingHoleCount}` : ''),
             );
             return 0;
         });

@@ -608,6 +608,12 @@ test('panelization reports the grid, seams, tabs and utilization', { skip: withA
     assert.equal(panel.tabs.length, panel.tabCount);
     assert.ok(panel.tabCount > 0);
     assert.ok(panel.utilizationPercent > 90 && panel.utilizationPercent < 91);
+    assert.equal(panel.breakaway.area, 3321);
+    assert.equal(panel.breakaway.railArea, 1496);
+    assert.equal(panel.breakaway.gapArea, 1825);
+    assert.ok(Math.abs(panel.breakaway.percent - 9.4023) < 0.001, `breakaway percent: ${panel.breakaway.percent}`);
+    assert.equal(panel.toolingHoleCount, 0);
+    assert.deepEqual(panel.toolingHoles, []);
 
     const defaults = await board.panelize({ columns: 1, rows: 1 });
     assert.equal(defaults.gapX, 0);
@@ -616,6 +622,33 @@ test('panelization reports the grid, seams, tabs and utilization', { skip: withA
     assert.equal(defaults.tab, 'v-cut');
     assert.deepEqual(defaults.tabs, []);
     assert.equal(defaults.utilizationPercent, 100);
+    assert.deepEqual(defaults.breakaway, { area: 0, percent: 0, railArea: 0, gapArea: 0 });
+
+    const tooling = await board.panelize({
+        columns: 2,
+        rows: 2,
+        rail: 3,
+        toolingHole: 2,
+        toolingHoleInset: 1.5,
+    });
+    assert.equal(tooling.toolingHoleCount, 4);
+    assert.deepEqual(
+        tooling.toolingHoles.map((hole) => [hole.corner, hole.x, hole.y, hole.diameter]),
+        [
+            ['bottom-left', -1.5, -1.5, 2],
+            ['bottom-right', 201.5, -1.5, 2],
+            ['top-right', 201.5, 161.5, 2],
+            ['top-left', -1.5, 161.5, 2],
+        ],
+    );
+    assert.equal(tooling.breakaway.area, 2196);
+    assert.equal(tooling.breakaway.railArea, 2196);
+    assert.equal(tooling.breakaway.gapArea, 0);
+    assert.ok(Math.abs(tooling.breakaway.percent - 6.4218) < 0.001, `breakaway percent: ${tooling.breakaway.percent}`);
+    await assert.rejects(
+        board.panelize({ columns: 2, rows: 1, toolingHole: 2 }),
+        (error: unknown) => error instanceof OpenPCBError && error.code === 'session/argument-invalid',
+    );
 
     await board.close();
     await pcb.dispose();
@@ -951,6 +984,12 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
             /panel 2x2 boards=4 size=209x169mm tab=mouse-bite tabs=18 utilization=[\d.]+%/,
         );
         assert.match(runFail('panel', document, '--columns', '2', '--rows', '2', '--tab', 'castellated'), /--tab/);
+        assert.match(
+            run('panel', document, '--columns', '2', '--rows', '2', '--rail', '2', '--tooling-hole', '2'),
+            /size=204x164mm .*breakaway=1456mm2 tooling=4/,
+        );
+        assert.match(runFail('panel', document, '--columns', '2', '--rows', '2', '--tooling-hole', '0'), /--tooling-hole/);
+        assert.match(runFail('panel', document, '--columns', '2', '--rows', '2', '--tooling-hole', '2'), /rail/);
         assert.match(run('rules', 'show', document), /solderMaskExpansion=0.05/);
         run('rules', 'set', document, '--hole-clearance', '0.3', '--solder-mask-expansion', '0.1');
         assert.match(run('rules', 'show', document), /holeClearance=0.3 .*solderMaskExpansion=0.1/);
