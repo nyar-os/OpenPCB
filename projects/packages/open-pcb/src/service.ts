@@ -51,6 +51,7 @@ import type {
     InspectReport,
     KeepoutAreaReport,
     MoveFootprintOptions,
+    NetAuditReport,
     NetLengthsReport,
     OutlineGeometryOptions,
     OutlineGeometryReport,
@@ -68,6 +69,7 @@ import type {
     SplitTrackOptions,
     SplitTrackResult,
     TextListReport,
+    TestPointCoverageReport,
     UpdateFootprintOptions,
     UpdateKeepoutOptions,
     UpdateLayerOptions,
@@ -499,6 +501,16 @@ export function copperBalance(handle: number): CopperBalanceReport {
 /** Reports routed copper length per declared net. */
 export function netLengths(handle: number): NetLengthsReport {
     return decode<NetLengthsReport>(() => binding('board.netLengths').board_net_lengths(handle));
+}
+
+/** Reports net class membership, width and clearance conformance. */
+export function netAudit(handle: number): NetAuditReport {
+    return decode<NetAuditReport>(() => binding('board.netAudit').board_net_audit(handle));
+}
+
+/** Reports test point coverage per declared net. */
+export function testpointCoverage(handle: number): TestPointCoverageReport {
+    return decode<TestPointCoverageReport>(() => binding('board.testpointCoverage').board_testpoint_coverage(handle));
 }
 
 /** Builds the panelization report of one open board. */

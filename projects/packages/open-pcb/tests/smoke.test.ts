@@ -183,6 +183,8 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.texts, 'supported');
     assert.equal(matrix.zoneReport, 'supported');
     assert.equal(matrix.netLengths, 'supported');
+    assert.equal(matrix.netAudit, 'supported');
+    assert.equal(matrix.testPointCoverage, 'supported');
     assert.equal(matrix.drillReport, 'supported');
     assert.equal(matrix.exportTargets.drl, 'supported');
     assert.equal(matrix.exportTargets.gbr, 'supported');
@@ -637,6 +639,59 @@ test('pour audit and fabrication manifest report islands and planned files', { s
     const matrix = await pcb.capabilities();
     assert.equal(matrix.zoneAudit, 'supported');
     assert.equal(matrix.fabManifest, 'supported');
+
+    await board.close();
+    await pcb.dispose();
+});
+
+test('net audit and test point coverage report class gaps and probe coverage', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+    const board = await pcb.create({ title: 'Audit' });
+    for (const name of ['N1', 'N2', 'SIG']) {
+        await board.addNet({ name });
+    }
+    await board.addNetClass({ name: 'Power', width: 0.5, clearance: 0.5 });
+    await board.assignNetClass({ net: 'N1', class: 'Power' });
+    await board.assignNetClass({ net: 'N2', class: 'Power' });
+    await board.addTrack({ net: 'N1', layer: 'F.Cu', width: 0.2, from: [0, 0], to: [10, 0] });
+    await board.addTrack({ net: 'N2', layer: 'F.Cu', width: 0.3, from: [0, 0.5], to: [10, 0.5] });
+    await board.addFootprint({ reference: 'U1', x: 5, y: 5 });
+    await board.addPad({ footprint: 'fp-1', number: '1', x: 0, y: 0, w: 0.8, h: 0.8, net: 'SIG' });
+    await board.addVia({ net: 'N1', at: [20, 20], diameter: 0.6, drill: 0.3 });
+    await board.addVia({ net: 'N2', at: [30, 30], diameter: 0.6, drill: 0.3 });
+    await board.addTestPoint({ target: 'via-1' });
+    await board.addTestPoint({ target: 'fp-1:1' });
+
+    const audit = await board.netAudit();
+    assert.equal(audit.report, 'open-pcb-net-audit');
+    assert.equal(audit.netCount, 3);
+    assert.equal(audit.classCount, 1);
+    assert.equal(audit.pairCount, 1);
+    assert.equal(audit.status, 'error');
+    assert.deepEqual(audit.issues.map((issue) => issue.code), [
+        'net/clearance-below-class',
+        'net/width-below-class',
+    ]);
+    assert.equal(audit.nets[0].class, 'Power');
+    assert.equal(audit.nets[0].widthStatus, 'below');
+    assert.deepEqual(audit.nets[0].width, { min: 0.2, max: 0.2 });
+    assert.equal(audit.pairs[0].actual, 0.25);
+    assert.equal(audit.pairs[0].required, 0.5);
+    assert.equal(audit.pairs[0].ok, false);
+
+    const coverage = await board.testpointCoverage();
+    assert.equal(coverage.report, 'open-pcb-testpoint-coverage');
+    assert.equal(coverage.netCount, 3);
+    assert.equal(coverage.coveredCount, 2);
+    assert.equal(coverage.uncoveredCount, 1);
+    assert.equal(coverage.unconnectedCount, 0);
+    assert.equal(coverage.probeCount, 2);
+    assert.equal(coverage.coveragePercent, 66.666667);
+    assert.equal(coverage.status, 'warn');
+    assert.deepEqual(coverage.issues.map((issue) => issue.code), ['testpoints/net-not-covered']);
+    assert.equal(coverage.nets[1].name, 'N2');
+    assert.equal(coverage.nets[1].covered, false);
+    assert.equal(coverage.probes[1].designator, 'U1');
 
     await board.close();
     await pcb.dispose();

@@ -777,6 +777,22 @@ fn board_net_lengths(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Reports net class membership, width and clearance conformance.
+#[function]
+fn board_net_audit(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::net_audit(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Reports test point coverage per declared net.
+#[function]
+fn board_testpoint_coverage(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::testpoint_coverage(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Reports the connectivity of every copper pour region.
 #[function]
 fn board_zone_audit(ctx: CallContext) -> Result<JsValue> {
@@ -1624,6 +1640,8 @@ register_module![
     stackup_impedance_report,
     board_copper_balance,
     board_net_lengths,
+    board_net_audit,
+    board_testpoint_coverage,
     board_panelize,
     board_outline_geometry,
     board_list,

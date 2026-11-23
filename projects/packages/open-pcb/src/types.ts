@@ -355,6 +355,131 @@ export interface NetLengthsReport {
     readonly totals: NetLengthTotals;
 }
 
+/** Class targets that apply to one net, in millimetres; null when the net has no class value. */
+export interface NetAuditTargets {
+    readonly width: number | null;
+    readonly clearance: number | null;
+    readonly viaDiameter: number | null;
+    readonly viaDrill: number | null;
+}
+
+/** Measured track-width range of one net, in millimetres. */
+export interface NetAuditWidth {
+    readonly min: number;
+    readonly max: number;
+}
+
+/** Narrowest measured clearance from one net to another. */
+export interface NetAuditClearance {
+    readonly to: string;
+    readonly actual: number;
+    readonly required: number;
+    readonly ok: boolean;
+}
+
+/** One declared net in the net audit. */
+export interface NetAuditNet {
+    readonly name: string;
+    readonly class: string | null;
+    readonly targets: NetAuditTargets;
+    readonly tracks: number;
+    readonly width: NetAuditWidth | null;
+    readonly vias: number;
+    readonly viaDiameter: number | null;
+    readonly viaDrill: number | null;
+    readonly pads: number;
+    readonly widthStatus: 'pass' | 'below' | 'none';
+    readonly clearance: NetAuditClearance | null;
+}
+
+/** One measured track pair between two declared nets. */
+export interface NetAuditPair {
+    readonly a: string;
+    readonly b: string;
+    readonly actual: number;
+    readonly required: number;
+    readonly ok: boolean;
+    readonly layer: LayerId;
+    readonly aTrack: ObjectId;
+    readonly bTrack: ObjectId;
+}
+
+/** One net audit finding. */
+export interface NetAuditIssue {
+    readonly code: string;
+    readonly severity: 'info' | 'warning' | 'error';
+    readonly objectId: string;
+    readonly net: string;
+    readonly other: string | null;
+    readonly layer: string | null;
+    readonly message: string;
+}
+
+/** Result of `board.netAudit()`. */
+export interface NetAuditReport {
+    readonly report: 'open-pcb-net-audit';
+    readonly revision: number;
+    readonly units: 'mm';
+    readonly status: 'pass' | 'warn' | 'error';
+    readonly netCount: number;
+    readonly classCount: number;
+    readonly pairCount: number;
+    readonly nets: readonly NetAuditNet[];
+    readonly pairs: readonly NetAuditPair[];
+    readonly issues: readonly NetAuditIssue[];
+}
+
+/** One declared net in the test point coverage report. */
+export interface TestPointCoverageNet {
+    readonly name: string;
+    readonly pads: number;
+    readonly vias: number;
+    readonly probes: number;
+    readonly layers: readonly LayerId[];
+    readonly covered: boolean;
+}
+
+/** One declared test point in the coverage report. */
+export interface TestPointCoverageProbe {
+    readonly id: ObjectId;
+    readonly target: string;
+    readonly kind: 'pad' | 'via';
+    readonly net: string | null;
+    readonly layer: LayerId;
+    /** Reference designator for a pad; an empty string for a via. */
+    readonly designator: string;
+    /** Pad number for a pad; an empty string for a via. */
+    readonly pad: string;
+    readonly at: readonly [number, number];
+}
+
+/** One test point coverage finding. */
+export interface TestPointCoverageIssue {
+    readonly code: string;
+    readonly severity: 'info' | 'warning' | 'error';
+    readonly objectId: string;
+    readonly message: string;
+}
+
+/** Result of `board.testpointCoverage()`. */
+export interface TestPointCoverageReport {
+    readonly report: 'open-pcb-testpoint-coverage';
+    readonly revision: number;
+    readonly units: 'mm';
+    readonly status: 'pass' | 'warn' | 'error';
+    readonly netCount: number;
+    readonly coveredCount: number;
+    readonly uncoveredCount: number;
+    readonly unconnectedCount: number;
+    readonly probeCount: number;
+    readonly unassignedProbes: number;
+    /** Covered share of connectable nets, in percent; null when no net is connectable. */
+    readonly coveragePercent: number | null;
+    readonly nets: readonly TestPointCoverageNet[];
+    readonly probes: readonly TestPointCoverageProbe[];
+    readonly issues: readonly TestPointCoverageIssue[];
+}
+
 /** One copper pour area entry of a layer. */
 export interface ZoneAreaLayer {
     readonly layer: LayerId;
@@ -758,6 +883,8 @@ export interface BoardCapabilities {
     readonly copperBalance: SupportLevel;
     /** Whether a routed copper length report per declared net can be produced. */
     readonly netLengths: SupportLevel;
+    /** Whether a net class, width and clearance conformance report can be produced. */
+    readonly netAudit: SupportLevel;
     /** Whether a rectangular board can be arrayed into a panel with seams or tabs. */
     readonly panelization: SupportLevel;
     /** Whether a polygonal board outline can be validated, measured and offset. */
@@ -770,6 +897,8 @@ export interface BoardCapabilities {
     readonly routingStyles: Readonly<Record<RouteStyle, SupportLevel>>;
     /** Whether declared test points can be reported. */
     readonly testPoints: SupportLevel;
+    /** Whether per-net test point coverage can be reported. */
+    readonly testPointCoverage: SupportLevel;
     /** Whether fiducial marks can be declared and managed. */
     readonly fiducials: SupportLevel;
     /** Whether a fiducial assembly report can be produced. */
@@ -1723,6 +1852,8 @@ export interface Board {
     impedanceReport(options?: ImpedanceReportOptions): Promise<ImpedanceSummaryReport>;
     copperBalance(): Promise<CopperBalanceReport>;
     netLengths(): Promise<NetLengthsReport>;
+    netAudit(): Promise<NetAuditReport>;
+    testpointCoverage(): Promise<TestPointCoverageReport>;
     panelize(options: PanelizeOptions): Promise<PanelizeReport>;
     addWaiver(options: AddWaiverOptions): Promise<BoardEditResult>;
     deleteWaiver(id: ObjectId): Promise<BoardEditResult>;

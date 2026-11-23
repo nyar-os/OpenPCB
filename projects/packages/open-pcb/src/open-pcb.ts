@@ -61,6 +61,7 @@ import type {
     KicadImportOptions,
     KicadImportResult,
     MoveFootprintOptions,
+    NetAuditReport,
     NetLengthsReport,
     OpenPCBOptions,
     OutlineGeometryOptions,
@@ -79,6 +80,7 @@ import type {
     SplitTrackOptions,
     SplitTrackResult,
     StitchViasOptions,
+    TestPointCoverageReport,
     TextListReport,
     UpdateFootprintOptions,
     UpdateKeepoutOptions,
@@ -703,6 +705,14 @@ function attach(
         async netLengths(): Promise<NetLengthsReport> {
             ensure();
             return service.netLengths(handle);
+        },
+        async netAudit(): Promise<NetAuditReport> {
+            ensure();
+            return service.netAudit(handle);
+        },
+        async testpointCoverage(): Promise<TestPointCoverageReport> {
+            ensure();
+            return service.testpointCoverage(handle);
         },
         async panelize(options: PanelizeOptions): Promise<PanelizeReport> {
             ensure();
