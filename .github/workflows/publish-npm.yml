@@ -55,7 +55,7 @@ jobs:
           package-manager-cache: false
       - name: Build and stage the native addon
         run: npx -y -p @wae/wae@0.0.6 wae native build --target ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: node-${{ matrix.target }}
           path: projects/packages/open-pcb-${{ matrix.target }}/open-pcb.${{ matrix.target }}.node
