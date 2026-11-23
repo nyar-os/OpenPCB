@@ -54,9 +54,10 @@ them.
 drc              connectivity       clearance          annular_rings
 annular-ring     track-width        unrouted           stackup
 outline          silkscreen         courtyard          netlist
-hole-to-hole     hole-to-track      copper-to-edge     edge-clearance
-silkscreen-over-pad diffpair        dangling-copper    netclass
-keepout          via-in-pad         pad-overlap        testpoints
+hole-to-hole     hole-to-track      hole-to-pad        copper-to-edge
+edge-clearance   silkscreen-over-pad diffpair          dangling-copper
+netclass         keepout            via-in-pad         pad-overlap
+testpoints
 ```
 
 `annular_rings` and `annular-ring` are both accepted spellings.
@@ -67,6 +68,12 @@ strictest clearance of the two nets, including net-class clearance. Every track
 is compared regardless of the layers the track or the hole spans, so a blind or
 buried via is treated as a through-hole feature and there is no per-layer
 filtering.
+
+`hole-to-pad` measures the same drill-hole set against every pad box. A pad hole
+is not measured against its own pad, same-net pairs are skipped (including two
+unassigned objects), and the check uses the strictest clearance of the two nets,
+including net-class clearance. Pads are compared on every layer, so each drill
+hole is a through-hole feature and there is no per-layer filtering.
 
 `diffpair` compares declared pairs against their width, gap and skew targets and
 also infers pairs from net names for nets that no declared pair covers. Two nets
@@ -104,6 +111,7 @@ counterpart warns `drc/diffpair-unpaired`.
 | Stackup | `supported` |
 | Single-ended and edge-coupled differential impedance | `supported` |
 | Impedance-to-width table (`stackup table`, `Board.impedanceTable`) | `supported` |
+| Per-net and per-pair impedance report (`stackup report`, `Board.impedanceReport`) | `supported` |
 
 ## Import loss ledgers
 
@@ -236,7 +244,8 @@ being approximated.
   `annular-ring` evaluates vias and drilled pads with the same minimum ring rule,
   and `hole-to-hole` compares every via and drilled-pad hole by net, so a pad
   without a drill contributes to neither check. `hole-to-track` measures those
-  same holes against every track of another net. The Excellon file and drill map
+  same holes against every track of another net, and `hole-to-pad` measures them
+  against every pad box of another net. The Excellon file and drill map
   list via, pad and routed-slot holes; a pad without a drill contributes nothing
   to those files.
 - A micro via is a typed via, not a smaller drill: it must bridge two adjacent
@@ -295,6 +304,12 @@ being approximated.
   matches measured boards best for `0.1 <= w / h <= 3` and `0.1 <= s / h <= 3`;
   outside that range it is still computed but is an estimate.
 - Width conversion rejects a target outside the formula's reachable range.
+- The impedance report measures every track on a declared net. `auto` (the
+  default) uses microstrip on `F.Cu` and `B.Cu` and stripline on inner copper; a
+  declared structure applies to every row, and a differential name is measured
+  as the single-ended geometry behind it in a net row. A net without copper
+  tracks is omitted while every declared pair is listed. The report uses the
+  stored stackup unless the request overrides it, and it is read-only.
 
 ### Silkscreen and text
 

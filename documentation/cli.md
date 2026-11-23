@@ -379,6 +379,10 @@ open-pcb stackup table <file> [--targets <ohm,ohm,...>]
     [--structure microstrip|stripline|diffMicrostrip|diffStripline]
     [--gap <mm>] [--dielectric-height <mm>] [--dielectric-constant <er>]
     [--copper-thickness <mm>]
+open-pcb stackup report <file>
+    [--structure auto|microstrip|stripline|diffMicrostrip|diffStripline]
+    [--dielectric-height <mm>] [--dielectric-constant <er>]
+    [--copper-thickness <mm>]
 ```
 
 `rules set` needs at least one option. `stackup set` needs all three values;
@@ -390,10 +394,20 @@ values come from the stored stackup. `stackup table` prints the width/impedance
 report as JSON; `--targets` defaults to `50`, and each value must be positive,
 finite and at most 64 targets.
 
+`stackup report` prints JSON with one row per declared net and one row per
+declared differential pair. The net rows list the tracked width and impedance
+range plus the structures used; the pair rows carry the differential, odd-mode
+and even-mode impedances. `--structure` defaults to `auto`, which uses
+microstrip on `F.Cu` and `B.Cu` and stripline on inner copper; any other name
+applies to every row. Values come from the stored stackup unless the electrical
+options override them. An invalid `--structure` fails with
+`open-pcb.cli.structure-invalid`.
+
 ```bash
 open-pcb stackup set board.opcb --copper-thickness 0.035 --dielectric-height 0.2 --dielectric-constant 4.2
 open-pcb stackup impedance board.opcb --width 0.25 --structure diffMicrostrip --gap 0.2
 open-pcb stackup table board.opcb --targets 40,50,60 --structure microstrip
+open-pcb stackup report board.opcb --structure auto
 ```
 
 ## Waivers and severity
