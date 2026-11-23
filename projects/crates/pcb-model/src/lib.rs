@@ -26,6 +26,7 @@ mod board;
 mod copper;
 mod drill;
 mod export;
+mod fab;
 mod impedance;
 mod inspect;
 mod ipc2581;
@@ -36,6 +37,7 @@ mod outline;
 mod panel;
 mod route;
 mod store;
+mod zone_audit;
 
 #[cfg(test)]
 #[path = "../tests/unit/model.rs"]
@@ -224,6 +226,8 @@ pub fn capabilities() -> Value {
         "copperBalance": "supported",
         "netLengths": "supported",
         "zoneReport": "supported",
+        "zoneAudit": "supported",
+        "fabManifest": "supported",
         "drillReport": "supported",
         "panelization": "supported",
         "polygonOutline": "supported",
@@ -1114,6 +1118,27 @@ pub fn copper_balance(handle: u64) -> Result<Value, ServiceError> {
 /// Reports the area and perimeter of every copper pour region.
 pub fn zone_report(handle: u64) -> Result<Value, ServiceError> {
     store::read(handle, copper::zones)
+}
+
+/// Reports the connectivity of every copper pour region.
+///
+/// A pour is connected when its polygon touches a same-net pad, via or track on
+/// its own layer. An unconnected pour is an isolated island; a pour without a
+/// net is unassigned copper. The report is read-only and lists the anchors that
+/// connect each pour.
+pub fn zone_audit(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, zone_audit::report)
+}
+
+/// Reports the fabrication file manifest of one open board.
+///
+/// The manifest lists every Gerber file the writer would emit, its X2 file
+/// function and object count, plus the drill tool and assembly row counts. It
+/// flags a missing outline, duplicate file names, empty copper layers and other
+/// conditions that would make the writer fail or emit an empty file. The report
+/// writes nothing.
+pub fn fab_manifest(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, fab::manifest)
 }
 
 /// Reports routed copper length per declared net.

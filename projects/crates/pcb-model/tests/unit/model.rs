@@ -25,11 +25,11 @@ use crate::{
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_fiducial, delete_footprint, delete_keepout,
     delete_net_class, delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver,
-    delete_zone, drill_report, export, fiducial_report, impedance_report, impedance_table, import, inspect, keepout_report,
-    list_fiducials, list_texts, move_footprint, net_lengths, open, outline_geometry, panelize, redo, route, save, set_outline,
-    set_rules, set_severity, set_stackup, set_via_back_drill, split_track, stackup_impedance, stackup_width, stitch_vias,
-    store, summary, undo, update_footprint, update_keepout, update_layer, update_pad, update_slot, update_text, update_track,
-    update_via, update_zone, zone_report,
+    delete_zone, drill_report, export, fab_manifest, fiducial_report, impedance_report, impedance_table, import, inspect,
+    keepout_report, list_fiducials, list_texts, move_footprint, net_lengths, open, outline_geometry, panelize, redo, route,
+    save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, split_track, stackup_impedance, stackup_width,
+    stitch_vias, store, summary, undo, update_footprint, update_keepout, update_layer, update_pad, update_slot, update_text,
+    update_track, update_via, update_zone, zone_audit, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -7432,4 +7432,193 @@ fn svg_preview_draws_footprints_and_keeps_board_y_down() {
     };
     assert!(y_of("A1") < y_of("A2"), "a smaller board Y must stay higher in the preview");
     close(handle).expect("the board closes");
+}
+
+#[test]
+fn fab_manifest_mirrors_the_gerber_files_and_a_clean_board_passes() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+
+    let report = fab_manifest(handle).expect("the manifest is built");
+    assert_eq!(report["report"], "open-pcb-fab-manifest");
+    assert_eq!(report["units"], "mm");
+    assert_eq!(report["outline"], true);
+    assert_eq!(report["status"], "pass", "a routable board has no manifest issue: {}", report["issues"]);
+    assert_eq!(report["copperLayers"], json!(["F.Cu", "B.Cu"]));
+    assert_eq!(report["fileCount"], 9);
+
+    let files = report["files"].as_array().expect("files is an array");
+    assert_eq!(files[0]["name"], "F_Cu.gbr");
+    assert_eq!(files[0]["function"], "Copper,L1,Top");
+    assert_eq!(files[0]["kind"], "copper");
+    assert_eq!(files[0]["layer"], "F.Cu");
+    assert_eq!(files[0]["objects"], 2, "one track and one through via sit on F.Cu");
+    assert_eq!(files[1]["function"], "Copper,L2,Bot");
+    assert_eq!(files[1]["objects"], 1, "the through via reaches B.Cu as well");
+    assert_eq!(files[4]["name"], "F_Mask.gbr");
+    assert_eq!(files[4]["function"], "Soldermask,Top");
+    assert_eq!(files[6]["function"], "Paste,Top");
+    assert_eq!(files[8]["name"], "Edge_Cuts.gbr");
+    assert_eq!(files[8]["function"], "Profile,NP");
+    assert_eq!(files[8]["objects"], 4);
+
+    assert_eq!(report["drill"]["tools"], 1);
+    assert_eq!(report["drill"]["holes"], 1);
+    assert_eq!(report["drill"]["slots"], 0);
+    assert_eq!(report["drill"]["padHoles"], 0);
+    assert_eq!(report["assembly"]["placements"], 1);
+    assert_eq!(report["assembly"]["bomGroups"], 1);
+
+    let gbr = directory.join("gerber");
+    let exported = export(handle, "gbr", &gbr).expect("Gerber export writes");
+    let artifacts = exported["artifacts"].as_array().expect("artifacts is an array");
+    let exported_names: Vec<&str> = artifacts.iter().map(|item| item["name"].as_str().expect("a name")).collect();
+    let planned_names: Vec<&str> = files.iter().map(|file| file["name"].as_str().expect("a name")).collect();
+    assert_eq!(planned_names, exported_names, "the manifest lists the files the writer emits, in order");
+    for file in files {
+        let name = file["name"].as_str().expect("a name");
+        let function = file["function"].as_str().expect("a function");
+        let text = fs::read_to_string(gbr.join(name)).expect("the Gerber file is readable");
+        assert!(text.contains(&format!("%TF.FileFunction,{function}*%")), "{name} declares {function}; got {text}");
+    }
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn fab_manifest_reports_a_missing_outline_and_a_file_name_collision() {
+    let handle = created();
+    add_layer(handle, AddLayerRequest { name: "F_Mask".to_string(), kind: None, color: None })
+        .expect("a copper layer named after the mask file is added");
+
+    let report = fab_manifest(handle).expect("the manifest is built");
+    assert_eq!(report["status"], "error");
+    let codes: Vec<&str> =
+        report["issues"].as_array().expect("issues is an array").iter().filter_map(|issue| issue["code"].as_str()).collect();
+    assert!(codes.contains(&"fab/no-outline"), "a missing outline stops Gerber export; got {codes:?}");
+    assert!(codes.contains(&"fab/file-name-collision"), "two files plan one name; got {codes:?}");
+    assert!(codes.contains(&"fab/no-drill-data"), "a board without drills warns; got {codes:?}");
+    assert!(codes.contains(&"fab/no-placements"), "a board without footprints warns; got {codes:?}");
+    assert_eq!(report["fileCount"], 9, "the extra copper layer adds one planned file");
+    let files = report["files"].as_array().expect("files is an array");
+    assert_eq!(files.iter().filter(|file| file["name"] == "F_Mask.gbr").count(), 2);
+    assert_eq!(files.iter().filter(|file| file["kind"] == "profile").count(), 0, "no outline plans no profile");
+
+    close(handle).expect("the board closes");
+    let missing = fab_manifest(handle).expect_err("a closed handle is rejected");
+    assert_eq!(missing.code, "board/not-found");
+}
+
+#[test]
+fn zone_audit_separates_connected_isolated_and_unassigned_pours() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("GND is declared");
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("VCC is declared");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("U1".to_string()),
+            value: Some("MCU".to_string()),
+            footprint: Some("QFN".to_string()),
+            x: Some(5.0),
+            y: Some(5.0),
+            rotation: Some(0.0),
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("GND".to_string()),
+            drill: None,
+        },
+    )
+    .expect("the ground pad is added");
+    add_zone(
+        handle,
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: Some("GND".to_string()),
+            points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+        },
+    )
+    .expect("the connected pour is added");
+    add_zone(
+        handle,
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: Some("VCC".to_string()),
+            points: vec![[20.0, 20.0], [30.0, 20.0], [30.0, 30.0], [20.0, 30.0]],
+        },
+    )
+    .expect("the isolated pour is added");
+    add_zone(
+        handle,
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: None,
+            points: vec![[40.0, 40.0], [50.0, 40.0], [50.0, 50.0], [40.0, 50.0]],
+        },
+    )
+    .expect("the unassigned pour is added");
+
+    let report = zone_audit(handle).expect("the zone audit is built");
+    assert_eq!(report["report"], "open-pcb-zone-audit");
+    assert_eq!(report["units"], "mm2");
+    assert_eq!(report["zoneCount"], 3);
+    assert_eq!(report["connectedCount"], 1);
+    assert_eq!(report["isolatedCount"], 1);
+    assert_eq!(report["unassignedCount"], 1);
+    assert_eq!(report["totalArea"], 300.0);
+    assert_eq!(report["isolatedArea"], 100.0);
+    assert_eq!(report["status"], "warn");
+    let codes: Vec<&str> =
+        report["issues"].as_array().expect("issues is an array").iter().filter_map(|issue| issue["code"].as_str()).collect();
+    assert_eq!(codes, ["zone/isolated", "zone/unassigned-net"]);
+
+    let zones = report["zones"].as_array().expect("zones is an array");
+    assert_eq!(zones[0]["id"], "zone-1");
+    assert_eq!(zones[0]["status"], "connected");
+    assert_eq!(zones[0]["anchors"], json!({ "pads": 1, "vias": 0, "tracks": 0 }));
+    assert_eq!(zones[0]["area"], 100.0);
+    assert_eq!(zones[0]["perimeter"], 40.0);
+    assert_eq!(zones[1]["status"], "isolated");
+    assert_eq!(zones[1]["anchors"], json!({ "pads": 0, "vias": 0, "tracks": 0 }));
+    assert_eq!(zones[2]["status"], "unassigned");
+    assert_eq!(report["layers"][0]["layer"], "F.Cu");
+    assert_eq!(report["layers"][0]["zones"], 3);
+    assert_eq!(report["layers"][0]["connected"], 1);
+    assert_eq!(report["layers"][0]["isolated"], 1);
+    assert_eq!(report["layers"][0]["unassigned"], 1);
+    assert_eq!(report["layers"][0]["area"], 300.0);
+    assert_eq!(report["layers"][0]["isolatedArea"], 100.0);
+
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("GND".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [5.0, 5.0],
+            to: [15.0, 5.0],
+        },
+    )
+    .expect("a track leaves the pour");
+    let report = zone_audit(handle).expect("the zone audit is rebuilt");
+    assert_eq!(report["zones"][0]["anchors"], json!({ "pads": 1, "vias": 0, "tracks": 1 }));
+    let revision = summary(handle).expect("the board is listed")["revision"].as_u64().expect("a revision");
+    let again = zone_audit(handle).expect("the audit is deterministic");
+    assert_eq!(again["zones"], report["zones"]);
+    assert_eq!(summary(handle).expect("the board is listed")["revision"].as_u64(), Some(revision), "the audit edits nothing");
+
+    close(handle).expect("the board closes");
+    let missing = zone_audit(handle).expect_err("a closed handle is rejected");
+    assert_eq!(missing.code, "board/not-found");
 }
