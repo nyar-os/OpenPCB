@@ -51,8 +51,9 @@ Every board exposes `id`, `revision`, `summary`, `canUndo` and `canRedo`, plus:
 - **Layers and outline:** `addLayer`, `updateLayer`, `setOutline`.
 - **Footprints and pads:** `addFootprint`, `updateFootprint`, `moveFootprint`,
   `deleteFootprint`, `addPad`, `updatePad`, `deletePad`.
-- **Nets and classes:** `addNet`, `addNetClass`, `assignNetClass`,
-  `deleteNetClass`, `addDifferentialPair`, `deleteDifferentialPair`.
+- **Nets and classes:** `addNet`, `addNetClass`, `updateNetClass`,
+  `assignNetClass`, `deleteNetClass`, `addDifferentialPair`,
+  `deleteDifferentialPair`.
 - **Copper edits:** `addTrack`, `updateTrack`, `splitTrack`, `deleteTrack`,
   `addVia`, `updateVia`, `deleteVia`, `setViaBackDrill`, `addSlot`,
   `updateSlot`, `deleteSlot`, `addZone`, `updateZone`, `deleteZone`,

@@ -121,7 +121,7 @@ accepted.
 | Solder-mask aperture check (`solder-mask`) | `supported` |
 | Panel tooling holes and breakaway report (`panel`) | `supported` |
 | Polygon outline geometry (`Board.outlineGeometry`, SDK only) | `supported` |
-| Net classes (checks and opt-in routing targets) | `supported` |
+| Net classes (checks and opt-in routing targets, editable in place) | `supported` |
 | Test points | `supported` |
 | Stackup | `supported` |
 | Single-ended and edge-coupled differential impedance | `supported` |

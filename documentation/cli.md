@@ -283,9 +283,19 @@ open-pcb diffpair delete <file> --id <id>
 
 open-pcb netclass add <file> --name <name> [--width <mm>] [--clearance <mm>]
     [--via-diameter <mm>] [--via-drill <mm>]
+open-pcb netclass update <file> --id <id> [--name <name>] [--width <mm>]
+    [--clearance <mm>] [--via-diameter <mm>] [--via-drill <mm>]
 open-pcb netclass assign <file> --net <name> --class <name-or-id>
 open-pcb netclass delete <file> --id <id>
 ```
+
+`netclass update` edits one class in place and needs at least one of `--name`,
+`--width`, `--clearance`, `--via-diameter` or `--via-drill`. Omitted fields keep
+their current value, and a field cannot be cleared because an absent option is
+the only empty form the model accepts. The class id never changes. Assignments
+live on the class itself, so renaming a class keeps every net in it. A name that
+another class already uses fails with `session/argument-invalid`, and an unknown
+id fails with `object/not-found`.
 
 `net audit` lists every declared net with its class targets, measured track
 width range, via sizes and the narrowest clearance to another net. Clearance is
