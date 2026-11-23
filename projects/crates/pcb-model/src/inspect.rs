@@ -35,6 +35,9 @@ const TRACK_WIDTH_WARNING_MM: f64 = 0.15;
 const CONNECTIVITY_TOLERANCE_MM: f64 = 0.01;
 /// Slack allowed when comparing differential-pair geometry, in millimetres.
 const DIFFPAIR_TOLERANCE_MM: f64 = 0.01;
+/// Minimum solder-mask web between two openings of different nets, in
+/// millimetres.
+const MIN_SOLDER_MASK_WEB_MM: f64 = 0.1;
 /// Largest allowed routed-length difference inside a naming-inferred
 /// differential pair, in millimetres.
 const DIFFPAIR_SKEW_MM: f64 = 0.5;
@@ -65,6 +68,7 @@ pub(crate) const CHECKS: &[&str] = &[
     "keepout",
     "via-in-pad",
     "pad-overlap",
+    "solder-mask",
     "testpoints",
 ];
 
@@ -94,6 +98,7 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "keepout",
     "via-in-pad",
     "pad-overlap",
+    "solder-mask",
     "testpoints",
 ];
 
@@ -136,6 +141,7 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "keepout" => keepout(board, &mut report),
             "via-in-pad" => via_in_pad(board, &mut report),
             "pad-overlap" => pad_overlap(board, &mut report),
+            "solder-mask" => solder_mask(board, &mut report),
             "testpoints" => testpoints(board, &mut report),
             other => report.push(finding(
                 "check/unsupported",
@@ -572,6 +578,72 @@ fn pad_overlap(board: &Board, issues: &mut CheckReport) {
                     pad.number, footprint.ref_, other_pad.number, other_footprint.ref_, footprint.layer
                 ),
             ));
+        }
+    }
+}
+
+/// Checks the solder-mask apertures of outer-layer pads.
+///
+/// The mask writer opens a rectangle over every outer-layer pad, grown by the
+/// document's solder-mask rule per side; vias stay tented and inner copper
+/// opens no mask. Two openings of different nets that overlap or touch leave
+/// no mask between the pads, so solder can bridge them; an opening pair that
+/// stays apart by less than [`MIN_SOLDER_MASK_WEB_MM`] leaves a web too thin to
+/// survive fabrication. Pads of the same net are skipped, mirroring
+/// `pad_overlap`. Each pair is reported once, in pad-key order, on the pad's
+/// outer copper layer.
+fn solder_mask(board: &Board, issues: &mut CheckReport) {
+    let scale = board.millimetres();
+    if scale <= 0.0 {
+        return;
+    }
+    let stack = board.copper_stack();
+    let Some(&front) = stack.first()
+    else {
+        return;
+    };
+    let back = *stack.last().unwrap_or(&front);
+    let expansion = board.rules.solder_mask_expansion / scale;
+    let mut pads: Vec<_> = board.placed_pads().into_iter().filter(|pad| pad.layer == front || pad.layer == back).collect();
+    pads.sort_by(|left, right| left.key.cmp(&right.key));
+    for (index, pad) in pads.iter().enumerate() {
+        for other in pads.iter().skip(index + 1) {
+            if pad.layer != other.layer || pad.net == other.net {
+                continue;
+            }
+            let overlap_x = pad.half[0] + other.half[0] + 2.0 * expansion - (pad.at[0] - other.at[0]).abs();
+            let overlap_y = pad.half[1] + other.half[1] + 2.0 * expansion - (pad.at[1] - other.at[1]).abs();
+            let object = format!("{}+{}", pad.key, other.key);
+            if overlap_x >= -1e-9 && overlap_y >= -1e-9 {
+                issues.push(finding(
+                    "drc/solder-mask-bridge",
+                    Severity::Error,
+                    board,
+                    Some(pad.layer),
+                    Some(&object),
+                    format!(
+                        "solder-mask openings of pad `{}` and pad `{}` overlap on {}; no mask separates the two nets",
+                        pad.key, other.key, pad.layer
+                    ),
+                ));
+                continue;
+            }
+            let gap = (overlap_x.min(0.0).powi(2) + overlap_y.min(0.0).powi(2)).sqrt() * scale;
+            // The rule is a minimum: a web that only differs from it by rounding
+            // is accepted, so a nominal 0.1 mm web never warns.
+            if gap + 1e-9 < MIN_SOLDER_MASK_WEB_MM && gap > 0.0 {
+                issues.push(finding(
+                    "drc/solder-mask-sliver",
+                    Severity::Warning,
+                    board,
+                    Some(pad.layer),
+                    Some(&object),
+                    format!(
+                        "solder-mask web between pad `{}` and pad `{}` is {gap:.3} mm on {}; the minimum web is {MIN_SOLDER_MASK_WEB_MM:.3} mm",
+                        pad.key, other.key, pad.layer
+                    ),
+                ));
+            }
         }
     }
 }

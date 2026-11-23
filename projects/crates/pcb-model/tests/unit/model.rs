@@ -247,6 +247,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         "keepout",
         "via-in-pad",
         "pad-overlap",
+        "solder-mask",
         "testpoints",
     ] {
         assert_eq!(matrix["checks"][check], "supported", "{check} check");
@@ -846,6 +847,77 @@ fn pad_overlap_reports_each_pair_once_in_a_stable_order() {
 }
 
 #[test]
+fn solder_mask_flags_merged_and_sliver_openings() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    place_footprint(handle, "U1", "F.Cu", 0.0, 0.0, 0.0);
+    // 0.5 mm pads 0.6 mm apart leave a 0.1 mm copper gap, so copper does not
+    // overlap; the default 0.05 mm mask expansion per side closes that gap.
+    add_net_pad(handle, "fp-1", "1", [0.0, 0.0], [0.5, 0.5], "VCC");
+    add_net_pad(handle, "fp-1", "2", [0.6, 0.0], [0.5, 0.5], "GND");
+
+    let check = || Some(vec!["solder-mask".to_string()]);
+    let bridge = inspect(handle, check()).expect("the check runs");
+    assert_eq!(codes(&bridge), ["drc/solder-mask-bridge"]);
+    assert_eq!(bridge["issues"][0]["severity"], "error");
+    assert_eq!(bridge["issues"][0]["layerId"], "F.Cu");
+    assert_eq!(bridge["issues"][0]["objectId"], "fp-1:1+fp-1:2");
+    let message = bridge["issues"][0]["message"].as_str().expect("the issue carries a message");
+    assert!(message.contains("overlap"), "the message explains the merged openings; got {message}");
+    assert_eq!(bridge["passed"], false);
+
+    update_pad(
+        handle,
+        UpdatePadRequest { footprint: "fp-1".to_string(), number: "2".to_string(), x: Some(0.65), ..Default::default() },
+    )
+    .expect("the pad moves out of the opening");
+    let sliver = inspect(handle, check()).expect("the check runs again");
+    assert_eq!(codes(&sliver), ["drc/solder-mask-sliver"]);
+    assert_eq!(sliver["issues"][0]["severity"], "warning");
+    let message = sliver["issues"][0]["message"].as_str().expect("the issue carries a message");
+    assert!(message.contains("0.050 mm"), "the web is measured; got {message}");
+    assert_eq!(sliver["passed"], true, "a thin web warns without failing the board");
+
+    update_pad(
+        handle,
+        UpdatePadRequest { footprint: "fp-1".to_string(), number: "2".to_string(), x: Some(0.7), ..Default::default() },
+    )
+    .expect("the pad reaches the minimum web");
+    let clean = inspect(handle, check()).expect("the check runs again");
+    assert!(codes(&clean).is_empty(), "a web at the minimum width is accepted");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn solder_mask_skips_same_net_and_inner_layer_pads() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    place_footprint(handle, "U1", "F.Cu", 0.0, 0.0, 0.0);
+    add_net_pad(handle, "fp-1", "1", [0.0, 0.0], [0.5, 0.5], "VCC");
+    add_net_pad(handle, "fp-1", "2", [0.6, 0.0], [0.5, 0.5], "VCC");
+    let same_net = inspect(handle, Some(vec!["solder-mask".to_string()])).expect("the check runs");
+    assert!(codes(&same_net).is_empty(), "one net may share or merge its own openings");
+
+    add_layer(handle, AddLayerRequest { name: "Inner1".to_string(), kind: Some("copper".to_string()), color: None })
+        .expect("an inner copper layer is added");
+    place_footprint(handle, "U2", "Inner1", 0.0, 10.0, 10.0);
+    add_net_pad(handle, "fp-2", "1", [0.0, 0.0], [0.5, 0.5], "VCC");
+    add_net_pad(handle, "fp-2", "2", [0.6, 0.0], [0.5, 0.5], "GND");
+    let inner = inspect(handle, Some(vec!["solder-mask".to_string()])).expect("the check runs again");
+    assert!(codes(&inner).is_empty(), "inner copper opens no solder mask");
+
+    place_footprint(handle, "U3", "B.Cu", 0.0, 20.0, 20.0);
+    add_net_pad(handle, "fp-3", "1", [0.0, 0.0], [0.5, 0.5], "VCC");
+    add_net_pad(handle, "fp-3", "2", [0.65, 0.0], [0.5, 0.5], "GND");
+    let back = inspect(handle, Some(vec!["solder-mask".to_string()])).expect("the check runs on the back side");
+    assert_eq!(codes(&back), ["drc/solder-mask-sliver"]);
+    assert_eq!(back["issues"][0]["layerId"], "B.Cu");
+    close(handle).expect("the board closes");
+}
+
+#[test]
 fn copper_balance_sums_layers_and_reports_coverage_imbalance() {
     let handle = created();
     add_full_board(handle);
@@ -914,6 +986,8 @@ fn panelization_tiles_the_outline_and_reports_utilization() {
             tab: Some("mouse-bite".to_string()),
             tab_width: Some(5.0),
             tab_spacing: Some(20.0),
+            tooling_hole: None,
+            tooling_hole_inset: None,
         },
     )
     .expect("the panel is reported");
@@ -932,8 +1006,61 @@ fn panelization_tiles_the_outline_and_reports_utilization() {
     assert_eq!(report["tabCount"], 18);
     assert_eq!(report["boardArea"], 8000.0);
     assert_eq!(report["panelArea"], 35321.0);
+    assert_eq!(report["breakaway"]["area"], 3321.0);
+    assert_eq!(report["breakaway"]["railArea"], 1496.0);
+    assert_eq!(report["breakaway"]["gapArea"], 1825.0);
+    assert_eq!(report["toolingHoleCount"], 0);
+    assert_eq!(report["toolingHoles"], json!([]));
     let utilization = report["utilizationPercent"].as_f64().expect("utilization is a number");
     assert!((90.0..91.0).contains(&utilization), "utilization is plausible: {utilization}");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn panelization_places_tooling_holes_in_the_rail_and_reports_breakaway() {
+    let handle = created();
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [60.0, 40.0] }).expect("the outline is set");
+    let request = |tooling_hole, tooling_hole_inset| PanelizeRequest {
+        columns: 2,
+        rows: 1,
+        gap_x: Some(5.0),
+        gap_y: None,
+        rail: Some(3.0),
+        tab: None,
+        tab_width: None,
+        tab_spacing: None,
+        tooling_hole,
+        tooling_hole_inset,
+    };
+    let report = panelize(handle, request(Some(2.0), Some(1.5))).expect("the panel is reported");
+
+    assert_eq!(report["panelSize"]["width"], 131.0);
+    assert_eq!(report["panelSize"]["height"], 46.0);
+    assert_eq!(report["panelOutline"]["from"], json!([-3.0, -3.0]));
+    assert_eq!(report["panelOutline"]["to"], json!([128.0, 43.0]));
+    assert_eq!(report["toolingHoleCount"], 4);
+    assert_eq!(
+        report["toolingHoles"],
+        json!([
+            { "corner": "bottom-left", "x": -1.5, "y": -1.5, "diameter": 2.0 },
+            { "corner": "bottom-right", "x": 126.5, "y": -1.5, "diameter": 2.0 },
+            { "corner": "top-right", "x": 126.5, "y": 41.5, "diameter": 2.0 },
+            { "corner": "top-left", "x": -1.5, "y": 41.5, "diameter": 2.0 },
+        ])
+    );
+    assert_eq!(report["breakaway"]["area"], 1226.0);
+    assert_eq!(report["breakaway"]["railArea"], 1026.0);
+    assert_eq!(report["breakaway"]["gapArea"], 200.0);
+
+    let no_rail =
+        panelize(handle, PanelizeRequest { rail: None, ..request(Some(2.0), None) }).expect_err("a tooling hole needs a rail");
+    assert_eq!(no_rail.code, "session/argument-invalid");
+    let too_big = panelize(handle, request(Some(8.0), None)).expect_err("the hole must fit inside the rail");
+    assert_eq!(too_big.code, "session/argument-invalid");
+    let too_close = panelize(handle, request(Some(2.0), Some(0.5))).expect_err("the inset must clear the hole radius");
+    assert_eq!(too_close.code, "session/argument-invalid");
+    let zero = panelize(handle, request(Some(0.0), None)).expect_err("a zero diameter is rejected");
+    assert_eq!(zero.code, "session/argument-invalid");
     close(handle).expect("the board closes");
 }
 
@@ -949,6 +1076,8 @@ fn panelization_rejects_an_absent_outline_and_invalid_tabs() {
         tab: tab.map(str::to_string),
         tab_width: Some(5.0),
         tab_spacing: Some(20.0),
+        tooling_hole: None,
+        tooling_hole_inset: None,
     };
 
     let missing = panelize(handle, request(2, 1, None, 0.0)).expect_err("a board without an outline cannot be panelized");
@@ -980,6 +1109,8 @@ fn panelization_defaults_and_repeat_reports_are_stable() {
         tab: None,
         tab_width: None,
         tab_spacing: None,
+        tooling_hole: None,
+        tooling_hole_inset: None,
     };
 
     let report = panelize(handle, request()).expect("the panel is reported");

@@ -49,6 +49,12 @@ pub struct PanelizeRequest {
     /// Distance between tab centres along a seam, in millimetres.
     #[serde(default)]
     pub tab_spacing: Option<f64>,
+    /// Finished diameter of the four rail tooling holes, in millimetres.
+    #[serde(default)]
+    pub tooling_hole: Option<f64>,
+    /// Distance from the panel edge to a tooling-hole centre, in millimetres.
+    #[serde(default)]
+    pub tooling_hole_inset: Option<f64>,
 }
 
 /// Builds the panelization report of one board.
@@ -67,6 +73,17 @@ pub(crate) fn report(board: &Board, request: PanelizeRequest) -> Result<Value, S
     let rail = length(request.rail.unwrap_or(0.0), "rail")?;
     let tab_width = length(request.tab_width.unwrap_or(DEFAULT_TAB_WIDTH_MM), "tabWidth")?;
     let tab_spacing = length(request.tab_spacing.unwrap_or(DEFAULT_TAB_SPACING_MM), "tabSpacing")?;
+    let tooling_hole = match request.tooling_hole {
+        Some(value) => {
+            let diameter = length(value, "toolingHole")?;
+            if diameter <= 0.0 {
+                return Err(crate::argument("`toolingHole` must be greater than zero"));
+            }
+            Some(diameter)
+        }
+        None => None,
+    };
+    let tooling_inset = request.tooling_hole_inset.map(|value| length(value, "toolingHoleInset")).transpose()?;
 
     let Some(outline) = board.outline
     else {
@@ -96,6 +113,43 @@ pub(crate) fn report(board: &Board, request: PanelizeRequest) -> Result<Value, S
     let panel_height = rows as f64 * board_height + (rows - 1) as f64 * gap_y + rail * 2.0;
     let panel_from = [outline.from[0] * scale - rail, outline.from[1] * scale - rail];
     let panel_to = [panel_from[0] + panel_width, panel_from[1] + panel_height];
+
+    let tooling_inset = match tooling_hole {
+        Some(diameter) => {
+            if rail <= 0.0 {
+                return Err(crate::argument("tooling holes need a positive `rail` to sit in"));
+            }
+            let radius = diameter / 2.0;
+            let inset = tooling_inset.unwrap_or(rail / 2.0);
+            if inset - radius < 0.0 || inset + radius > rail {
+                return Err(crate::argument(format!(
+                    "a {diameter} mm tooling hole must fit inside the {rail} mm rail; the inset allows {radius} to {} mm",
+                    rail - radius
+                )));
+            }
+            Some(inset)
+        }
+        None => None,
+    };
+    let tooling_holes: Vec<Value> = match tooling_inset {
+        Some(inset) => [
+            ("bottom-left", panel_from[0] + inset, panel_from[1] + inset),
+            ("bottom-right", panel_to[0] - inset, panel_from[1] + inset),
+            ("top-right", panel_to[0] - inset, panel_to[1] - inset),
+            ("top-left", panel_from[0] + inset, panel_to[1] - inset),
+        ]
+        .iter()
+        .map(|(corner, x, y)| {
+            json!({
+                "corner": corner,
+                "x": round6(*x),
+                "y": round6(*y),
+                "diameter": round6(tooling_hole.unwrap_or(0.0)),
+            })
+        })
+        .collect(),
+        None => Vec::new(),
+    };
 
     let mut placements = Vec::with_capacity(count as usize);
     for row in 0..rows {
@@ -170,7 +224,13 @@ pub(crate) fn report(board: &Board, request: PanelizeRequest) -> Result<Value, S
 
     let board_area = board_width * board_height;
     let panel_area = panel_width * panel_height;
-    let utilization = if panel_area > 0.0 { board_area * count as f64 / panel_area * 100.0 } else { 0.0 };
+    let content_area = (columns as f64 * board_width + (columns - 1) as f64 * gap_x)
+        * (rows as f64 * board_height + (rows - 1) as f64 * gap_y);
+    let board_total = board_area * count as f64;
+    let breakaway_area = panel_area - board_total;
+    let utilization = if panel_area > 0.0 { board_total / panel_area * 100.0 } else { 0.0 };
+    let breakaway_percent = if panel_area > 0.0 { breakaway_area / panel_area * 100.0 } else { 0.0 };
+    let tooling_count = tooling_holes.len();
     Ok(json!({
         "revision": board.revision,
         "units": "mm",
@@ -189,6 +249,14 @@ pub(crate) fn report(board: &Board, request: PanelizeRequest) -> Result<Value, S
         "boardArea": round6(board_area),
         "panelArea": round6(panel_area),
         "utilizationPercent": round6(utilization),
+        "breakaway": {
+            "area": round6(breakaway_area),
+            "percent": round6(breakaway_percent),
+            "railArea": round6(panel_area - content_area),
+            "gapArea": round6(content_area - board_total),
+        },
+        "toolingHoles": tooling_holes,
+        "toolingHoleCount": tooling_count,
         "tab": tab,
         "seams": seams,
         "tabs": tabs,
