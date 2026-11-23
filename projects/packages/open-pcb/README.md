@@ -60,8 +60,8 @@ Every board exposes `id`, `revision`, `summary`, `canUndo` and `canRedo`, plus:
   `deleteText`, `listTexts`, `addTeardrops`, `stitchVias`.
 - **Routing:** `route(options?)`; `useNetClasses: true` follows each net's
   declared class width, clearance and via targets.
-- **Reports:** `zoneReport`, `keepoutReport`, `drillReport`, `copperBalance`,
-  `netLengths`.
+- **Reports:** `zoneReport`, `zoneAudit`, `keepoutReport`, `drillReport`,
+  `copperBalance`, `netLengths`, `fabManifest`.
 - **Rules, stackup and impedance:** `setRules`, `setStackup`, `impedance`,
   `impedanceWidth`, `impedanceTable`.
 - **Test points and policy:** `addTestPoint`, `deleteTestPoint`, `addWaiver`,

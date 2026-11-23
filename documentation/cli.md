@@ -235,6 +235,7 @@ open-pcb zone add <file> --layer <layer> --points <list> [--net <name>]
 open-pcb zone update <file> --id <id> [--layer <layer>] [--net <name>] [--points <list>]
 open-pcb zone delete <file> --id <id>
 open-pcb zone list <file>
+open-pcb zone audit <file>
 ```
 
 ```bash
@@ -247,6 +248,15 @@ open-pcb keepout list <file>
 `zone add` requires `--layer` and `--points`. `keepout add` requires `--points`;
 omitting `--layer` means every layer (`*`). `zone list` prints per-layer and total
 copper area. `keepout list` prints count and total declared area.
+
+`zone audit` reports whether each pour touches copper of its own net on its own
+layer: a pad whose box touches the polygon, a via whose circle touches it, or a
+track whose endpoint lies inside it or whose segment crosses an edge. A pour with
+no anchor is `isolated`; a pour without a net is `unassigned`. The report lists
+the anchor counts and areas per layer, and the summary prints
+`zones=<n> connected=<n> isolated=<n> unassigned=<n> isolatedArea=<mm2>`.
+Adjacent same-net pour polygons are measured one at a time, so they are not
+merged into one island.
 
 ## Text
 
@@ -322,6 +332,27 @@ open-pcb route board.opcb --net VCC --width 0.25
 open-pcb route board.opcb --netclass
 open-pcb route board.opcb --style chamfer45
 open-pcb stitch board.opcb --net GND --spacing 5 --inset 1
+```
+
+## Fabrication manifest
+
+```bash
+open-pcb fab manifest <file>
+```
+
+`fab manifest` is a dry run of the Gerber writer: it lists every file the
+writer would emit, in writer order, with its X2 `function`, source layer and
+object count, and adds the drill tool and assembly row counts. It writes no
+file. The report flags a missing outline (an error, because Gerber export
+rejects the board), two planned files that map to one name, a copper layer with
+no tracks, pads, vias or pours, a missing silkscreen layer, mask or paste files
+whose copper side is absent, a board with no drill data and a board with no
+footprints. `status` is `error` when any error finding exists, `warn` when only
+warnings remain and `pass` otherwise. The summary prints `files=<n>`, `copper=<n>`,
+`outline=yes|no`, `tools=<n>`, `placements=<n>`, `status=<s>` and `issues=<n>`.
+
+```bash
+open-pcb fab manifest board.opcb
 ```
 
 ## Panelization

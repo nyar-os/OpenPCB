@@ -113,6 +113,8 @@ accepted.
 | Plated routed slots and the drill report | `supported` |
 | Copper area and balance report | `supported` |
 | Routed net-length report with longest-net ranking (`lengths`, `Board.netLengths`) | `supported` |
+| Copper pour connectivity audit (`zone audit`, `Board.zoneAudit`) | `supported` |
+| Fabrication file manifest (`fab manifest`, `Board.fabManifest`) | `supported` |
 | Panelization (`panel`, `Board.panelize`) | `supported` |
 | Solder-mask aperture check (`solder-mask`) | `supported` |
 | Panel tooling holes and breakaway report (`panel`) | `supported` |
@@ -278,6 +280,19 @@ being approximated.
 - Copper pours are stored as closed polygons and written as `G36`/`G37` regions
   in their layer's Gerber file and in the SVG/PDF previews. KiCad PCB and
   IPC-2581 exchange do not carry them, and the PNG raster omits the fill.
+- The copper pour audit is a connectivity measure, not a fill calculation. A
+  pour is connected when its polygon touches a same-net pad box, via circle or
+  track segment on its own layer; a pour with no anchor is `isolated`, and a
+  pour with no net is `unassigned`. Each stored polygon is measured alone, so
+  adjacent same-net polygons are not merged into one island, and pour copper
+  that only reaches same-net copper through another pour is reported isolated.
+- The fabrication manifest is a dry run of the Gerber writer. It lists the files
+  the writer plans, in writer order, with the object counts that writer would
+  draw, and flags a missing outline, duplicate file names, empty copper layers,
+  missing silkscreen layers, orphan mask or paste sides, missing drill data and
+  missing footprints. It writes no file, measures no fabrication process and
+  does not compare the layer set against a specific stackup. Assembly and drill
+  counts describe the CSV and Excellon writers, not a machine program.
 - `placement` writes millimetre JSON; `pos` keeps its CSV columns and appends the
   footprint layer. Neither writer invents pad geometry or rotations.
 - IPC-D-356 writes the header, `327` pad records, `317`/`307` via records and the
