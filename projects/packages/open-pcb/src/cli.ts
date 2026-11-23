@@ -1548,6 +1548,61 @@ netclass
     });
 
 netclass
+    .command('update', 'cli.cmd.netclass-update')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--name <name>', 'cli.opt.name')
+    .option('--width <mm>', 'cli.opt.width')
+    .option('--clearance <mm>', 'cli.opt.clearance')
+    .option('--via-diameter <mm>', 'cli.opt.via-diameter')
+    .option('--via-drill <mm>', 'cli.opt.via-drill')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        const name = text(options, 'name');
+        const width = text(options, 'width');
+        const clearance = text(options, 'clearance');
+        const viaDiameter = text(options, 'via-diameter');
+        const viaDrill = text(options, 'via-drill');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        if (name !== undefined && name.length === 0) {
+            ctx.fail('open-pcb.cli.name-required', { message: '`--name <name>` must not be empty' });
+            return 2;
+        }
+        if (
+            name === undefined &&
+            width === undefined &&
+            clearance === undefined &&
+            viaDiameter === undefined &&
+            viaDrill === undefined
+        ) {
+            ctx.fail('open-pcb.cli.netclass-update-empty', {
+                message: 'a net class update needs `--name`, `--width`, `--clearance`, `--via-diameter` or `--via-drill`',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.updateNetClass({
+                id,
+                name,
+                width: numberOption(width),
+                clearance: numberOption(clearance),
+                viaDiameter: numberOption(viaDiameter),
+                viaDrill: numberOption(viaDrill),
+            });
+            ctx.emitResult(result, `updated ${result.object?.id ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+netclass
     .command('delete', 'cli.cmd.netclass-delete')
     .option('--id <id>', 'cli.opt.id')
     .actionCtx(async (options, _args, ctx) => {

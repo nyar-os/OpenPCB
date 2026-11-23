@@ -58,6 +58,7 @@
             "net-audit": "Report net class targets, track widths and clearances",
             "netclass": "Edit the net classes of a board document",
             "netclass-add": "Declare a net class and write the document back in place",
+            "netclass-update": "Update the name or targets of a net class in place",
             "netclass-delete": "Delete a net class by id and write the document back in place",
             "netclass-assign": "Move one net into a net class and write the document back in place",
             "testpoint": "Edit the test points of a board document",
