@@ -480,6 +480,10 @@ export interface PanelizeOptions {
     readonly tabWidth?: number;
     /** Distance between tab centres; defaults to 20. */
     readonly tabSpacing?: number;
+    /** Finished diameter of the four rail tooling holes; omit for none. */
+    readonly toolingHole?: number;
+    /** Distance from the panel edge to a tooling-hole centre; defaults to half the rail. */
+    readonly toolingHoleInset?: number;
 }
 
 /** One board placement inside a panel, in millimetres. */
@@ -508,6 +512,26 @@ export interface PanelTab {
     readonly height: number;
 }
 
+/** One rail tooling hole, in millimetres. */
+export interface PanelToolingHole {
+    readonly corner: 'bottom-left' | 'bottom-right' | 'top-right' | 'top-left';
+    readonly x: number;
+    readonly y: number;
+    readonly diameter: number;
+}
+
+/** Panel area that is removed before assembly, in square millimetres. */
+export interface PanelBreakaway {
+    /** Panel area minus every board area; `railArea + gapArea`. */
+    readonly area: number;
+    /** Share of the panel area that is breakaway, in percent. */
+    readonly percent: number;
+    /** Border area around the board array. */
+    readonly railArea: number;
+    /** Area of the gaps between neighbouring boards. */
+    readonly gapArea: number;
+}
+
 /** Result of `board.panelize()`. Lengths are in millimetres and areas in square millimetres. */
 export interface PanelizeReport {
     readonly revision: number;
@@ -527,6 +551,9 @@ export interface PanelizeReport {
     readonly boardArea: number;
     readonly panelArea: number;
     readonly utilizationPercent: number;
+    readonly breakaway: PanelBreakaway;
+    readonly toolingHoles: readonly PanelToolingHole[];
+    readonly toolingHoleCount: number;
     readonly tab: PanelTabStyle;
     readonly seams: readonly PanelSeam[];
     readonly tabs: readonly PanelTab[];
