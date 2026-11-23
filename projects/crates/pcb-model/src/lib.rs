@@ -21,6 +21,9 @@
 //! unimplemented and rejects with `capability/not-implemented`.
 
 #![deny(missing_docs)]
+// The capability matrix is one large `json!` literal; leave headroom above the
+// default expansion limit as new report entries are added.
+#![recursion_limit = "256"]
 
 mod board;
 mod copper;
@@ -33,10 +36,12 @@ mod ipc2581;
 mod ipc2581_import;
 mod kicad_import;
 mod kicad_pcb;
+mod net_audit;
 mod outline;
 mod panel;
 mod route;
 mod store;
+mod testpoint_audit;
 mod zone_audit;
 
 #[cfg(test)]
@@ -225,6 +230,7 @@ pub fn capabilities() -> Value {
         "padDrills": "supported",
         "copperBalance": "supported",
         "netLengths": "supported",
+        "netAudit": "supported",
         "zoneReport": "supported",
         "zoneAudit": "supported",
         "fabManifest": "supported",
@@ -233,6 +239,7 @@ pub fn capabilities() -> Value {
         "polygonOutline": "supported",
         "netClasses": "supported",
         "testPoints": "supported",
+        "testPointCoverage": "supported",
         "fiducials": "supported",
         "fiducialReport": "supported",
         "stackup": "supported",
@@ -1149,6 +1156,32 @@ pub fn fab_manifest(handle: u64) -> Result<Value, ServiceError> {
 /// length is exact, and copper without a declared net is not listed.
 pub fn net_lengths(handle: u64) -> Result<Value, ServiceError> {
     store::read(handle, copper::net_lengths)
+}
+
+/// Reports net class membership, width and clearance conformance.
+///
+/// Every declared net lists its class, the class targets, the actual track
+/// widths and via sizes, and the narrowest measured clearance to another net.
+/// Clearance is the smallest edge-to-edge gap between two track segments of
+/// different declared nets on a shared copper layer; the required value is the
+/// strictest class clearance of the pair, or the 0.2 mm baseline the checks use.
+/// A track narrower than its class width reports `net/width-below-class`, and a
+/// pair closer than its required clearance reports
+/// `net/clearance-below-class`. The report is read-only.
+pub fn net_audit(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, net_audit::report)
+}
+
+/// Reports test point coverage per declared net.
+///
+/// A net is covered only by an explicit test point on one of its pads or vias.
+/// A connectable net with no declared probe reports `testpoints/net-not-covered`
+/// as a warning, and a net with neither a pad nor a via has no physical contact
+/// point, so it reports `testpoints/net-unconnected` as an error. The report
+/// carries the per-net rows, the resolved probes, the covered share and the
+/// findings; it is read-only.
+pub fn testpoint_coverage(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, testpoint_audit::report)
 }
 
 /// Reports the drill tools, holes and slots of one open board.

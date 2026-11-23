@@ -26,10 +26,10 @@ use crate::{
     capabilities, close, copper_balance, create, delete_differential_pair, delete_fiducial, delete_footprint, delete_keepout,
     delete_net_class, delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver,
     delete_zone, drill_report, export, fab_manifest, fiducial_report, impedance_report, impedance_table, import, inspect,
-    keepout_report, list_fiducials, list_texts, move_footprint, net_lengths, open, outline_geometry, panelize, redo, route,
-    save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, split_track, stackup_impedance, stackup_width,
-    stitch_vias, store, summary, undo, update_footprint, update_keepout, update_layer, update_pad, update_slot, update_text,
-    update_track, update_via, update_zone, zone_audit, zone_report,
+    keepout_report, list_fiducials, list_texts, move_footprint, net_audit, net_lengths, open, outline_geometry, panelize, redo,
+    route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, split_track, stackup_impedance,
+    stackup_width, stitch_vias, store, summary, testpoint_coverage, undo, update_footprint, update_keepout, update_layer,
+    update_pad, update_slot, update_text, update_track, update_via, update_zone, zone_audit, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -7620,5 +7620,190 @@ fn zone_audit_separates_connected_isolated_and_unassigned_pours() {
 
     close(handle).expect("the board closes");
     let missing = zone_audit(handle).expect_err("a closed handle is rejected");
+    assert_eq!(missing.code, "board/not-found");
+}
+
+#[test]
+fn net_audit_reports_class_targets_widths_and_clearance_pairs() {
+    let handle = created();
+    for name in ["N1", "N2", "N3"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_net_class(
+        handle,
+        AddNetClassRequest {
+            name: "Power".to_string(),
+            width: Some(0.5),
+            clearance: Some(0.5),
+            via_diameter: Some(0.8),
+            via_drill: Some(0.4),
+        },
+    )
+    .expect("the class is declared");
+    for net in ["N1", "N2"] {
+        assign_net_class(handle, AssignNetClassRequest { net: net.to_string(), class: "Power".to_string() })
+            .expect("the net joins the class");
+    }
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("N1".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [0.0, 0.0],
+            to: [10.0, 0.0],
+        },
+    )
+    .expect("the narrow track is placed");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("N2".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.3,
+            from: [0.0, 0.5],
+            to: [10.0, 0.5],
+        },
+    )
+    .expect("the close track is placed");
+
+    let report = net_audit(handle).expect("the net audit is built");
+    assert_eq!(report["report"], "open-pcb-net-audit");
+    assert_eq!(report["units"], "mm");
+    assert_eq!(report["status"], "error");
+    assert_eq!(report["netCount"], 3);
+    assert_eq!(report["classCount"], 1);
+    assert_eq!(report["pairCount"], 1);
+    let codes: Vec<&str> =
+        report["issues"].as_array().expect("issues is an array").iter().filter_map(|issue| issue["code"].as_str()).collect();
+    assert_eq!(
+        codes,
+        ["net/clearance-below-class", "net/width-below-class", "net/width-below-class"],
+        "both class nets route below the target width"
+    );
+
+    let nets = report["nets"].as_array().expect("nets is an array");
+    assert_eq!(nets[0]["name"], "N1");
+    assert_eq!(nets[0]["class"], "Power");
+    assert_eq!(nets[0]["targets"]["width"], 0.5);
+    assert_eq!(nets[0]["targets"]["clearance"], 0.5);
+    assert_eq!(nets[0]["targets"]["viaDiameter"], 0.8);
+    assert_eq!(nets[0]["targets"]["viaDrill"], 0.4);
+    assert_eq!(nets[0]["tracks"], 1);
+    assert_eq!(nets[0]["width"], json!({ "min": 0.2, "max": 0.2 }));
+    assert_eq!(nets[0]["widthStatus"], "below");
+    assert_eq!(nets[0]["clearance"], json!({ "to": "N2", "actual": 0.25, "required": 0.5, "ok": false }));
+    assert_eq!(nets[2]["name"], "N3");
+    assert_eq!(nets[2]["class"], Value::Null);
+    assert_eq!(nets[2]["tracks"], 0);
+    assert_eq!(nets[2]["widthStatus"], "none");
+    assert_eq!(nets[2]["clearance"], Value::Null);
+
+    let pairs = report["pairs"].as_array().expect("pairs is an array");
+    assert_eq!(pairs[0]["a"], "N1");
+    assert_eq!(pairs[0]["b"], "N2");
+    assert_eq!(pairs[0]["actual"], 0.25);
+    assert_eq!(pairs[0]["required"], 0.5);
+    assert_eq!(pairs[0]["ok"], false);
+    assert_eq!(pairs[0]["layer"], "F.Cu");
+
+    let revision = summary(handle).expect("the board is listed")["revision"].as_u64().expect("a revision");
+    let again = net_audit(handle).expect("the audit is deterministic");
+    assert_eq!(again["nets"], report["nets"]);
+    assert_eq!(summary(handle).expect("the board is listed")["revision"].as_u64(), Some(revision), "the audit edits nothing");
+
+    close(handle).expect("the board closes");
+    let missing = net_audit(handle).expect_err("a closed handle is rejected");
+    assert_eq!(missing.code, "board/not-found");
+}
+
+#[test]
+fn testpoint_coverage_classifies_covered_uncovered_and_unconnected_nets() {
+    let handle = created();
+    for name in ["GND", "VCC", "SIG", "FLOAT"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("U1".to_string()),
+            value: Some("MCU".to_string()),
+            footprint: Some("QFN".to_string()),
+            x: Some(20.0),
+            y: Some(20.0),
+            rotation: Some(0.0),
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the footprint is placed");
+    for (number, net) in [("1", "GND"), ("2", "VCC"), ("3", "SIG")] {
+        add_pad(
+            handle,
+            AddPadRequest {
+                footprint: "fp-1".to_string(),
+                number: number.to_string(),
+                x: number.parse::<f64>().expect("a column") - 1.0,
+                y: 0.0,
+                w: 0.8,
+                h: 0.8,
+                net: Some(net.to_string()),
+                drill: None,
+            },
+        )
+        .expect("the pad is added");
+    }
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+    add_test_point(handle, AddTestPointRequest { target: "fp-1:1".to_string() }).expect("the pad is a probe");
+    add_test_point(handle, AddTestPointRequest { target: "via-1".to_string() }).expect("the via is a probe");
+
+    let report = testpoint_coverage(handle).expect("the coverage report is built");
+    assert_eq!(report["report"], "open-pcb-testpoint-coverage");
+    assert_eq!(report["units"], "mm");
+    assert_eq!(report["status"], "error");
+    assert_eq!(report["netCount"], 4);
+    assert_eq!(report["coveredCount"], 2);
+    assert_eq!(report["uncoveredCount"], 1);
+    assert_eq!(report["unconnectedCount"], 1);
+    assert_eq!(report["probeCount"], 2);
+    assert_eq!(report["unassignedProbes"], 0);
+    assert_eq!(report["coveragePercent"], 66.666667);
+    let codes: Vec<&str> =
+        report["issues"].as_array().expect("issues is an array").iter().filter_map(|issue| issue["code"].as_str()).collect();
+    assert_eq!(codes, ["testpoints/net-not-covered", "testpoints/net-unconnected"]);
+
+    let nets = report["nets"].as_array().expect("nets is an array");
+    assert_eq!(nets[0]["name"], "GND");
+    assert_eq!(nets[0]["pads"], 1);
+    assert_eq!(nets[0]["probes"], 1);
+    assert_eq!(nets[0]["covered"], true);
+    assert_eq!(nets[1]["name"], "VCC");
+    assert_eq!(nets[1]["vias"], 1);
+    assert_eq!(nets[1]["probes"], 1);
+    assert_eq!(nets[1]["covered"], true);
+    assert_eq!(nets[2]["name"], "SIG");
+    assert_eq!(nets[2]["pads"], 1);
+    assert_eq!(nets[2]["probes"], 0);
+    assert_eq!(nets[2]["covered"], false);
+    assert_eq!(nets[3]["name"], "FLOAT");
+    assert_eq!(nets[3]["pads"], 0);
+    assert_eq!(nets[3]["covered"], false);
+
+    let probes = report["probes"].as_array().expect("probes is an array");
+    assert_eq!(probes[0]["target"], "fp-1:1");
+    assert_eq!(probes[0]["designator"], "U1");
+    assert_eq!(probes[0]["pad"], "1");
+    assert_eq!(probes[1]["target"], "via-1");
+
+    let revision = summary(handle).expect("the board is listed")["revision"].as_u64().expect("a revision");
+    let again = testpoint_coverage(handle).expect("the report is deterministic");
+    assert_eq!(again["nets"], report["nets"]);
+    assert_eq!(summary(handle).expect("the board is listed")["revision"].as_u64(), Some(revision), "the report edits nothing");
+
+    close(handle).expect("the board closes");
+    let missing = testpoint_coverage(handle).expect_err("a closed handle is rejected");
     assert_eq!(missing.code, "board/not-found");
 }

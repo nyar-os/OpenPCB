@@ -22,7 +22,7 @@ use crate::{
 /// Minimum copper width in millimetres.
 const MIN_TRACK_WIDTH_MM: f64 = 0.15;
 /// Minimum copper-to-copper clearance in millimetres.
-const MIN_CLEARANCE_MM: f64 = 0.2;
+pub(crate) const MIN_CLEARANCE_MM: f64 = 0.2;
 /// Courtyard expansion around a footprint's pad bounding box, in millimetres.
 const COURTYARD_MARGIN_MM: f64 = 0.25;
 /// Minimum annular ring on a via or a drilled pad, in millimetres.
