@@ -1599,6 +1599,26 @@ netclass
 
 const testpoint = cli.command('testpoint', 'cli.cmd.testpoint');
 testpoint
+    .command('coverage', 'cli.cmd.testpoint-coverage')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.testpointCoverage();
+            const coverage = report.coveragePercent === null ? 'n/a' : `${report.coveragePercent}%`;
+            ctx.emitResult(
+                report,
+                `nets=${report.netCount} covered=${report.coveredCount} uncovered=${report.uncoveredCount} unconnected=${report.unconnectedCount} probes=${report.probeCount} coverage=${coverage} status=${report.status}`,
+            );
+            return 0;
+        });
+        return 0;
+    });
+
+testpoint
     .command('add', 'cli.cmd.testpoint-add')
     .option('--target <target>', 'cli.opt.target')
     .actionCtx(async (options, _args, ctx) => {
@@ -1738,6 +1758,25 @@ fiducial
     });
 
 const net = cli.command('net', 'cli.cmd.net');
+net
+    .command('audit', 'cli.cmd.net-audit')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.netAudit();
+            ctx.emitResult(
+                report,
+                `nets=${report.netCount} classes=${report.classCount} pairs=${report.pairCount} issues=${report.issues.length} status=${report.status}`,
+            );
+            return 0;
+        });
+        return 0;
+    });
+
 net
     .command('add', 'cli.cmd.net-add')
     .option('--name <name>', 'cli.opt.name')
