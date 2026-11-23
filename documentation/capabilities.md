@@ -113,6 +113,8 @@ accepted.
 | Plated routed slots and the drill report | `supported` |
 | Copper area and balance report | `supported` |
 | Routed net-length report with longest-net ranking (`lengths`, `Board.netLengths`) | `supported` |
+| Net class, width and clearance audit (`net audit`, `Board.netAudit`) | `supported` |
+| Test point coverage report (`testpoint coverage`, `Board.testpointCoverage`) | `supported` |
 | Copper pour connectivity audit (`zone audit`, `Board.zoneAudit`) | `supported` |
 | Fabrication file manifest (`fab manifest`, `Board.fabManifest`) | `supported` |
 | Panelization (`panel`, `Board.panelize`) | `supported` |
@@ -326,6 +328,19 @@ being approximated.
 - The copper balance report sums feature areas, so overlapping copper counts once
   per feature rather than once as a union. Coverage and imbalance need a
   rectangular outline; without one the report still lists per-layer areas.
+- The net audit measures clearance only between track segments of two different
+  declared nets on a shared copper layer, using the edge-to-edge gap and the
+  strictest class clearance of the pair or the 0.2 mm baseline. Pads, vias and
+  pours take no part, a track on a non-copper layer is ignored, and copper whose
+  net is not declared is not measured. Width conformance compares every track on
+  a declared net with that class's width; a net without a class width reports
+  `none`. The report is read-only and never edits the board.
+- The test point coverage report repeats the `testpoints` classification per
+  declared net: a net is covered only by a declared probe on one of its pads or
+  vias, a connectable net without a probe is a warning, and a net with no pad and
+  no via is an error. A probe whose net is not declared still appears in the
+  probe list and sets `unassignedProbes`; it covers no net row. `coveragePercent`
+  divides covered nets by connectable nets and is null when none is connectable.
 - A waiver silences a finding by code and, when set, by object id; it never hides
   the finding from the report. Overrides apply before waivers, so `passed` is
   false only while a non-waived error remains. There is no waiver expiry or

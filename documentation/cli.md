@@ -276,6 +276,7 @@ SVG preview and the KiCad PCB writer.
 
 ```bash
 open-pcb net add <file> --name <name>
+open-pcb net audit <file>
 
 open-pcb diffpair add <file> --positive <net> --negative <net> --width <mm> --gap <mm> [--max-skew <mm>]
 open-pcb diffpair delete <file> --id <id>
@@ -286,14 +287,28 @@ open-pcb netclass assign <file> --net <name> --class <name-or-id>
 open-pcb netclass delete <file> --id <id>
 ```
 
+`net audit` lists every declared net with its class targets, measured track
+width range, via sizes and the narrowest clearance to another net. Clearance is
+the edge-to-edge gap between two track segments of different declared nets on a
+shared copper layer, and the required value is the strictest class clearance of
+the pair or the 0.2 mm baseline. A track narrower than its class width reports
+`net/width-below-class`, and a pair closer than its required clearance reports
+`net/clearance-below-class`. The report is read-only.
+
 ## Test points
 
 ```bash
 open-pcb testpoint add <file> --target <footprint-id:pad-number|via-id>
 open-pcb testpoint delete <file> --id <id>
+open-pcb testpoint coverage <file>
 ```
 
-The target is an existing pad key or via id.
+The target is an existing pad key or via id. `testpoint coverage` reports, per
+declared net, how many pads and vias it offers and how many declared test points
+touch it. A connectable net with no declared probe warns
+`testpoints/net-not-covered`, and a net with neither a pad nor a via errors
+`testpoints/net-unconnected`, because copper geometry never implies a probe.
+The summary prints the covered share and the status.
 
 ## Routing and copper tools
 
