@@ -55,6 +55,7 @@ pub(crate) const CHECKS: &[&str] = &[
     "netlist",
     "hole-to-hole",
     "hole-to-track",
+    "hole-to-pad",
     "copper-to-edge",
     "edge-clearance",
     "silkscreen-over-pad",
@@ -83,6 +84,7 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "netlist",
     "hole-to-hole",
     "hole-to-track",
+    "hole-to-pad",
     "copper-to-edge",
     "edge-clearance",
     "silkscreen-over-pad",
@@ -124,6 +126,7 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "netlist" => netlist(board, &mut report),
             "hole-to-hole" => hole_to_hole(board, &mut report),
             "hole-to-track" => hole_to_track(board, &mut report),
+            "hole-to-pad" => hole_to_pad(board, &mut report),
             "copper-to-edge" => copper_to_edge(board, &mut report),
             "edge-clearance" => edge_clearance(board, &mut report),
             "silkscreen-over-pad" => silkscreen_over_pad(board, &mut report),
@@ -1309,6 +1312,8 @@ struct HoleSite {
     at: [f64; 2],
     /// Finished drill diameter in board units.
     drill: f64,
+    /// Pad key `footprint-id:pad-number` of the owning pad, `None` for a via.
+    pad: Option<String>,
 }
 
 /// Collects every physical drill hole in document order.
@@ -1320,7 +1325,7 @@ fn hole_sites(board: &Board) -> Vec<HoleSite> {
     let mut holes: Vec<HoleSite> = board
         .vias
         .iter()
-        .map(|via| HoleSite { id: via.id.clone(), net: via.net.clone(), at: via.at, drill: via.drill })
+        .map(|via| HoleSite { id: via.id.clone(), net: via.net.clone(), at: via.at, drill: via.drill, pad: None })
         .collect();
     let placed = board.placed_pads();
     for footprint in &board.footprints {
@@ -1334,7 +1339,13 @@ fn hole_sites(board: &Board) -> Vec<HoleSite> {
             else {
                 continue;
             };
-            holes.push(HoleSite { id: format!("{}.{}", footprint.id, pad.number), net: pad.net.clone(), at: site.at, drill });
+            holes.push(HoleSite {
+                id: format!("{}.{}", footprint.id, pad.number),
+                net: pad.net.clone(),
+                at: site.at,
+                drill,
+                pad: Some(key),
+            });
         }
     }
     holes
@@ -1402,6 +1413,45 @@ fn hole_to_track(board: &Board, issues: &mut CheckReport) {
                     format!(
                         "drill hole `{}` is {gap:.3} mm from track `{}`; the clearance rule requires {rule} mm",
                         hole.id, track.id
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+/// Checks copper clearance between every drill hole and every other pad.
+///
+/// The hole set matches `hole-to-hole`: every via, then every pad with a finite
+/// positive drill. A hole is measured to the nearest point of every pad box,
+/// not to its own drill: the pad that owns a pad hole is skipped by identity,
+/// and a hole and a pad on the same net are not compared, including two
+/// unassigned objects. Every pad is tested regardless of the layer the hole or
+/// the pad sits on, so each drill hole is treated as a through-hole feature and
+/// the check makes no per-layer filtering.
+fn hole_to_pad(board: &Board, issues: &mut CheckReport) {
+    let scale = board.millimetres();
+    let holes = hole_sites(board);
+    let pads = board.placed_pads();
+    for hole in &holes {
+        for pad in &pads {
+            if hole.pad.as_deref() == Some(pad.key.as_str()) || hole.net == pad.net {
+                continue;
+            }
+            let centres = point_box_distance(hole.at, pad.at, pad.half) * scale;
+            let gap = centres - hole.drill / 2.0 * scale;
+            let rule = required_clearance(board, hole.net.as_deref(), pad.net.as_deref());
+            if gap < rule {
+                let object = format!("{}+{}", hole.id, pad.key);
+                issues.push(finding(
+                    "drc/hole-to-pad",
+                    Severity::Error,
+                    board,
+                    Some(pad.layer),
+                    Some(&object),
+                    format!(
+                        "drill hole `{}` is {gap:.3} mm from pad `{}`; the clearance rule requires {rule} mm",
+                        hole.id, pad.key
                     ),
                 ));
             }

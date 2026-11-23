@@ -20,7 +20,15 @@
 //! boards best for `0.1 <= w / h <= 3` and `0.1 <= s / h <= 3`. It replaces
 //! neither a field solver nor a fabrication stackup sign-off.
 
-use crate::{ServiceError, board::Stackup};
+use std::collections::BTreeSet;
+
+use serde_json::{Value, json};
+
+use crate::{
+    ServiceError,
+    board::{Board, ImpedanceReportRequest, LayerKind, Stackup},
+    round6,
+};
 
 /// Trace geometry accepted by the impedance helpers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,6 +213,111 @@ fn widest(structure: Structure, parts: Parts) -> f64 {
         Structure::Stripline => (4.0 * parts.height / (0.67 * std::f64::consts::PI) - parts.thickness) / 0.8,
         _ => (5.98 * parts.height - parts.thickness) / 0.8,
     }
+}
+
+/// Builds the impedance report for every routed net and declared pair.
+///
+/// `auto` (the default) selects the structure from each track's copper layer:
+/// microstrip on the two outer layers and stripline inside the stack. A
+/// declared structure applies to every row, and a differential name is
+/// measured on the single-ended geometry behind it in a net row. Values come
+/// from the board stackup unless the request overrides them. A net without
+/// copper tracks does not appear; every declared pair does.
+pub(crate) fn report(board: &Board, request: ImpedanceReportRequest) -> Result<Value, ServiceError> {
+    let scale = board.millimetres();
+    let raw = request.structure.as_deref().map(str::trim);
+    let auto = raw.is_none_or(|name| name.is_empty() || name.eq_ignore_ascii_case("auto"));
+    let declared = if auto { None } else { Some(Structure::parse(raw)?) };
+    let stackup = board.resolved_stackup(request.copper_thickness, request.dielectric_height, request.dielectric_constant)?;
+
+    let mut nets = Vec::new();
+    for net in &board.nets {
+        let mut widths = Vec::new();
+        let mut impedances = Vec::new();
+        let mut structures: BTreeSet<&'static str> = BTreeSet::new();
+        for track in &board.tracks {
+            if track.net.as_deref() != Some(net.name.as_str()) {
+                continue;
+            }
+            let Some(layer) = board.layer(&track.layer)
+            else {
+                continue;
+            };
+            if layer.kind != LayerKind::Copper {
+                continue;
+            }
+            let structure = match declared {
+                None => {
+                    if layer.id == "F.Cu" || layer.id == "B.Cu" {
+                        Structure::Microstrip
+                    }
+                    else {
+                        Structure::Stripline
+                    }
+                }
+                Some(structure) => structure.single(),
+            };
+            let width = track.width * scale;
+            let values = values(structure, width, None, stackup)?;
+            widths.push(width);
+            impedances.push(values.impedance);
+            structures.insert(structure.name());
+        }
+        if widths.is_empty() {
+            continue;
+        }
+        nets.push(json!({
+            "net": net.name,
+            "tracks": widths.len(),
+            "widthMin": round6(widths.iter().copied().fold(f64::INFINITY, f64::min)),
+            "widthMax": round6(widths.iter().copied().fold(f64::MIN, f64::max)),
+            "impedanceMin": round6(impedances.iter().copied().fold(f64::INFINITY, f64::min)),
+            "impedanceMax": round6(impedances.iter().copied().fold(f64::MIN, f64::max)),
+            "structures": structures.iter().copied().collect::<Vec<_>>(),
+        }));
+    }
+
+    let mut pairs = Vec::new();
+    for pair in &board.differential_pairs {
+        let structure = match declared {
+            None => Structure::DiffMicrostrip,
+            Some(Structure::Microstrip) => Structure::DiffMicrostrip,
+            Some(Structure::Stripline) => Structure::DiffStripline,
+            Some(structure) => structure,
+        };
+        let width = pair.width * scale;
+        let gap = pair.gap * scale;
+        let values = values(structure, width, Some(gap), stackup)?;
+        let mut row = json!({
+            "id": pair.id,
+            "positive": pair.positive,
+            "negative": pair.negative,
+            "width": round6(width),
+            "gap": round6(gap),
+            "structure": structure.name(),
+            "impedance": round6(values.impedance),
+        });
+        if let Some(odd) = values.odd {
+            row["oddImpedance"] = json!(round6(odd));
+        }
+        if let Some(even) = values.even {
+            row["evenImpedance"] = json!(round6(even));
+        }
+        pairs.push(row);
+    }
+
+    Ok(json!({
+        "revision": board.revision,
+        "units": "mm",
+        "structure": declared.map_or("auto", Structure::name),
+        "copperThickness": round6(stackup.copper_thickness),
+        "dielectricHeight": round6(stackup.dielectric_height),
+        "dielectricConstant": round6(stackup.dielectric_constant),
+        "netCount": nets.len(),
+        "pairCount": pairs.len(),
+        "nets": nets,
+        "pairs": pairs,
+    }))
 }
 
 /// Reads the edge gap of a pair; a differential request must declare one.

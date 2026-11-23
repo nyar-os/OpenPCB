@@ -15,21 +15,21 @@ use crate::{
     AddDifferentialPairRequest, AddFiducialRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest,
     AddNetClassRequest, AddNetRequest, AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest,
     AddTestPointRequest, AddTextRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
-    AssignNetClassRequest, CreateRequest, ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest,
-    OutlineGeometryRequest, PanelizeRequest, RouteOptions, RouteStyle, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
-    SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest, UpdateKeepoutRequest,
-    UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest,
-    UpdateZoneRequest, WidthRequest, add_differential_pair, add_fiducial, add_footprint, add_keepout, add_layer, add_net,
-    add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via, add_waiver, add_zone,
-    assign_net_class,
+    AssignNetClassRequest, CreateRequest, ImpedanceReportRequest, ImpedanceRequest, ImpedanceTableRequest,
+    MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, RouteStyle, SetOutlineRequest,
+    SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest,
+    UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest,
+    UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair, add_fiducial, add_footprint, add_keepout,
+    add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via,
+    add_waiver, add_zone, assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_fiducial, delete_footprint, delete_keepout,
     delete_net_class, delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver,
-    delete_zone, drill_report, export, fiducial_report, impedance_table, import, inspect, keepout_report, list_fiducials,
-    list_texts, move_footprint, net_lengths, open, outline_geometry, panelize, redo, route, save, set_outline, set_rules,
-    set_severity, set_stackup, set_via_back_drill, split_track, stackup_impedance, stackup_width, stitch_vias, store, summary,
-    undo, update_footprint, update_keepout, update_layer, update_pad, update_slot, update_text, update_track, update_via,
-    update_zone, zone_report,
+    delete_zone, drill_report, export, fiducial_report, impedance_report, impedance_table, import, inspect, keepout_report,
+    list_fiducials, list_texts, move_footprint, net_lengths, open, outline_geometry, panelize, redo, route, save, set_outline,
+    set_rules, set_severity, set_stackup, set_via_back_drill, split_track, stackup_impedance, stackup_width, stitch_vias,
+    store, summary, undo, update_footprint, update_keepout, update_layer, update_pad, update_slot, update_text, update_track,
+    update_via, update_zone, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1847,6 +1847,177 @@ fn impedance_table_rejects_empty_and_unreachable_targets() {
 
     let negative = impedance_table(handle, request(Some(vec![-50.0]))).expect_err("a negative target is rejected");
     assert_eq!(negative.code, "session/argument-invalid");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn impedance_report_lists_net_and_pair_rows_from_the_stored_stackup() {
+    let handle = created();
+    set_stackup(handle, SetStackupRequest { copper_thickness: 0.035, dielectric_height: 0.2, dielectric_constant: 4.2 })
+        .expect("the stackup is declared");
+    add_net(handle, AddNetRequest { name: "A".to_string() }).expect("the first net is declared");
+    add_net(handle, AddNetRequest { name: "B".to_string() }).expect("the second net is declared");
+    add_layer(handle, AddLayerRequest { name: "Inner1".to_string(), kind: Some("copper".to_string()), color: None })
+        .expect("the inner copper layer is added");
+    for (net, layer, from, to, width) in [
+        ("A", "F.Cu", [10.0, 10.0], [30.0, 10.0], 0.25),
+        ("A", "Inner1", [10.0, 11.0], [30.0, 11.0], 0.3),
+        ("B", "B.Cu", [10.0, 12.0], [30.0, 12.0], 0.2),
+    ] {
+        add_track(handle, AddTrackRequest { net: Some(net.to_string()), layer: layer.to_string(), width, from, to })
+            .expect("the track is routed");
+    }
+    add_differential_pair(
+        handle,
+        AddDifferentialPairRequest {
+            positive: "A".to_string(),
+            negative: "B".to_string(),
+            width: 0.15,
+            gap: 0.2,
+            max_skew: 0.5,
+        },
+    )
+    .expect("the pair is declared");
+
+    let report = impedance_report(handle, ImpedanceReportRequest::default()).expect("the report is produced");
+    assert_eq!(report["units"], "mm");
+    assert_eq!(report["structure"], "auto");
+    assert_eq!(report["copperThickness"], 0.035);
+    assert_eq!(report["dielectricHeight"], 0.2);
+    assert_eq!(report["dielectricConstant"], 4.2);
+    assert_eq!(report["netCount"], 2, "the net without copper tracks does not appear");
+    assert_eq!(report["pairCount"], 1);
+    let nets = report["nets"].as_array().expect("nets is an array");
+    assert_eq!(nets[0]["net"], "A");
+    assert_eq!(nets[0]["tracks"], 2);
+    assert_eq!(nets[0]["widthMin"], 0.25);
+    assert_eq!(nets[0]["widthMax"], 0.3);
+    assert_eq!(nets[0]["structures"], json!(["microstrip", "stripline"]), "auto follows the copper layer");
+
+    // Each row matches the same value computed directly through the table and
+    // impedance helpers on the stored stackup.
+    let strip = stackup_impedance(
+        handle,
+        ImpedanceRequest {
+            structure: Some("microstrip".to_string()),
+            width: 0.25,
+            gap: None,
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("the microstrip value is computed");
+    let inner = stackup_impedance(
+        handle,
+        ImpedanceRequest {
+            structure: Some("stripline".to_string()),
+            width: 0.3,
+            gap: None,
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("the stripline value is computed");
+    assert_eq!(nets[0]["impedanceMax"], strip["impedance"], "the microstrip track sets the maximum");
+    assert_eq!(nets[0]["impedanceMin"], inner["impedance"], "the inner-layer track sets the minimum");
+    let pair_direct = stackup_impedance(
+        handle,
+        ImpedanceRequest {
+            structure: Some("diffMicrostrip".to_string()),
+            width: 0.15,
+            gap: Some(0.2),
+            dielectric_height: None,
+            dielectric_constant: None,
+            copper_thickness: None,
+        },
+    )
+    .expect("the pair value is computed");
+    let pair = &report["pairs"][0];
+    assert_eq!(pair["id"], "dp-1");
+    assert_eq!(pair["positive"], "A");
+    assert_eq!(pair["negative"], "B");
+    assert_eq!(pair["structure"], "diffMicrostrip");
+    assert_eq!(pair["width"], 0.15);
+    assert_eq!(pair["gap"], 0.2);
+    assert_eq!(pair["impedance"], pair_direct["impedance"], "the pair row matches the direct calculation");
+    assert_eq!(pair["oddImpedance"], pair_direct["oddImpedance"]);
+    assert_eq!(pair["evenImpedance"], pair_direct["evenImpedance"]);
+
+    let again = impedance_report(handle, ImpedanceReportRequest::default()).expect("the report is produced again");
+    assert_eq!(again, report, "the report is deterministic");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn impedance_report_applies_a_declared_structure_to_every_row() {
+    let handle = created();
+    set_stackup(handle, SetStackupRequest { copper_thickness: 0.035, dielectric_height: 0.2, dielectric_constant: 4.2 })
+        .expect("the stackup is declared");
+    add_net(handle, AddNetRequest { name: "A".to_string() }).expect("the net is declared");
+    add_layer(handle, AddLayerRequest { name: "Inner1".to_string(), kind: Some("copper".to_string()), color: None })
+        .expect("the inner copper layer is added");
+    for (layer, from, to, width) in [("F.Cu", [10.0, 10.0], [30.0, 10.0], 0.25), ("Inner1", [10.0, 11.0], [30.0, 11.0], 0.3)] {
+        add_track(handle, AddTrackRequest { net: Some("A".to_string()), layer: layer.to_string(), width, from, to })
+            .expect("the track is routed");
+    }
+    add_differential_pair(
+        handle,
+        AddDifferentialPairRequest {
+            positive: "A".to_string(),
+            negative: "B".to_string(),
+            width: 0.15,
+            gap: 0.2,
+            max_skew: 0.5,
+        },
+    )
+    .expect_err("the negative half is not declared yet");
+
+    for structure in ["stripline", "diffStripline"] {
+        let report =
+            impedance_report(handle, ImpedanceReportRequest { structure: Some(structure.to_string()), ..Default::default() })
+                .expect("the report is produced");
+        assert_eq!(report["structure"], structure);
+        let nets = report["nets"].as_array().expect("nets is an array");
+        assert_eq!(nets[0]["structures"], json!(["stripline"]), "net rows use the single-ended geometry");
+    }
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn impedance_report_requires_a_stackup_or_overrides() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "A".to_string() }).expect("the net is declared");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("A".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.25,
+            from: [10.0, 10.0],
+            to: [30.0, 10.0],
+        },
+    )
+    .expect("the track is routed");
+
+    let error = impedance_report(handle, ImpedanceReportRequest::default()).expect_err("a board without a stackup is rejected");
+    assert_eq!(error.code, "session/argument-invalid");
+
+    let report = impedance_report(
+        handle,
+        ImpedanceReportRequest {
+            structure: Some("auto".to_string()),
+            dielectric_height: Some(0.2),
+            dielectric_constant: Some(4.2),
+            copper_thickness: None,
+        },
+    )
+    .expect("explicit values replace the missing stackup");
+    assert_eq!(report["structure"], "auto");
+    assert_eq!(report["dielectricHeight"], 0.2);
+    assert_eq!(report["dielectricConstant"], 4.2);
+    assert_eq!(report["netCount"], 1);
     close(handle).expect("the board closes");
 }
 
@@ -4527,6 +4698,210 @@ fn inspect_runs_hole_to_track_without_an_explicit_list() {
 
     let report = inspect(handle, None).expect("the checks run");
     assert!(codes(&report).contains(&"drc/hole-to-track"), "an explicit-free run includes hole-to-track: {report}");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_pad_flags_a_via_on_another_nets_pad() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J1".to_string()), x: Some(10.0), y: Some(10.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("A".to_string()),
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("B".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+
+    let report = inspect(handle, Some(vec!["hole-to-pad".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/hole-to-pad"]);
+    assert_eq!(report["passed"], false);
+    let issue = &report["issues"][0];
+    assert_eq!(issue["objectId"], "via-1+fp-1:1");
+    assert_eq!(issue["layerId"], "F.Cu");
+    let message = issue["message"].as_str().expect("a message");
+    assert!(message.contains("drill hole `via-1`") && message.contains("pad `fp-1:1`"), "{message}");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_pad_skips_same_net_and_unassigned_pairs() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "A".to_string() }).expect("the net is declared");
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J1".to_string()), x: Some(10.0), y: Some(10.0), ..Default::default() },
+    )
+    .expect("the same-net footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("A".to_string()),
+            drill: None,
+        },
+    )
+    .expect("the same-net pad is added");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("A".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the same-net via is placed");
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J2".to_string()), x: Some(30.0), y: Some(30.0), ..Default::default() },
+    )
+    .expect("the unassigned footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-2".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the unassigned pad is added");
+    add_via(handle, AddViaRequest { net: None, at: [30.0, 30.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the unassigned via is placed");
+
+    let report = inspect(handle, Some(vec!["hole-to-pad".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "same-net and unassigned holes and pads are not compared");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_pad_accepts_a_gap_exactly_at_the_rule() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_net_class(handle, AddNetClassRequest { name: "PWR".to_string(), clearance: Some(0.5), ..Default::default() })
+        .expect("the clearance class is declared");
+    for net in ["A", "B"] {
+        assign_net_class(handle, AssignNetClassRequest { net: net.to_string(), class: "PWR".to_string() })
+            .expect("the net joins the class");
+    }
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J1".to_string()), x: Some(10.0), y: Some(10.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("A".to_string()),
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("B".to_string()), at: [11.25, 10.0], diameter: 0.8, drill: 0.5, ..Default::default() },
+    )
+    .expect("the via is placed");
+
+    let report = inspect(handle, Some(vec!["hole-to-pad".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "a gap exactly at the rule passes");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn hole_to_pad_ignores_a_drilled_pads_own_hole() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "A".to_string() }).expect("the net is declared");
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J1".to_string()), x: Some(10.0), y: Some(10.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("A".to_string()),
+            drill: Some(0.3),
+        },
+    )
+    .expect("the drilled pad is added");
+
+    let report = inspect(handle, Some(vec!["hole-to-pad".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), Vec::<&str>::new(), "a drilled pad is not measured against its own drill");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn inspect_runs_hole_to_pad_without_an_explicit_list() {
+    let handle = created();
+    for name in ["A", "B"] {
+        add_net(handle, AddNetRequest { name: name.to_string() }).expect("the net is declared");
+    }
+    add_footprint(
+        handle,
+        AddFootprintRequest { reference: Some("J1".to_string()), x: Some(10.0), y: Some(10.0), ..Default::default() },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("A".to_string()),
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("B".to_string()), at: [10.0, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+
+    let report = inspect(handle, None).expect("the checks run");
+    assert!(codes(&report).contains(&"drc/hole-to-pad"), "an explicit-free run includes hole-to-pad: {report}");
     close(handle).expect("the board closes");
 }
 

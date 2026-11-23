@@ -4079,6 +4079,25 @@ pub struct ImpedanceTableRequest {
     pub copper_thickness: Option<f64>,
 }
 
+/// Request of [`crate::impedance_report`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpedanceReportRequest {
+    /// Trace geometry: `auto` (default) selects the structure from each copper
+    /// layer; the other names apply one structure to every row.
+    #[serde(default)]
+    pub structure: Option<String>,
+    /// Dielectric thickness in millimetres; defaults to the board stackup.
+    #[serde(default)]
+    pub dielectric_height: Option<f64>,
+    /// Relative permittivity; defaults to the board stackup.
+    #[serde(default)]
+    pub dielectric_constant: Option<f64>,
+    /// Copper foil thickness in millimetres; defaults to the board stackup or 0.035.
+    #[serde(default)]
+    pub copper_thickness: Option<f64>,
+}
+
 /// Path style the router uses for one two-point edge.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]

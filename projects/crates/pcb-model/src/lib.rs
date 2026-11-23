@@ -47,10 +47,11 @@ pub use board::{
     AddDifferentialPairRequest, AddFiducialRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest,
     AddNetClassRequest, AddNetRequest, AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest,
     AddTestPointRequest, AddTextRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
-    AssignNetClassRequest, DeletePadRequest, ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest, RouteOptions,
-    RouteStyle, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest,
-    SplitTrackRequest, UpdateFootprintRequest, UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest,
-    UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest,
+    AssignNetClassRequest, DeletePadRequest, ImpedanceReportRequest, ImpedanceRequest, ImpedanceTableRequest,
+    MoveFootprintRequest, RouteOptions, RouteStyle, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest,
+    SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest, UpdateKeepoutRequest, UpdateLayerRequest,
+    UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest,
+    WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 pub use outline::OutlineGeometryRequest;
@@ -233,6 +234,7 @@ pub fn capabilities() -> Value {
         "stackup": "supported",
         "impedance": "supported",
         "impedanceTable": "supported",
+        "impedanceReport": "supported",
     })
 }
 
@@ -1018,6 +1020,16 @@ pub fn impedance_table(handle: u64, request: ImpedanceTableRequest) -> Result<Va
         }
         Ok(report)
     })?
+}
+
+/// Reports the impedance of every routed net and every declared pair.
+///
+/// `auto` (the default) selects the structure from each track's copper layer;
+/// a declared structure applies to every row. Values come from the board
+/// stackup unless the request overrides them. The report is deterministic and
+/// carries the resolved stackup values used for every row.
+pub fn impedance_report(handle: u64, request: ImpedanceReportRequest) -> Result<Value, ServiceError> {
+    store::read(handle, |board| impedance::report(board, request))?
 }
 
 /// Declares one net on an open board.
