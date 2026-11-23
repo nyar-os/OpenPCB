@@ -2378,6 +2378,14 @@ function differentialStructure(structure: ImpedanceStructure | undefined): boole
     return structure === 'diffMicrostrip' || structure === 'diffStripline';
 }
 
+/** Parses the report structure; `auto` and an empty value select the per-layer geometry. */
+function reportStructure(raw: string | undefined): ImpedanceStructure | 'auto' | undefined {
+    if (raw === undefined) {
+        return undefined;
+    }
+    return raw === 'auto' || raw.trim() === '' ? 'auto' : impedanceStructure(raw);
+}
+
 /** Parses `a,b,...` into target impedances; an all-empty list stays empty for the model. */
 function impedanceTargets(raw: string | undefined): number[] | undefined {
     if (raw === undefined) {
@@ -2538,6 +2546,39 @@ stackup
                 structure: text(options, 'structure') as ImpedanceStructure | undefined,
                 targets,
                 gap: numberOption(text(options, 'gap')),
+                dielectricHeight: numberOption(text(options, 'dielectric-height')),
+                dielectricConstant: numberOption(text(options, 'dielectric-constant')),
+                copperThickness: numberOption(text(options, 'copper-thickness')),
+            });
+            ctx.emitResult(report, JSON.stringify(report));
+            return 0;
+        });
+        return 0;
+    });
+
+stackup
+    .command('report', 'cli.cmd.stackup-report')
+    .option('--structure <auto|microstrip|stripline|diffMicrostrip|diffStripline>', 'cli.opt.report-structure')
+    .option('--dielectric-height <mm>', 'cli.opt.dielectric-height')
+    .option('--dielectric-constant <er>', 'cli.opt.dielectric-constant')
+    .option('--copper-thickness <mm>', 'cli.opt.copper-thickness')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        const rawStructure = text(options, 'structure');
+        const structure = reportStructure(rawStructure);
+        if (rawStructure !== undefined && structure === undefined) {
+            ctx.fail('open-pcb.cli.structure-invalid', {
+                message: '`--structure` must be auto, microstrip, stripline, diffMicrostrip or diffStripline',
+            });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.impedanceReport({
+                structure,
                 dielectricHeight: numberOption(text(options, 'dielectric-height')),
                 dielectricConstant: numberOption(text(options, 'dielectric-constant')),
                 copperThickness: numberOption(text(options, 'copper-thickness')),

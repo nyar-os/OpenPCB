@@ -890,6 +890,40 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
             table,
             'the table is deterministic',
         );
+        const impedanceReport = JSON.parse(run('stackup', 'report', document)) as {
+            units: string;
+            structure: string;
+            netCount: number;
+            pairCount: number;
+            nets: {
+                net: string;
+                tracks: number;
+                widthMin: number;
+                widthMax: number;
+                impedanceMin: number;
+                impedanceMax: number;
+                structures: string[];
+            }[];
+        };
+        assert.equal(impedanceReport.units, 'mm');
+        assert.equal(impedanceReport.structure, 'auto');
+        assert.equal(impedanceReport.netCount, 1);
+        assert.equal(impedanceReport.pairCount, 0);
+        assert.equal(impedanceReport.nets[0]!.net, 'VCC');
+        assert.equal(impedanceReport.nets[0]!.tracks, 1);
+        assert.equal(impedanceReport.nets[0]!.widthMin, 0.25);
+        assert.equal(impedanceReport.nets[0]!.widthMax, 0.25);
+        assert.deepEqual(impedanceReport.nets[0]!.structures, ['microstrip']);
+        assert.ok(
+            impedanceReport.nets[0]!.impedanceMin <= impedanceReport.nets[0]!.impedanceMax,
+            'the impedance range is ordered',
+        );
+        assert.equal(
+            run('stackup', 'report', document, '--structure', 'microstrip'),
+            run('stackup', 'report', document, '--structure', 'microstrip'),
+            'the report is deterministic',
+        );
+        assert.match(runFail('stackup', 'report', document, '--structure', 'twinaxial'), /--structure/);
         assert.match(runFail('stackup', 'table', document, '--targets', 'fast'), /--targets/);
         assert.match(runFail('stackup', 'table', document, '--gap', 'wide'), /--gap/);
         assert.match(
@@ -931,7 +965,7 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
             'inspect',
             document,
             '--checks',
-            'drc,connectivity,clearance,annular_rings,stackup,outline,silkscreen,courtyard,netlist',
+            'drc,connectivity,clearance,annular_rings,stackup,outline,silkscreen,courtyard,netlist,hole-to-pad',
         );
         assert.match(inspected, /passed=true/);
 
