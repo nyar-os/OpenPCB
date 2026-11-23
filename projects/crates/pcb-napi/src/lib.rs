@@ -310,6 +310,42 @@ fn board_delete_test_point(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Adds one fiducial mark to an open board.
+#[function]
+fn board_add_fiducial(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let raw = text(&ctx, 1)?;
+    let request: open_pcb_model::AddFiducialRequest =
+        serde_json::from_str(&raw).map_err(|error| Error::new(format!("session/argument-invalid: {error}")))?;
+    let value = open_pcb_model::add_fiducial(handle, request).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Removes one fiducial mark from an open board.
+#[function]
+fn board_delete_fiducial(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let value = open_pcb_model::delete_fiducial(handle, &id).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Lists every fiducial mark of one open board.
+#[function]
+fn board_list_fiducials(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::list_fiducials(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
+/// Reports the fiducial marks of one open board for assembly.
+#[function]
+fn board_fiducial_report(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::fiducial_report(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Adds one copper pour region to an open board.
 #[function]
 fn board_add_zone(ctx: CallContext) -> Result<JsValue> {
@@ -1038,6 +1074,25 @@ fn board_rpc(kind: &str, value: &Value) -> std::result::Result<Value, ServiceErr
             let id = rpc_text(value, "id")?;
             open_pcb_model::delete_test_point(handle, id)
         }
+        "board.addFiducial" => {
+            let handle = rpc_handle(value)?;
+            let request: open_pcb_model::AddFiducialRequest =
+                serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
+            open_pcb_model::add_fiducial(handle, request)
+        }
+        "board.deleteFiducial" => {
+            let handle = rpc_handle(value)?;
+            let id = rpc_text(value, "id")?;
+            open_pcb_model::delete_fiducial(handle, id)
+        }
+        "board.listFiducials" => {
+            let handle = rpc_handle(value)?;
+            open_pcb_model::list_fiducials(handle)
+        }
+        "board.fiducialReport" => {
+            let handle = rpc_handle(value)?;
+            open_pcb_model::fiducial_report(handle)
+        }
         "board.addNet" => {
             let handle = rpc_handle(value)?;
             let request: open_pcb_model::AddNetRequest = serde_json::from_value(rpc_request(value)).map_err(argument_error)?;
@@ -1508,6 +1563,10 @@ register_module![
     board_assign_net_class,
     board_add_test_point,
     board_delete_test_point,
+    board_add_fiducial,
+    board_delete_fiducial,
+    board_list_fiducials,
+    board_fiducial_report,
     board_route,
     board_add_net,
     board_undo,

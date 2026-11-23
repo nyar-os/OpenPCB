@@ -44,13 +44,13 @@ mod tests;
 use std::{fs, path::Path};
 
 pub use board::{
-    AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
-    AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTextRequest,
-    AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, DeletePadRequest,
-    ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest, RouteOptions, RouteStyle, SetOutlineRequest,
-    SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest,
-    UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest,
-    UpdateViaRequest, UpdateZoneRequest, WidthRequest,
+    AddDifferentialPairRequest, AddFiducialRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest,
+    AddNetClassRequest, AddNetRequest, AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest,
+    AddTestPointRequest, AddTextRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
+    AssignNetClassRequest, DeletePadRequest, ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest, RouteOptions,
+    RouteStyle, SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest,
+    SplitTrackRequest, UpdateFootprintRequest, UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest,
+    UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest,
 };
 use board::{Board, DOCUMENT_FORMAT, DOCUMENT_VERSION, Document};
 pub use outline::OutlineGeometryRequest;
@@ -228,6 +228,8 @@ pub fn capabilities() -> Value {
         "polygonOutline": "supported",
         "netClasses": "supported",
         "testPoints": "supported",
+        "fiducials": "supported",
+        "fiducialReport": "supported",
         "stackup": "supported",
         "impedance": "supported",
         "impedanceTable": "supported",
@@ -578,6 +580,50 @@ pub fn delete_test_point(handle: u64, id: &str) -> Result<Value, ServiceError> {
         Ok(())
     })?;
     edit_result(handle, None, Some(deleted))
+}
+
+/// Adds one fiducial mark to an open board.
+///
+/// The mark sits on `F.Fid` or `B.Fid` with a positive diameter and a centre
+/// inside the board outline.
+pub fn add_fiducial(handle: u64, request: AddFiducialRequest) -> Result<Value, ServiceError> {
+    let mut object = Value::Null;
+    store::mutate(handle, |board| {
+        object = board.add_fiducial(request)?;
+        Ok(())
+    })?;
+    edit_result(handle, Some(object), None)
+}
+
+/// Deletes one fiducial mark from an open board.
+pub fn delete_fiducial(handle: u64, id: &str) -> Result<Value, ServiceError> {
+    let mut deleted = String::new();
+    store::mutate(handle, |board| {
+        deleted = board.delete_fiducial(id)?;
+        Ok(())
+    })?;
+    edit_result(handle, None, Some(deleted))
+}
+
+/// Lists every fiducial mark of one open board.
+pub fn list_fiducials(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, |board| {
+        Ok(json!({
+            "revision": board.revision,
+            "units": board.units,
+            "count": board.fiducials.len(),
+            "items": board.fiducials.iter().map(board::Fiducial::to_value).collect::<Vec<_>>(),
+        }))
+    })?
+}
+
+/// Reports the fiducial marks of one open board for assembly.
+///
+/// The report counts marks per side, measures the gap from each mark to the
+/// board edge against the copper-to-edge rule and flags marks outside the
+/// outline; it never edits the board.
+pub fn fiducial_report(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, |board| board.fiducial_report())
 }
 
 /// Adds one copper pour region to an open board.

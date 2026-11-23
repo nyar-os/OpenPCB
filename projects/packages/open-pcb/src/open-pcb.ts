@@ -15,6 +15,7 @@ import type { BoardIntent } from './formats.js';
 import * as service from './service.js';
 import type {
     AddDifferentialPairOptions,
+    AddFiducialOptions,
     AddFootprintOptions,
     AddKeepoutOptions,
     AddTeardropsOptions,
@@ -43,6 +44,8 @@ import type {
     DrillReport,
     ExportOptions,
     ExportReport,
+    FiducialListReport,
+    FiducialReport,
     ImpedanceOptions,
     ImpedanceReport,
     ImpedanceTableOptions,
@@ -586,6 +589,22 @@ function attach(
         async deleteTestPoint(id: string): Promise<BoardEditResult> {
             ensure();
             return commit((current) => service.deleteTestPoint(current, id));
+        },
+        async addFiducial(options: AddFiducialOptions): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.addFiducial(current, options));
+        },
+        async deleteFiducial(id: string): Promise<BoardEditResult> {
+            ensure();
+            return commit((current) => service.deleteFiducial(current, id));
+        },
+        async listFiducials(): Promise<FiducialListReport> {
+            ensure();
+            return service.listFiducials(handle);
+        },
+        async fiducialReport(): Promise<FiducialReport> {
+            ensure();
+            return service.fiducialReport(handle);
         },
         async setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult> {
             ensure();

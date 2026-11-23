@@ -566,6 +566,10 @@ export interface BoardCapabilities {
     readonly routingStyles: Readonly<Record<RouteStyle, SupportLevel>>;
     /** Whether declared test points can be reported. */
     readonly testPoints: SupportLevel;
+    /** Whether fiducial marks can be declared and managed. */
+    readonly fiducials: SupportLevel;
+    /** Whether a fiducial assembly report can be produced. */
+    readonly fiducialReport: SupportLevel;
     /** Whether a physical stackup can be declared and read. */
     readonly stackup: SupportLevel;
     /** Whether microstrip and stripline impedance and width conversion are available. */
@@ -613,6 +617,7 @@ export interface BoardSummaryCounts {
     readonly texts: number;
     readonly netClasses: number;
     readonly testPoints: number;
+    readonly fiducials: number;
     readonly differentialPairs: number;
     readonly waivers: number;
 }
@@ -1027,6 +1032,75 @@ export interface AddTestPointOptions {
     readonly target: string;
 }
 
+/** Options of `board.addFiducial()`. */
+export interface AddFiducialOptions {
+    /** Fiducial layer: `F.Fid` or `B.Fid`. */
+    readonly layer: string;
+    /** Mark centre in board units. */
+    readonly at: readonly [number, number];
+    /** Mark diameter in board units; greater than zero. */
+    readonly diameter: number;
+    /** Optional human label. */
+    readonly name?: string;
+}
+
+/** One fiducial mark in board units. */
+export interface BoardFiducial {
+    readonly id: ObjectId;
+    readonly layer: string;
+    /** Mark centre in board units. */
+    readonly at: readonly [number, number];
+    /** Mark diameter in board units. */
+    readonly diameter: number;
+    readonly name: string | null;
+}
+
+/** Result of `board.listFiducials()`. */
+export interface FiducialListReport {
+    readonly revision: number;
+    readonly units: BoardUnits;
+    readonly count: number;
+    readonly items: readonly BoardFiducial[];
+}
+
+/** One finding of the fiducial assembly report. */
+export interface FiducialIssue {
+    readonly code: string;
+    readonly severity: 'info' | 'warning' | 'error';
+    readonly objectId: string;
+    readonly message: string;
+}
+
+/** One fiducial mark measured in millimetres. */
+export interface FiducialReportEntry {
+    readonly id: ObjectId;
+    readonly layer: string;
+    /** Mark centre, in millimetres. */
+    readonly at: readonly [number, number];
+    /** Mark diameter, in millimetres. */
+    readonly diameter: number;
+    readonly name: string | null;
+    /** Gap from the mark edge to the nearest board edge, in millimetres;
+     *  null when the board has no outline. */
+    readonly edgeGap: number | null;
+}
+
+/** Result of `board.fiducialReport()`. */
+export interface FiducialReport {
+    readonly revision: number;
+    readonly units: 'mm';
+    readonly count: number;
+    /** Marks on `F.Fid`. */
+    readonly front: number;
+    /** Marks on `B.Fid`. */
+    readonly back: number;
+    /** Copper-to-edge rule the edge gaps are checked against, in millimetres. */
+    readonly edgeRule: number;
+    readonly status: 'pass' | 'warn' | 'error';
+    readonly issues: readonly FiducialIssue[];
+    readonly items: readonly FiducialReportEntry[];
+}
+
 /** Back-drill geometry of one through via, in board units. */
 export interface BackDrill {
     /** Barrel depth removed from the secondary side; greater than zero. */
@@ -1419,6 +1493,10 @@ export interface Board {
     assignNetClass(options: AssignNetClassOptions): Promise<BoardEditResult>;
     addTestPoint(options: AddTestPointOptions): Promise<BoardEditResult>;
     deleteTestPoint(id: ObjectId): Promise<BoardEditResult>;
+    addFiducial(options: AddFiducialOptions): Promise<BoardEditResult>;
+    deleteFiducial(id: ObjectId): Promise<BoardEditResult>;
+    listFiducials(): Promise<FiducialListReport>;
+    fiducialReport(): Promise<FiducialReport>;
     setViaBackDrill(options: SetViaBackDrillOptions): Promise<BoardEditResult>;
     addNet(options: AddNetOptions): Promise<BoardEditResult>;
     addTeardrops(options?: AddTeardropsOptions): Promise<BoardEditResult>;

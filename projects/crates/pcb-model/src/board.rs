@@ -434,6 +434,40 @@ pub(crate) struct ResolvedTestPoint {
     pub(crate) at: [f64; 2],
 }
 
+/// One fiducial mark on an assembly layer.
+///
+/// A fiducial is a circular solder-mask-defined copper mark the placement
+/// camera locks onto. It stores its own centre and diameter in board units on
+/// `F.Fid` or `B.Fid`; the `fiducialReport` reads them for assembly checks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Fiducial {
+    /// Stable fiducial id.
+    pub(crate) id: String,
+    /// Fiducial layer: `F.Fid` or `B.Fid`.
+    pub(crate) layer: String,
+    /// Mark centre in board units.
+    pub(crate) at: [f64; 2],
+    /// Mark diameter in board units.
+    pub(crate) diameter: f64,
+    /// Optional human label; never blank after trimming.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+}
+
+impl Fiducial {
+    /// Api projection of one fiducial mark.
+    pub(crate) fn to_value(&self) -> Value {
+        json!({
+            "id": self.id,
+            "layer": self.layer,
+            "at": self.at,
+            "diameter": self.diameter,
+            "name": self.name,
+        })
+    }
+}
+
 /// One copper pour region on a copper layer.
 ///
 /// A zone is a closed polygon with at least three vertices. It carries no fill
@@ -611,6 +645,9 @@ pub(crate) struct Board {
     /// Declared test points; absent on documents written before them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) test_points: Vec<TestPoint>,
+    /// Fiducial marks; absent on documents written before them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) fiducials: Vec<Fiducial>,
     /// Declared differential pairs; absent on documents written before pairs existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) differential_pairs: Vec<DifferentialPair>,
@@ -650,6 +687,9 @@ pub(crate) struct Board {
     /// Next test point sequence number.
     #[serde(default = "one")]
     pub(crate) next_test_point: u64,
+    /// Next fiducial sequence number.
+    #[serde(default = "one")]
+    pub(crate) next_fiducial: u64,
     /// Next net sequence number.
     pub(crate) next_net: u64,
 }
@@ -708,6 +748,7 @@ impl Board {
             texts: Vec::new(),
             net_classes: Vec::new(),
             test_points: Vec::new(),
+            fiducials: Vec::new(),
             differential_pairs: Vec::new(),
             severity_overrides: BTreeMap::new(),
             waivers: Vec::new(),
@@ -722,6 +763,7 @@ impl Board {
             next_text: 1,
             next_net_class: 1,
             next_test_point: 1,
+            next_fiducial: 1,
             next_net: 1,
         })
     }
@@ -2332,6 +2374,160 @@ impl Board {
         })
     }
 
+    /// Adds one fiducial mark and returns its public object shape.
+    ///
+    /// The layer is `F.Fid` or `B.Fid`, the diameter is positive, the centre
+    /// is finite and lies inside the rectangular outline, so an added mark is
+    /// always placeable by the assembly camera.
+    pub(crate) fn add_fiducial(&mut self, request: AddFiducialRequest) -> Result<Value, ServiceError> {
+        let layer = request.layer.trim();
+        if layer != "F.Fid" && layer != "B.Fid" {
+            return Err(crate::argument(format!("`{layer}` is not a fiducial layer; use `F.Fid` or `B.Fid`")));
+        }
+        let at = finite_pair(request.at, "at")?;
+        let diameter = positive(request.diameter, "diameter")?;
+        let name = match request.name {
+            Some(name) => {
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return Err(crate::argument("a fiducial `name` must not be blank"));
+                }
+                Some(name)
+            }
+            None => None,
+        };
+        let Some(outline) = self.outline
+        else {
+            return Err(crate::argument("a fiducial needs a board outline; set one first"));
+        };
+        if at[0] < outline.from[0] || at[0] > outline.to[0] || at[1] < outline.from[1] || at[1] > outline.to[1] {
+            return Err(crate::argument("the fiducial centre is outside the board outline"));
+        }
+        let id = format!("fiducial-{}", self.next_fiducial);
+        self.next_fiducial += 1;
+        let fiducial = Fiducial { id, layer: layer.to_string(), at, diameter, name };
+        let object = fiducial.to_value();
+        self.fiducials.push(fiducial);
+        self.revision += 1;
+        Ok(object)
+    }
+
+    /// Removes one fiducial mark by id and returns the removed id.
+    pub(crate) fn delete_fiducial(&mut self, id: &str) -> Result<String, ServiceError> {
+        let index = self
+            .fiducials
+            .iter()
+            .position(|fiducial| fiducial.id == id)
+            .ok_or_else(|| ServiceError::new("object/not-found", format!("no fiducial with id `{id}`")))?;
+        let removed = self.fiducials.remove(index);
+        self.revision += 1;
+        Ok(removed.id)
+    }
+
+    /// Builds the fiducial assembly report of one board.
+    ///
+    /// Every mark reports its centre and diameter in millimetres and the gap
+    /// from the mark edge to the nearest board edge. Assembly prefers at least
+    /// two marks on a side that has any and at least three in total; a mark
+    /// closer to the edge than the copper-to-edge rule warns, and a mark whose
+    /// centre left the outline is an error. Boards without an outline cannot
+    /// measure edge gaps, so those marks report no gap and no edge findings.
+    pub(crate) fn fiducial_report(&self) -> Value {
+        let scale = self.millimetres();
+        let edge_rule = self.rules.copper_to_edge;
+        let mut items = Vec::with_capacity(self.fiducials.len());
+        let mut issues: Vec<Value> = Vec::new();
+        let mut front = 0;
+        let mut back = 0;
+        for fiducial in &self.fiducials {
+            if fiducial.layer == "F.Fid" {
+                front += 1;
+            }
+            else {
+                back += 1;
+            }
+            let diameter = crate::round6(fiducial.diameter * scale);
+            let edge_gap = self.outline.map(|outline| {
+                let centre_gap = (fiducial.at[0] - outline.from[0])
+                    .min(outline.to[0] - fiducial.at[0])
+                    .min(fiducial.at[1] - outline.from[1])
+                    .min(outline.to[1] - fiducial.at[1]);
+                crate::round6(centre_gap * scale - diameter / 2.0)
+            });
+            let inside = self.outline.is_none_or(|outline| {
+                fiducial.at[0] >= outline.from[0]
+                    && fiducial.at[0] <= outline.to[0]
+                    && fiducial.at[1] >= outline.from[1]
+                    && fiducial.at[1] <= outline.to[1]
+            });
+            if !inside {
+                issues.push(fiducial_issue(
+                    "fiducial/outside-outline",
+                    "error",
+                    &fiducial.id,
+                    format!("fiducial `{}` is outside the board outline", fiducial.id),
+                ));
+            }
+            if let Some(gap) = edge_gap
+                && gap < edge_rule
+            {
+                issues.push(fiducial_issue(
+                    "fiducial/edge-clearance",
+                    "warning",
+                    &fiducial.id,
+                    format!("fiducial `{}` is {gap:.3} mm from the board edge; the rule requires {edge_rule} mm", fiducial.id),
+                ));
+            }
+            items.push(json!({
+                "id": fiducial.id,
+                "layer": fiducial.layer,
+                "at": [crate::round6(fiducial.at[0] * scale), crate::round6(fiducial.at[1] * scale)],
+                "diameter": diameter,
+                "name": fiducial.name,
+                "edgeGap": edge_gap,
+            }));
+        }
+        let total = self.fiducials.len();
+        if total < 3 {
+            issues.push(fiducial_issue(
+                "fiducial/total-count",
+                "warning",
+                "",
+                format!("the board carries {total} fiducial marks; assembly prefers at least 3"),
+            ));
+        }
+        for (side, count) in [("F.Fid", front), ("B.Fid", back)] {
+            if count > 0 && count < 2 {
+                issues.push(fiducial_issue(
+                    "fiducial/side-count",
+                    "warning",
+                    side,
+                    format!("`{side}` carries {count} fiducial marks; assembly prefers at least 2 per side"),
+                ));
+            }
+        }
+        let status = if issues.iter().any(|issue| issue["severity"] == "error") {
+            "error"
+        }
+        else if issues.is_empty() {
+            "pass"
+        }
+        else {
+            "warn"
+        };
+        json!({
+            "revision": self.revision,
+            "units": "mm",
+            "count": total,
+            "front": front,
+            "back": back,
+            "edgeRule": crate::round6(edge_rule),
+            "status": status,
+            "issues": issues,
+            "items": items,
+        })
+    }
+
     /// Replaces one or more design-rule values.
     ///
     /// Every value is in millimetres. The request must name at least one rule;
@@ -2722,6 +2918,11 @@ fn non_negative(value: f64, field: &str) -> Result<f64, ServiceError> {
     if value < 0.0 { Err(crate::argument(format!("`{field}` must not be negative"))) } else { Ok(value) }
 }
 
+/// One finding of the fiducial assembly report.
+fn fiducial_issue(code: &str, severity: &str, object_id: &str, message: String) -> Value {
+    json!({ "code": code, "severity": severity, "objectId": object_id, "message": message })
+}
+
 /// Validates a board loaded from disk before it receives a handle.
 ///
 /// Failures use `format/invalid`; a version mismatch is reported by the caller
@@ -3102,6 +3303,30 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         }
     }
 
+    let mut fiducial_ids = HashSet::new();
+    for fiducial in &board.fiducials {
+        if fiducial.id.trim().is_empty() {
+            return Err(crate::invalid("a fiducial has an empty id"));
+        }
+        if !fiducial_ids.insert(fiducial.id.as_str()) {
+            return Err(crate::invalid(format!("fiducial id `{}` is duplicated", fiducial.id)));
+        }
+        if fiducial.layer != "F.Fid" && fiducial.layer != "B.Fid" {
+            return Err(crate::invalid(format!(
+                "fiducial `{}` sits on `{}`, which is not a fiducial layer",
+                fiducial.id, fiducial.layer
+            )));
+        }
+        checks(fiducial.at[0], &format!("fiducial `{}` at.x", fiducial.id))?;
+        checks(fiducial.at[1], &format!("fiducial `{}` at.y", fiducial.id))?;
+        sizes(fiducial.diameter, &format!("fiducial `{}` diameter", fiducial.id))?;
+        if let Some(name) = fiducial.name.as_deref()
+            && name.trim().is_empty()
+        {
+            return Err(crate::invalid(format!("fiducial `{}` has an empty name", fiducial.id)));
+        }
+    }
+
     let mut pair_ids = HashSet::new();
     for pair in &board.differential_pairs {
         if pair.id.trim().is_empty() {
@@ -3209,6 +3434,7 @@ pub(crate) fn summary(board: &Board) -> Value {
             "texts": board.texts.len(),
             "netClasses": board.net_classes.len(),
             "testPoints": board.test_points.len(),
+            "fiducials": board.fiducials.len(),
             "differentialPairs": board.differential_pairs.len(),
             "waivers": board.waivers.len(),
         },
@@ -3340,6 +3566,21 @@ pub struct AssignNetClassRequest {
 pub struct AddTestPointRequest {
     /// Pad key `footprint-id:pad-number` or via id.
     pub target: String,
+}
+
+/// Request of [`crate::add_fiducial`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddFiducialRequest {
+    /// Fiducial layer: `F.Fid` or `B.Fid`.
+    pub layer: String,
+    /// Mark centre in board units.
+    pub at: [f64; 2],
+    /// Mark diameter in board units; greater than zero.
+    pub diameter: f64,
+    /// Optional human label.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 /// Request of [`crate::add_zone`].

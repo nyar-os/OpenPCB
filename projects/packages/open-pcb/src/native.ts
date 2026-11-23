@@ -55,6 +55,10 @@ export interface NativeBinding {
     board_assign_net_class(handle: number, requestJson: string): string;
     board_add_test_point(handle: number, requestJson: string): string;
     board_delete_test_point(handle: number, id: string): string;
+    board_add_fiducial(handle: number, requestJson: string): string;
+    board_delete_fiducial(handle: number, id: string): string;
+    board_list_fiducials(handle: number): string;
+    board_fiducial_report(handle: number): string;
     board_route(handle: number, optionsJson: string): string;
     board_add_net(handle: number, requestJson: string): string;
     board_undo(handle: number): string;

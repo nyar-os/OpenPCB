@@ -12,22 +12,24 @@ use std::{
 use serde_json::{Value, json};
 
 use crate::{
-    AddDifferentialPairRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest, AddNetClassRequest, AddNetRequest,
-    AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest, AddTestPointRequest, AddTextRequest,
-    AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest, AssignNetClassRequest, CreateRequest, ImpedanceRequest,
-    ImpedanceTableRequest, MoveFootprintRequest, OutlineGeometryRequest, PanelizeRequest, RouteOptions, RouteStyle,
-    SetOutlineRequest, SetRulesRequest, SetSeverityRequest, SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest,
-    UpdateFootprintRequest, UpdateKeepoutRequest, UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest,
-    UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair, add_footprint, add_keepout,
-    add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via,
-    add_waiver, add_zone, assign_net_class,
+    AddDifferentialPairRequest, AddFiducialRequest, AddFootprintRequest, AddKeepoutRequest, AddLayerRequest,
+    AddNetClassRequest, AddNetRequest, AddPadRequest, AddSlotRequest, AddStitchingRequest, AddTeardropsRequest,
+    AddTestPointRequest, AddTextRequest, AddTrackRequest, AddViaRequest, AddWaiverRequest, AddZoneRequest,
+    AssignNetClassRequest, CreateRequest, ImpedanceRequest, ImpedanceTableRequest, MoveFootprintRequest,
+    OutlineGeometryRequest, PanelizeRequest, RouteOptions, RouteStyle, SetOutlineRequest, SetRulesRequest, SetSeverityRequest,
+    SetStackupRequest, SetViaBackDrillRequest, SplitTrackRequest, UpdateFootprintRequest, UpdateKeepoutRequest,
+    UpdateLayerRequest, UpdatePadRequest, UpdateSlotRequest, UpdateTextRequest, UpdateTrackRequest, UpdateViaRequest,
+    UpdateZoneRequest, WidthRequest, add_differential_pair, add_fiducial, add_footprint, add_keepout, add_layer, add_net,
+    add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track, add_via, add_waiver, add_zone,
+    assign_net_class,
     board::{Board, Document, Footprint, Net, Pad, Track, Via},
-    capabilities, close, copper_balance, create, delete_differential_pair, delete_footprint, delete_keepout, delete_net_class,
-    delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver, delete_zone,
-    drill_report, export, impedance_table, import, inspect, keepout_report, list_texts, move_footprint, net_lengths, open,
-    outline_geometry, panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill,
-    split_track, stackup_impedance, stackup_width, stitch_vias, store, summary, undo, update_footprint, update_keepout,
-    update_layer, update_pad, update_slot, update_text, update_track, update_via, update_zone, zone_report,
+    capabilities, close, copper_balance, create, delete_differential_pair, delete_fiducial, delete_footprint, delete_keepout,
+    delete_net_class, delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver,
+    delete_zone, drill_report, export, fiducial_report, impedance_table, import, inspect, keepout_report, list_fiducials,
+    list_texts, move_footprint, net_lengths, open, outline_geometry, panelize, redo, route, save, set_outline, set_rules,
+    set_severity, set_stackup, set_via_back_drill, split_track, stackup_impedance, stackup_width, stitch_vias, store, summary,
+    undo, update_footprint, update_keepout, update_layer, update_pad, update_slot, update_text, update_track, update_via,
+    update_zone, zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1198,6 +1200,104 @@ fn test_points_report_pad_and_via_probes() {
     delete_test_point(reopened, "testpoint-1").expect("the pad test point is deleted");
     assert_eq!(summary(reopened).expect("the board is listed")["counts"]["testPoints"], 0);
     close(reopened).expect("the board closes");
+}
+
+#[test]
+fn fiducials_are_managed_reported_and_undoable() {
+    let directory = TempDir::new();
+    let path = directory.join("fiducials.opcb");
+    let handle = created();
+    add_full_board(handle);
+    assert_eq!(summary(handle).expect("the board is listed")["counts"]["fiducials"], 0);
+
+    for (layer, at) in [("F.Fid", [10.0, 10.0]), ("F.Fid", [90.0, 10.0]), ("B.Fid", [10.0, 70.0]), ("B.Fid", [90.0, 70.0])] {
+        add_fiducial(handle, AddFiducialRequest { layer: layer.to_string(), at, diameter: 1.0, name: Some("FID".to_string()) })
+            .expect("the fiducial is added");
+    }
+    let listed = list_fiducials(handle).expect("the fiducials are listed");
+    assert_eq!(listed["count"], 4);
+    assert_eq!(listed["items"][0]["layer"], "F.Fid");
+    assert_eq!(listed["items"][0]["name"], "FID");
+    assert_eq!(summary(handle).expect("the board is listed")["counts"]["fiducials"], 4);
+
+    let report = fiducial_report(handle).expect("the fiducial report is built");
+    assert_eq!(report["units"], "mm");
+    assert_eq!(report["count"], 4);
+    assert_eq!(report["front"], 2);
+    assert_eq!(report["back"], 2);
+    assert_eq!(report["status"], "pass");
+    assert_eq!(report["items"][0]["at"], json!([10.0, 10.0]));
+    assert_eq!(report["items"][0]["diameter"], 1.0);
+    assert_eq!(report["items"][0]["edgeGap"], 9.5);
+    assert!(report["issues"].as_array().expect("issues is an array").is_empty());
+
+    undo(handle).expect("the last fiducial add is undone");
+    assert_eq!(list_fiducials(handle).expect("the fiducials are listed")["count"], 3);
+    let warn = fiducial_report(handle).expect("the fiducial report is built");
+    assert_eq!(warn["status"], "warn", "one mark on B.Fid warns below the two-per-side preference");
+    redo(handle).expect("the fiducial add is redone");
+    assert_eq!(list_fiducials(handle).expect("the fiducials are listed")["count"], 4);
+
+    let deleted = delete_fiducial(handle, "fiducial-1").expect("the fiducial is deleted");
+    assert_eq!(deleted["deleted"], "fiducial-1");
+    let missing = delete_fiducial(handle, "fiducial-1").expect_err("the fiducial is gone");
+    assert_eq!(missing.code, "object/not-found");
+
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    assert_eq!(list_fiducials(reopened).expect("the fiducials are listed")["count"], 3);
+    close(reopened).expect("the board closes");
+}
+
+#[test]
+fn fiducial_add_rejects_bad_layer_geometry_and_outline() {
+    let handle = created();
+    let no_outline =
+        add_fiducial(handle, AddFiducialRequest { layer: "F.Fid".to_string(), at: [1.0, 1.0], diameter: 1.0, name: None })
+            .expect_err("a fiducial needs an outline");
+    assert_eq!(no_outline.code, "session/argument-invalid");
+    add_full_board(handle);
+
+    let wrong_layer =
+        add_fiducial(handle, AddFiducialRequest { layer: "F.Cu".to_string(), at: [10.0, 10.0], diameter: 1.0, name: None })
+            .expect_err("only fiducial layers are accepted");
+    assert_eq!(wrong_layer.code, "session/argument-invalid");
+    let zero_diameter =
+        add_fiducial(handle, AddFiducialRequest { layer: "F.Fid".to_string(), at: [10.0, 10.0], diameter: 0.0, name: None })
+            .expect_err("the diameter must be positive");
+    assert_eq!(zero_diameter.code, "session/argument-invalid");
+    let outside =
+        add_fiducial(handle, AddFiducialRequest { layer: "F.Fid".to_string(), at: [120.0, 40.0], diameter: 1.0, name: None })
+            .expect_err("the centre must sit inside the outline");
+    assert_eq!(outside.code, "session/argument-invalid");
+    let blank = add_fiducial(
+        handle,
+        AddFiducialRequest { layer: "F.Fid".to_string(), at: [10.0, 10.0], diameter: 1.0, name: Some(" ".to_string()) },
+    )
+    .expect_err("a name must not be blank");
+    assert_eq!(blank.code, "session/argument-invalid");
+    assert_eq!(list_fiducials(handle).expect("the fiducials are listed")["count"], 0);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn fiducial_report_warns_on_edge_clearance_and_sparse_sides() {
+    let handle = created();
+    add_full_board(handle);
+    add_fiducial(handle, AddFiducialRequest { layer: "F.Fid".to_string(), at: [0.2, 40.0], diameter: 1.0, name: None })
+        .expect("the fiducial is added");
+    let report = fiducial_report(handle).expect("the fiducial report is built");
+    assert_eq!(report["status"], "warn");
+    assert_eq!(report["edgeGap"], json!(null), "the gap lives on the item");
+    let item = &report["items"][0];
+    assert_eq!(item["edgeGap"], -0.3, "half the mark hangs off the edge");
+    let codes: Vec<&str> =
+        report["issues"].as_array().expect("issues is an array").iter().map(|issue| issue["code"].as_str().unwrap()).collect();
+    assert!(codes.contains(&"fiducial/edge-clearance"), "the edge gap warns: {codes:?}");
+    assert!(codes.contains(&"fiducial/total-count"), "one mark warns below three: {codes:?}");
+    assert!(codes.contains(&"fiducial/side-count"), "one mark on a side warns below two: {codes:?}");
+    close(handle).expect("the board closes");
 }
 
 #[test]

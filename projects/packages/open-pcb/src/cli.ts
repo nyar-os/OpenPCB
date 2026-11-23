@@ -1609,6 +1609,99 @@ testpoint
         return 0;
     });
 
+const fiducial = cli.command('fiducial', 'cli.cmd.fiducial');
+fiducial
+    .command('add', 'cli.cmd.fiducial-add')
+    .option('--layer <layer>', 'cli.opt.layer')
+    .option('--at <x,y>', 'cli.opt.at')
+    .option('--diameter <mm>', 'cli.opt.diameter')
+    .option('--name <label>', 'cli.opt.name')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const layer = text(options, 'layer');
+        const at = pair(text(options, 'at'));
+        const diameter = numberOption(text(options, 'diameter'));
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (layer === undefined || layer.length === 0) {
+            ctx.fail('open-pcb.cli.layer-required', { message: '`--layer <layer>` is required' });
+            return 2;
+        }
+        if (at === undefined) {
+            ctx.fail('open-pcb.cli.point-required', { message: '`--at <x,y>` needs two numbers' });
+            return 2;
+        }
+        if (diameter === undefined || diameter <= 0) {
+            ctx.fail('open-pcb.cli.diameter-required', { message: '`--diameter <mm>` must be greater than zero' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.addFiducial({ layer, at, diameter, name: text(options, 'name') });
+            ctx.emitResult(result, `added ${result.object?.id ?? 'fiducial'} at ${at[0]},${at[1]}`);
+            return 0;
+        });
+        return 0;
+    });
+
+fiducial
+    .command('delete', 'cli.cmd.fiducial-delete')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        const id = text(options, 'id');
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        if (id === undefined || id.length === 0) {
+            ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const result = await board.deleteFiducial(id);
+            ctx.emitResult(result, `deleted ${result.deleted ?? id}`);
+            return 0;
+        });
+        return 0;
+    });
+
+fiducial
+    .command('list', 'cli.cmd.fiducial-list')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.listFiducials();
+            ctx.emitResult(report, `fiducials=${report.count}`);
+            return 0;
+        });
+        return 0;
+    });
+
+fiducial
+    .command('report', 'cli.cmd.fiducial-report')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.fiducialReport();
+            ctx.emitResult(
+                report,
+                `fiducials=${report.count} front=${report.front} back=${report.back} status=${report.status}`,
+            );
+            return 0;
+        });
+        return 0;
+    });
+
 const net = cli.command('net', 'cli.cmd.net');
 net
     .command('add', 'cli.cmd.net-add')

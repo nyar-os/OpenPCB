@@ -10,6 +10,7 @@ import { NotImplementedError, OpenPCBError, errorCodes, type OpenPCBErrorCode } 
 import { nativeBinding } from './native.js';
 import type {
     AddDifferentialPairOptions,
+    AddFiducialOptions,
     AddFootprintOptions,
     AddKeepoutOptions,
     AddTeardropsOptions,
@@ -34,6 +35,8 @@ import type {
     DrillReport,
     ExportReport,
     ExportTarget,
+    FiducialListReport,
+    FiducialReport,
     ImportReport,
     ImpedanceOptions,
     ImpedanceReport,
@@ -357,6 +360,28 @@ export function addTestPoint(handle: number, options: AddTestPointOptions): Boar
 /** Deletes one declared test point from an open board. */
 export function deleteTestPoint(handle: number, id: string): BoardEditResult {
     return decode<BoardEditResult>(() => binding('board.deleteTestPoint').board_delete_test_point(handle, id));
+}
+
+/** Adds one fiducial mark to an open board. */
+export function addFiducial(handle: number, options: AddFiducialOptions): BoardEditResult {
+    return decode<BoardEditResult>(() =>
+        binding('board.addFiducial').board_add_fiducial(handle, JSON.stringify(options)),
+    );
+}
+
+/** Deletes one fiducial mark from an open board. */
+export function deleteFiducial(handle: number, id: string): BoardEditResult {
+    return decode<BoardEditResult>(() => binding('board.deleteFiducial').board_delete_fiducial(handle, id));
+}
+
+/** Lists every fiducial mark of an open board. */
+export function listFiducials(handle: number): FiducialListReport {
+    return decode<FiducialListReport>(() => binding('board.listFiducials').board_list_fiducials(handle));
+}
+
+/** Reports the fiducial marks of an open board for assembly. */
+export function fiducialReport(handle: number): FiducialReport {
+    return decode<FiducialReport>(() => binding('board.fiducialReport').board_fiducial_report(handle));
 }
 
 /** Moves one footprint on an open board. */
