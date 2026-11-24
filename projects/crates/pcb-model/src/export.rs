@@ -44,6 +44,15 @@ const A4_LANDSCAPE_PT: [f64; 2] = [841.89, 595.28];
 /// Margin kept around the board inside a PDF page, in points (10 mm).
 const PDF_MARGIN_PT: f64 = 28.34646;
 
+/// Height of the title band above the board in an exported SVG, in board units.
+const SVG_TITLE_BAND: f64 = 8.0;
+
+/// Height reserved at the top of a PDF page for the drawing title, in points.
+const PDF_TITLE_BAND_PT: f64 = 24.0;
+
+/// Dark background shared by the SVG preview canvas and its title bands.
+const PREVIEW_BACKGROUND: Color = Color::rgb(14, 26, 20);
+
 /// Preview renderers this build can produce without writing a file.
 pub(crate) const SUPPORTED_PREVIEWS: &[&str] = &["svg"];
 
@@ -872,35 +881,228 @@ fn round3(value: f64) -> f64 {
     if value == 0.0 { 0.0 } else { value }
 }
 
-/// Top and bottom composite of tracks, pads and vias.
+/// Top and bottom composite of tracks, pads and vias with a title block.
 fn svg(board: &Board) -> Result<String, ServiceError> {
-    let (content, _, _) = svg_preview(board)?;
-    Ok(content)
+    let (content, width, height) = svg_preview(board)?;
+    Ok(add_title_block(board, content, width, height))
+}
+
+/// Extends an exported SVG with a title band above the board and a layer
+/// legend band below it.
+///
+/// The preview keeps its own canvas; the root `viewBox` grows upward by the
+/// title band and downward by the legend, so existing coordinates stay put.
+fn add_title_block(board: &Board, content: String, width: f64, height: f64) -> String {
+    let Some(start) = content.find("<svg")
+    else {
+        return content;
+    };
+    let Some(offset) = content[start..].find('>')
+    else {
+        return content;
+    };
+    let root_end = start + offset;
+    let Some(index) = content.rfind("</svg>")
+    else {
+        return content;
+    };
+    let legend = layout_legend(board, width, 2.5, 2.5, 2.5, 4.5);
+    let total = height + SVG_TITLE_BAND + legend.band;
+    let mut root = content[start..=root_end].to_string();
+    root = set_svg_attribute(&root, "height", &format!("{:.0}", total * SVG_PREVIEW_PX_PER_MM));
+    root = set_svg_attribute(&root, "viewBox", &format!("0 -{SVG_TITLE_BAND} {width} {total}"));
+    let background = PREVIEW_BACKGROUND.to_css();
+    let silk = layer_color(board, "F.SilkS");
+    let mut block = String::from("    <g class=\"title-block\">\n");
+    let _ = writeln!(
+        block,
+        "      <rect x=\"0\" y=\"-{SVG_TITLE_BAND}\" width=\"{width}\" height=\"{SVG_TITLE_BAND}\" fill=\"{background}\"/>"
+    );
+    let _ = writeln!(
+        block,
+        "      <rect x=\"0\" y=\"{height}\" width=\"{width}\" height=\"{:.3}\" fill=\"{background}\"/>",
+        legend.band
+    );
+    let title_size = 4.0;
+    let _ = writeln!(
+        block,
+        "      <text x=\"{:.3}\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"{title_size}\" fill=\"{}\" text-anchor=\"middle\">{}</text>",
+        width / 2.0,
+        title_size - 1.0,
+        layer_color(board, "Edge.Cuts"),
+        xml(board_title(board))
+    );
+    for (x, row, color, label) in &legend.items {
+        let y = height + legend.size * 2.0 + row;
+        if let Some(color) = color {
+            let _ = writeln!(
+                block,
+                "      <rect x=\"{x:.3}\" y=\"{:.3}\" width=\"{}\" height=\"{}\" fill=\"{color}\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
+                y - legend.swatch,
+                legend.swatch,
+                legend.swatch
+            );
+        }
+        let text_x = x + if color.is_some() { legend.swatch + legend.size * 0.4 } else { 0.0 };
+        let _ = writeln!(
+            block,
+            "      <text x=\"{text_x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"{}\" fill=\"{silk}\">{}</text>",
+            legend.size,
+            xml(label)
+        );
+    }
+    block.push_str("    </g>\n");
+    let mut result = String::with_capacity(content.len() + block.len());
+    result.push_str(&content[..start]);
+    result.push_str(&root);
+    result.push_str(&content[root_end + 1..index]);
+    result.push_str(&block);
+    result.push_str(&content[index..]);
+    result
+}
+
+/// Replaces one quoted attribute value inside the root tag.
+fn set_svg_attribute(tag: &str, attribute: &str, value: &str) -> String {
+    let needle = format!("{attribute}=\"");
+    let Some(start) = tag.find(&needle)
+    else {
+        return tag.to_string();
+    };
+    let value_start = start + needle.len();
+    let Some(offset) = tag[value_start..].find('"')
+    else {
+        return tag.to_string();
+    };
+    format!("{}{value}{}", &tag[..value_start], &tag[value_start + offset..])
+}
+
+/// Drawing title: the board title, or the board id when the document has none.
+fn board_title(board: &Board) -> &str {
+    board.title.as_deref().filter(|title| !title.is_empty()).unwrap_or(board.id.as_str())
+}
+
+/// Legend entries for the title block: colour swatch and label.
+///
+/// Swatch colours reuse the layer palette and the drill ink of the previews.
+/// The board size line follows when the document declares an outline.
+fn legend_items(board: &Board) -> Vec<(Option<String>, String)> {
+    let mut items = vec![
+        (Some(layer_color(board, "F.Cu")), "Front copper".to_string()),
+        (Some(layer_color(board, "B.Cu")), "Back copper".to_string()),
+        (Some(layer_color(board, "F.SilkS")), "Silkscreen".to_string()),
+        (Some(DRILL_COLOR.to_css()), "Drill".to_string()),
+        (Some(layer_color(board, "Edge.Cuts")), "Edge cuts".to_string()),
+    ];
+    if let Some(outline) = board.outline {
+        let scale = board.millimetres();
+        let width = (outline.to[0] - outline.from[0]) * scale;
+        let height = (outline.to[1] - outline.from[1]) * scale;
+        items.push((None, format!("Board: {} x {} mm", trim_mm(width), trim_mm(height))));
+    }
+    items
+}
+
+/// One placed legend item: x, row offset, optional swatch colour, label.
+type LegendItem = (f64, f64, Option<String>, String);
+
+/// A laid-out legend band: placed items, band height, swatch and font sizes.
+struct Legend {
+    items: Vec<LegendItem>,
+    band: f64,
+    size: f64,
+    swatch: f64,
+}
+
+/// Lays the legend items out left to right, wrapping at the canvas edge.
+///
+/// The band height fits every row with padding above the first baseline and
+/// below the last one, all in the caller's drawing units.
+fn layout_legend(board: &Board, width: f64, inset: f64, size: f64, swatch: f64, row_gap: f64) -> Legend {
+    let mut items = Vec::new();
+    let mut x = inset;
+    let mut row = 0.0;
+    for (color, label) in legend_items(board) {
+        let label_width = label.chars().count() as f64 * size * 0.6;
+        let swatch_width = if color.is_some() { swatch + size * 0.4 } else { 0.0 };
+        let item_width = swatch_width + label_width;
+        if x + item_width > width - inset && x > inset {
+            x = inset;
+            row += row_gap;
+        }
+        items.push((x, row, color, label));
+        x += item_width + size * 1.6;
+    }
+    let pad = size * 2.0;
+    Legend { items, band: pad + row + pad, size, swatch }
+}
+
+/// Formats a millimetre size without a trailing `.0`.
+fn trim_mm(value: f64) -> String {
+    let rounded = (value * 10.0).round() / 10.0;
+    if rounded == rounded.round() { (rounded as i64).to_string() } else { format!("{rounded:.1}") }
 }
 
 /// Single-page vector PDF sized to A4 landscape or to the board itself.
 ///
 /// The page uses point coordinates (1 mm = 2.834646 pt). `document-drawing`
 /// owns the geometry lowering and the PDF backend, so this writer only places
-/// the same outline, tracks, pads and vias the preview draws.
+/// the same outline, tracks, pads and vias the preview draws, plus a title
+/// band at the top and a layer legend band at the bottom.
 fn pdf(board: &Board) -> Result<Vec<u8>, ServiceError> {
     let scale = board.millimetres();
     let (min, max) = drawing_bounds(board);
     let board_width = (max[0] - min[0]) * scale * PT_PER_MM;
     let board_height = (max[1] - min[1]) * scale * PT_PER_MM;
     let page_width = A4_LANDSCAPE_PT[0].max(board_width + PDF_MARGIN_PT * 2.0);
-    let page_height = A4_LANDSCAPE_PT[1].max(board_height + PDF_MARGIN_PT * 2.0);
+    let legend = layout_legend(board, page_width, PDF_MARGIN_PT, 8.0, 6.0, 11.0);
+    let page_height = A4_LANDSCAPE_PT[1].max(board_height + PDF_MARGIN_PT * 2.0 + PDF_TITLE_BAND_PT + legend.band);
+    let slack = page_height - board_height - PDF_TITLE_BAND_PT - legend.band;
     let layout = Layout {
         scale: PT_PER_MM,
         origin_x: min[0] - (page_width - board_width) / (2.0 * PT_PER_MM),
-        origin_y: max[1] + (page_height - board_height) / (2.0 * PT_PER_MM),
+        origin_y: max[1] + (legend.band + slack / 2.0) / PT_PER_MM,
         width: page_width,
         height: page_height,
         y_up: true,
     };
-    build_drawing(board, &layout, None, true)
-        .to_pdf()
-        .map_err(|error| crate::invalid(format!("cannot render the PDF preview: {error}")))
+    let mut drawing = build_drawing(board, &layout, None, true);
+    draw_pdf_title_block(board, &mut drawing, page_width, page_height, &legend);
+    drawing.to_pdf().map_err(|error| crate::invalid(format!("cannot render the PDF preview: {error}")))
+}
+
+/// Places the title and the layer legend on a PDF page.
+///
+/// Page coordinates are points with Y growing up, so the title sits inside
+/// the band reserved at the top and the legend rows descend from the band
+/// reserved at the bottom.
+fn draw_pdf_title_block(board: &Board, drawing: &mut Drawing, page_width: f64, page_height: f64, legend: &Legend) {
+    let title_size = 11.0;
+    let title = board_title(board).to_string();
+    let title_width = title.chars().count() as f64 * title_size * 0.6;
+    drawing.push(Element::new(
+        Shape::Text {
+            at: DrawPoint::new((page_width - title_width) / 2.0, page_height - PDF_TITLE_BAND_PT + title_size - 4.0),
+            text: title,
+            size: title_size,
+        },
+        fill_style(layer_color_value(board, "Edge.Cuts")),
+    ));
+    for (x, row, color, label) in &legend.items {
+        let y = legend.band - legend.size * 2.0 - row;
+        if let Some(color) = color {
+            let corners =
+                [[*x, y + 1.0], [x + legend.swatch, y + 1.0], [x + legend.swatch, y - legend.swatch + 1.0], [*x, y - legend.swatch + 1.0]];
+            drawing.push(Element::new(
+                Shape::Polygon { points: corners.iter().map(|corner| DrawPoint::new(corner[0], corner[1])).collect() },
+                fill_style(color_from_hex(color)),
+            ));
+        }
+        let text_x = x + if color.is_some() { legend.swatch + legend.size * 0.4 } else { 0.0 };
+        drawing.push(Element::new(
+            Shape::Text { at: DrawPoint::new(text_x, y), text: label.clone(), size: legend.size },
+            fill_style(DRILL_COLOR),
+        ));
+    }
 }
 
 /// Maps board millimetres onto a drawing canvas.
@@ -1098,7 +1300,11 @@ pub(crate) fn pad_corners(footprint: &crate::board::Footprint, pad: &crate::boar
 
 /// Resolves a layer colour, falling back to the default copper tone.
 fn layer_color_value(board: &Board, layer: &str) -> Color {
-    let text = layer_color(board, layer);
+    color_from_hex(&layer_color(board, layer))
+}
+
+/// Parses a `#rrggbb` colour, falling back to the default copper tone.
+fn color_from_hex(text: &str) -> Color {
     let Some(hex) = text.strip_prefix('#').filter(|hex| hex.len() == 6)
     else {
         return Color::rgb(200, 117, 51);
@@ -1222,7 +1428,7 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
     let width = (max[0] - min[0]).max(1.0) + margin * 2.0;
     let height = (max[1] - min[1]).max(1.0) + margin * 2.0;
     let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: min[1] - margin, width, height, y_up: false };
-    let drawing = build_drawing(board, &layout, Some(Color::rgb(14, 26, 20)), false);
+    let drawing = build_drawing(board, &layout, Some(PREVIEW_BACKGROUND), false);
     let mut content = drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the SVG preview: {error}")))?;
     content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
     if !board.texts.is_empty()

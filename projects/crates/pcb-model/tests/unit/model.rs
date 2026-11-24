@@ -7529,6 +7529,22 @@ fn svg_preview_draws_footprints_and_keeps_board_y_down() {
 }
 
 #[test]
+fn svg_export_carries_the_title_layer_legend_and_board_size() {
+    let directory = TempDir::new();
+    let handle = created();
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [80.0, 50.0] }).expect("the outline is set");
+    let path = directory.join("title.svg");
+    export(handle, "svg", &path).expect("the SVG export writes");
+    let svg = fs::read_to_string(&path).expect("the SVG is readable");
+    assert!(svg.contains(">Blinker</text>"), "the title is drawn above the board");
+    for marker in ["Front copper", "Back copper", "Silkscreen", "Drill", "Edge cuts", "Board: 80 x 50 mm"] {
+        assert!(svg.contains(marker), "the legend carries {marker}");
+    }
+    assert!(svg.contains("class=\"title-block\""), "the title block is grouped");
+    close(handle).expect("the board closes");
+}
+
+#[test]
 fn fab_manifest_mirrors_the_gerber_files_and_a_clean_board_passes() {
     let directory = TempDir::new();
     let handle = created();
