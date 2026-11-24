@@ -22,7 +22,7 @@ use crate::{
     UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair, add_fiducial, add_footprint,
     add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track,
     add_via, add_waiver, add_zone, assign_net_class,
-    board::{Board, Document, Footprint, Net, Pad, Track, Via},
+    board::{Board, Document, Footprint, Net, Outline, Pad, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_fiducial, delete_footprint, delete_keepout,
     delete_net_class, delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver,
     delete_zone, drill_report, export, fab_manifest, fiducial_report, impedance_report, impedance_table, import, inspect,
@@ -2972,7 +2972,7 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
     assert!(text.contains("/Type /Catalog"));
     assert!(text.contains("/Type /Page"));
     assert!(text.contains("/Count 1"), "the PDF is a single page");
-    assert!(text.contains("/MediaBox [0 0 841.89 595.28]"), "the page is A4 landscape at 1 pt per unit");
+    assert!(text.contains("/MediaBox [0 0 841.89 595.28]"), "the page keeps its A4 landscape size");
     assert!(text.contains("startxref"));
     assert!(text.contains("trailer"));
     assert!(text.contains("%%EOF"));
@@ -3042,6 +3042,72 @@ fn pdf_export_reports_characters_the_base_font_cannot_encode() {
     let bytes = fs::read(&path).expect("the PDF is readable");
     assert!(String::from_utf8_lossy(&bytes).contains("???"), "the Chinese title degrades to question marks");
 
+    close(handle).expect("the board closes");
+}
+
+fn outlined_board(width: f64, height: f64) -> Board {
+    let mut board = crafted();
+    board.outline = Some(Outline { from: [0.0, 0.0], to: [width, height] });
+    board
+}
+
+#[test]
+fn pdf_scales_a_small_board_to_fill_the_printable_area() {
+    let board = outlined_board(72.0, 52.0);
+    let page = crate::export::pdf_page(&board);
+    assert_eq!(page.width, 841.89, "a small board keeps the A4 landscape width");
+    assert_eq!(page.height, 595.28, "a small board keeps the A4 landscape height");
+    assert!(page.scale > crate::export::PT_PER_MM, "the board is enlarged instead of drawn at 1 pt per mm");
+
+    let width_ratio = page.board_width / page.printable_width();
+    let height_ratio = page.board_height / page.printable_height();
+    assert!(width_ratio >= 0.70, "the board covers at least 70% of the printable width, got {width_ratio}");
+    assert!(height_ratio >= 0.70, "the board covers at least 70% of the printable height, got {height_ratio}");
+    assert!(height_ratio > 0.99, "the limiting axis fills the printable height, got {height_ratio}");
+
+    let left_gap = page.board_left;
+    let right_gap = page.width - page.board_left - page.board_width;
+    assert!((left_gap - right_gap).abs() < 0.01, "the board is horizontally centred: {left_gap} vs {right_gap}");
+    let bottom_gap = page.board_bottom - (page.legend_band + crate::export::PDF_MARGIN_PT);
+    let top_gap =
+        page.height - crate::export::PDF_TITLE_BAND_PT - crate::export::PDF_MARGIN_PT - (page.board_bottom + page.board_height);
+    assert!((bottom_gap - top_gap).abs() < 0.01, "the board is vertically centred: {bottom_gap} vs {top_gap}");
+
+    let handle = store::insert(board);
+    let directory = TempDir::new();
+    let path = directory.join("small.pdf");
+    export(handle, "pdf", &path).expect("PDF export writes");
+    let text = String::from_utf8_lossy(&fs::read(&path).expect("the PDF is readable")).to_string();
+    assert!(text.contains("/MediaBox [0 0 841.89 595.28]"), "the fitted board stays on one A4 landscape page");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn pdf_grows_the_page_for_a_board_larger_than_a4() {
+    let board = outlined_board(400.0, 300.0);
+    let page = crate::export::pdf_page(&board);
+    assert!(page.width > 841.89, "the page grows past the A4 width: {}", page.width);
+    assert!(page.height > 595.28, "the page grows past the A4 height: {}", page.height);
+    assert!((page.scale - crate::export::PT_PER_MM).abs() < 1e-6, "the oversized board keeps 1 pt per mm instead of shrinking");
+    assert!((page.board_width - 400.0 * crate::export::PT_PER_MM).abs() < 0.05, "the board keeps its millimetre width");
+    assert!((page.board_height - 300.0 * crate::export::PT_PER_MM).abs() < 0.05, "the board keeps its millimetre height");
+    assert!(
+        page.width >= page.board_width + crate::export::PDF_MARGIN_PT * 2.0 - 0.01,
+        "the grown page still leaves its margin around the board"
+    );
+
+    let handle = store::insert(board);
+    let directory = TempDir::new();
+    let path = directory.join("large.pdf");
+    export(handle, "pdf", &path).expect("PDF export writes");
+    let text = String::from_utf8_lossy(&fs::read(&path).expect("the PDF is readable")).to_string();
+    let num = |value: f64| {
+        let text = format!("{value:.3}");
+        let trimmed = text.trim_end_matches('0').trim_end_matches('.').to_string();
+        if trimmed.is_empty() { "0".to_string() } else { trimmed }
+    };
+    let media_box = format!("/MediaBox [0 0 {} {}]", num(page.width), num(page.height));
+    assert!(text.contains(&media_box), "the PDF page matches the planned size: {media_box}");
     close(handle).expect("the board closes");
 }
 

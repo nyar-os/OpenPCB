@@ -29,20 +29,20 @@ pub(crate) const SUPPORTED_EXPORTS: &[&str] = &[
     "png",
 ];
 
-/// Points per millimetre used by the vector PDF writer.
-const PT_PER_MM: f64 = 2.834646;
+/// Points per millimetre used by the vector PDF writer at its 1:1 scale.
+pub(crate) const PT_PER_MM: f64 = 2.834646;
 
 /// Width and height of one A4 page in landscape orientation, in points.
 const A4_LANDSCAPE_PT: [f64; 2] = [841.89, 595.28];
 
 /// Margin kept around the board inside a PDF page, in points (10 mm).
-const PDF_MARGIN_PT: f64 = 28.34646;
+pub(crate) const PDF_MARGIN_PT: f64 = 28.34646;
 
 /// Height of the title band above the board in an exported SVG, in board units.
 const SVG_TITLE_BAND: f64 = 8.0;
 
 /// Height reserved at the top of a PDF page for the drawing title, in points.
-const PDF_TITLE_BAND_PT: f64 = 24.0;
+pub(crate) const PDF_TITLE_BAND_PT: f64 = 24.0;
 
 /// Dark background shared by the SVG preview canvas and its title bands.
 const PREVIEW_BACKGROUND: Color = Color::rgb(14, 26, 20);
@@ -1169,28 +1169,23 @@ fn trim_mm(value: f64) -> String {
 /// The page uses point coordinates (1 mm = 2.834646 pt). `document-drawing`
 /// owns the geometry lowering and the PDF backend, so this writer only places
 /// the same outline, tracks, pads and vias the preview draws, plus a title
-/// band at the top and a layer legend band at the bottom.
+/// band at the top and a layer legend band at the bottom. The board is scaled
+/// to fill the printable area between those bands so a small board stays
+/// legible, while a board larger than A4 grows the page instead of shrinking.
 /// Renders the board as a one-page PDF and counts the characters outside
 /// printable ASCII that the base-14 fonts degrade to `?`.
 fn pdf(board: &Board) -> Result<(Vec<u8>, usize), ServiceError> {
-    let scale = board.millimetres();
-    let (min, max) = drawing_bounds(board);
-    let board_width = (max[0] - min[0]) * scale * PT_PER_MM;
-    let board_height = (max[1] - min[1]) * scale * PT_PER_MM;
-    let page_width = A4_LANDSCAPE_PT[0].max(board_width + PDF_MARGIN_PT * 2.0);
-    let legend = layout_legend(board, page_width, PDF_MARGIN_PT, 8.0, 6.0, 11.0);
-    let page_height = A4_LANDSCAPE_PT[1].max(board_height + PDF_MARGIN_PT * 2.0 + PDF_TITLE_BAND_PT + legend.band);
-    let slack = page_height - board_height - PDF_TITLE_BAND_PT - legend.band;
+    let page = pdf_page(board);
     let layout = Layout {
-        scale: PT_PER_MM,
-        origin_x: min[0] - (page_width - board_width) / (2.0 * PT_PER_MM),
-        origin_y: max[1] + (legend.band + slack / 2.0) / PT_PER_MM,
-        width: page_width,
-        height: page_height,
+        scale: page.scale,
+        origin_x: page.origin_x,
+        origin_y: page.origin_y,
+        width: page.width,
+        height: page.height,
         y_up: true,
     };
     let mut drawing = build_drawing(board, &layout, None, true);
-    draw_pdf_title_block(board, &mut drawing, page_width, page_height, &legend);
+    draw_pdf_title_block(board, &mut drawing, page.width, page.height, &page.legend);
     let dropped = drawing
         .elements
         .iter()
@@ -1203,6 +1198,77 @@ fn pdf(board: &Board) -> Result<(Vec<u8>, usize), ServiceError> {
         .count();
     let bytes = drawing.to_pdf().map_err(|error| crate::invalid(format!("cannot render the PDF preview: {error}")))?;
     Ok((bytes, dropped))
+}
+
+/// Planned geometry of one PDF page, in points.
+///
+/// `board_*` is the scaled drawing box already centred inside the printable
+/// region, which excludes the title band at the top, the legend band at the
+/// bottom and the page margin on every side. The crate-internal fields are
+/// readable by the regression tests that check the fit.
+#[allow(dead_code, reason = "the fit fields and helpers are asserted by the crate tests")]
+pub(crate) struct PdfPage {
+    pub(crate) width: f64,
+    pub(crate) height: f64,
+    /// Points per board millimetre applied to the drawing.
+    pub(crate) scale: f64,
+    origin_x: f64,
+    origin_y: f64,
+    pub(crate) board_width: f64,
+    pub(crate) board_height: f64,
+    pub(crate) board_left: f64,
+    pub(crate) board_bottom: f64,
+    pub(crate) legend_band: f64,
+    legend: Legend,
+}
+
+#[allow(dead_code, reason = "the fit fields and helpers are asserted by the crate tests")]
+impl PdfPage {
+    /// Width of the area the board may fill, in points.
+    pub(crate) fn printable_width(&self) -> f64 {
+        (self.width - PDF_MARGIN_PT * 2.0).max(1.0)
+    }
+
+    /// Height of the area between the title band and the legend band, in points.
+    pub(crate) fn printable_height(&self) -> f64 {
+        (self.height - PDF_MARGIN_PT * 2.0 - PDF_TITLE_BAND_PT - self.legend_band).max(1.0)
+    }
+}
+
+/// Plans the PDF page and the board placement inside it.
+///
+/// The page stays A4 landscape unless the board does not fit at one point per
+/// millimetre, in which case it grows to hold the board plus the margins and
+/// both bands. The board is then scaled to fill the printable area and centred
+/// in both directions, so a 72 x 52 mm board uses the page instead of a small
+/// patch in its middle.
+pub(crate) fn pdf_page(board: &Board) -> PdfPage {
+    let (min, max) = drawing_bounds(board);
+    let width_mm = (max[0] - min[0]).max(1e-6);
+    let height_mm = (max[1] - min[1]).max(1e-6);
+    let page_width = A4_LANDSCAPE_PT[0].max(width_mm * PT_PER_MM + PDF_MARGIN_PT * 2.0);
+    let legend = layout_legend(board, page_width, PDF_MARGIN_PT, 8.0, 6.0, 11.0);
+    let page_height = A4_LANDSCAPE_PT[1].max(height_mm * PT_PER_MM + PDF_MARGIN_PT * 2.0 + PDF_TITLE_BAND_PT + legend.band);
+    let printable_width = (page_width - PDF_MARGIN_PT * 2.0).max(1.0);
+    let printable_height = (page_height - PDF_MARGIN_PT * 2.0 - PDF_TITLE_BAND_PT - legend.band).max(1.0);
+    let scale = (printable_width / width_mm).min(printable_height / height_mm).max(PT_PER_MM);
+    let board_width = width_mm * scale;
+    let board_height = height_mm * scale;
+    let board_left = (page_width - board_width) / 2.0;
+    let board_bottom = legend.band + PDF_MARGIN_PT + (printable_height - board_height) / 2.0;
+    PdfPage {
+        width: page_width,
+        height: page_height,
+        scale,
+        origin_x: min[0] - board_left / scale,
+        origin_y: max[1] + board_bottom / scale,
+        board_width,
+        board_height,
+        board_left,
+        board_bottom,
+        legend_band: legend.band,
+        legend,
+    }
 }
 
 /// Places the title and the layer legend on a PDF page.
