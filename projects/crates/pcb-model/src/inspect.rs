@@ -70,6 +70,7 @@ pub(crate) const CHECKS: &[&str] = &[
     "pad-overlap",
     "solder-mask",
     "testpoints",
+    "stencil",
 ];
 
 /// Checks this build can actually run.
@@ -100,6 +101,7 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "pad-overlap",
     "solder-mask",
     "testpoints",
+    "stencil",
 ];
 
 /// Runs the requested checks and returns an `InspectReport`.
@@ -143,6 +145,7 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "pad-overlap" => pad_overlap(board, &mut report),
             "solder-mask" => solder_mask(board, &mut report),
             "testpoints" => testpoints(board, &mut report),
+            "stencil" => stencil(board, &mut report),
             other => report.push(finding(
                 "check/unsupported",
                 Severity::Warning,
@@ -644,6 +647,92 @@ fn solder_mask(board: &Board, issues: &mut CheckReport) {
                     ),
                 ));
             }
+        }
+    }
+}
+
+/// Checks the stencil apertures implied by the solder-paste windows of
+/// outer-layer pads.
+///
+/// The paste writer opens one rectangular window over every outer-layer pad,
+/// sized exactly to the copper pad; vias stay tented and inner copper opens no
+/// paste. Each window is measured in millimetres against the document's stencil
+/// foil thickness. The area ratio is the opening area divided by the opening
+/// perimeter times the thickness; the aspect ratio is the opening's short side
+/// divided by the thickness. A ratio below its configured minimum is reported
+/// as a warning, because a small opening fills and releases paste unreliably.
+/// Findings are emitted in pad-key order, and a ratio exactly at the minimum is
+/// accepted.
+fn stencil(board: &Board, issues: &mut CheckReport) {
+    let scale = board.millimetres();
+    let thickness = board.rules.stencil_thickness;
+    if scale <= 0.0 || thickness <= 0.0 {
+        return;
+    }
+    let min_area = board.rules.stencil_area_ratio;
+    let min_aspect = board.rules.stencil_aspect_ratio;
+    let stack = board.copper_stack();
+    let Some(front) = stack.first().copied()
+    else {
+        return;
+    };
+    let Some(back) = stack.last().copied()
+    else {
+        return;
+    };
+
+    let mut windows: Vec<(String, &str, f64, f64)> = Vec::new();
+    for footprint in &board.footprints {
+        if footprint.layer != front && footprint.layer != back {
+            continue;
+        }
+        for pad in &footprint.pads {
+            if pad.w <= 0.0 || pad.h <= 0.0 {
+                continue;
+            }
+            windows.push((format!("{}:{}", footprint.id, pad.number), footprint.layer.as_str(), pad.w * scale, pad.h * scale));
+        }
+    }
+    windows.sort_by(|left, right| left.0.cmp(&right.0));
+
+    for (key, layer, width, height) in windows {
+        let area_ratio = (width * height) / (2.0 * (width + height) * thickness);
+        let aspect_ratio = width.min(height) / thickness;
+        if area_ratio + 1e-9 < min_area {
+            let mut issue = finding(
+                "drc/stencil-area-ratio",
+                Severity::Warning,
+                board,
+                Some(layer),
+                Some(&key),
+                format!(
+                    "stencil opening of pad `{key}` is {width:.3} x {height:.3} mm with an area ratio of {area_ratio:.3}; the minimum is {min_area:.3}"
+                ),
+            );
+            issue = issue
+                .with_detail("openingWidth", format!("{width:.3}"))
+                .with_detail("openingHeight", format!("{height:.3}"))
+                .with_detail("areaRatio", format!("{area_ratio:.3}"))
+                .with_detail("stencilThickness", format!("{thickness:.3}"));
+            issues.push(issue);
+        }
+        if aspect_ratio + 1e-9 < min_aspect {
+            let mut issue = finding(
+                "drc/stencil-aspect-ratio",
+                Severity::Warning,
+                board,
+                Some(layer),
+                Some(&key),
+                format!(
+                    "stencil opening of pad `{key}` is {width:.3} x {height:.3} mm with an aspect ratio of {aspect_ratio:.3}; the minimum is {min_aspect:.3}"
+                ),
+            );
+            issue = issue
+                .with_detail("openingWidth", format!("{width:.3}"))
+                .with_detail("openingHeight", format!("{height:.3}"))
+                .with_detail("aspectRatio", format!("{aspect_ratio:.3}"))
+                .with_detail("stencilThickness", format!("{thickness:.3}"));
+            issues.push(issue);
         }
     }
 }

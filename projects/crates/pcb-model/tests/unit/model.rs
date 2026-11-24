@@ -249,6 +249,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         "pad-overlap",
         "solder-mask",
         "testpoints",
+        "stencil",
     ] {
         assert_eq!(matrix["checks"][check], "supported", "{check} check");
     }
@@ -914,6 +915,149 @@ fn solder_mask_skips_same_net_and_inner_layer_pads() {
     let back = inspect(handle, Some(vec!["solder-mask".to_string()])).expect("the check runs on the back side");
     assert_eq!(codes(&back), ["drc/solder-mask-sliver"]);
     assert_eq!(back["issues"][0]["layerId"], "B.Cu");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn stencil_flags_area_and_aspect_ratio_failures() {
+    let handle = created();
+    place_footprint(handle, "U1", "F.Cu", 0.0, 0.0, 0.0);
+    // 1.0 x 1.0 mm: area ratio 2.083 and aspect ratio 8.333 against 0.12 mm.
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the clean pad is added");
+    // 0.3 x 0.3 mm: area ratio 0.625 fails, the aspect ratio 2.5 passes.
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "2".to_string(),
+            x: 0.0,
+            y: 5.0,
+            w: 0.3,
+            h: 0.3,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the area-ratio pad is added");
+    // 0.17 x 20 mm: area ratio 0.702 passes, the aspect ratio 1.417 fails.
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "3".to_string(),
+            x: 5.0,
+            y: 0.0,
+            w: 0.17,
+            h: 20.0,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the aspect-ratio pad is added");
+
+    let check = || Some(vec!["stencil".to_string()]);
+    let report = inspect(handle, check()).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/stencil-area-ratio", "drc/stencil-aspect-ratio"]);
+    assert_eq!(report["issues"][0]["severity"], "warning");
+    assert_eq!(report["issues"][0]["layerId"], "F.Cu");
+    assert_eq!(report["issues"][0]["objectId"], "fp-1:2");
+    assert_eq!(report["issues"][0]["areaRatio"], "0.625");
+    assert_eq!(report["issues"][1]["objectId"], "fp-1:3");
+    assert_eq!(report["issues"][1]["aspectRatio"], "1.417");
+    assert_eq!(report["passed"], true, "a stencil warning does not fail the board");
+
+    let again = inspect(handle, check()).expect("the check runs a second time");
+    assert_eq!(report["issues"], again["issues"], "repeated runs are identical");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn stencil_honours_rules_and_waivers() {
+    let handle = created();
+    place_footprint(handle, "U1", "F.Cu", 0.0, 0.0, 0.0);
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.3,
+            h: 0.3,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+
+    let check = || Some(vec!["stencil".to_string()]);
+    assert_eq!(codes(&inspect(handle, check()).expect("the check runs")), ["drc/stencil-area-ratio"]);
+
+    add_waiver(
+        handle,
+        AddWaiverRequest {
+            code: "drc/stencil-area-ratio".to_string(),
+            object: Some("fp-1:1".to_string()),
+            reason: Some("prototype stencil".to_string()),
+        },
+    )
+    .expect("the finding is waived");
+    let waived = inspect(handle, check()).expect("the check runs");
+    assert_eq!(waived["issues"][0]["waived"], true);
+    assert_eq!(waived["waived"], 1);
+    assert_eq!(waived["active"], 0);
+    assert_eq!(waived["passed"], true);
+
+    let relaxed = set_rules(handle, SetRulesRequest { stencil_area_ratio: Some(0.5), ..Default::default() })
+        .expect("the area-ratio rule is relaxed");
+    assert_eq!(relaxed["object"]["stencilAreaRatio"], 0.5);
+    assert_eq!(relaxed["object"]["stencilThickness"], 0.12, "untouched stencil rules keep their value");
+    assert!(codes(&inspect(handle, check()).expect("the check runs again")).is_empty());
+
+    let zero_thickness = set_rules(handle, SetRulesRequest { stencil_thickness: Some(0.0), ..Default::default() })
+        .expect_err("a zero thickness is rejected");
+    assert_eq!(zero_thickness.code, "session/argument-invalid");
+    let negative_ratio = set_rules(handle, SetRulesRequest { stencil_aspect_ratio: Some(-1.0), ..Default::default() })
+        .expect_err("a negative ratio is rejected");
+    assert_eq!(negative_ratio.code, "session/argument-invalid");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn stencil_skips_inner_layers_and_other_checks_stay_filtered() {
+    let handle = created();
+    add_layer(handle, AddLayerRequest { name: "Inner1".to_string(), kind: Some("copper".to_string()), color: None })
+        .expect("an inner copper layer is added");
+    place_footprint(handle, "U1", "Inner1", 0.0, 0.0, 0.0);
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.3,
+            h: 0.3,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the inner pad is added");
+
+    assert!(codes(&inspect(handle, Some(vec!["stencil".to_string()])).expect("the check runs")).is_empty());
     close(handle).expect("the board closes");
 }
 
@@ -8102,7 +8246,10 @@ fn four_layer_gerber_and_drill_carry_the_via_spans() {
     let read = |name: &str| fs::read_to_string(gbr.join(name)).expect("the gerber file is readable");
     let top = read("F_Cu.gbr");
     assert!(top.contains("%TF.FileFunction,Copper,L1,Top*%"), "the top layer stays L1 in a four-layer stack");
-    assert!(top.contains("X5000000Y5000000D03*") && top.contains("X6000000Y6000000D03*"), "through and blind vias reach the top");
+    assert!(
+        top.contains("X5000000Y5000000D03*") && top.contains("X6000000Y6000000D03*"),
+        "through and blind vias reach the top"
+    );
     assert!(!top.contains("X7000000Y7000000"), "a buried via never reaches an outer layer");
     let in1 = read("In1_Cu.gbr");
     assert!(in1.contains("%TF.FileFunction,Copper,L2,Inr*%"), "the first inner layer is L2,Inr");
@@ -8116,7 +8263,10 @@ fn four_layer_gerber_and_drill_carry_the_via_spans() {
     assert!(in2.contains("X7000000Y7000000D03*") && !in2.contains("X6000000Y6000000"), "only the buried span reaches In2");
     let bottom = read("B_Cu.gbr");
     assert!(bottom.contains("%TF.FileFunction,Copper,L4,Bot*%"), "the bottom layer becomes L4");
-    assert!(bottom.contains("X5000000Y5000000D03*") && !bottom.contains("X6000000Y6000000"), "only the through via reaches the bottom");
+    assert!(
+        bottom.contains("X5000000Y5000000D03*") && !bottom.contains("X6000000Y6000000"),
+        "only the through via reaches the bottom"
+    );
 
     let drill = directory.join("stack.drl");
     let report = export(handle, "drl", &drill).expect("the drill file writes");
@@ -8153,8 +8303,11 @@ fn negative_coordinates_reach_every_fabrication_writer() {
         },
     )
     .expect("the track crosses the origin");
-    add_via(handle, AddViaRequest { net: Some("VCC".to_string()), at: [-3.0, -4.0], diameter: 0.6, drill: 0.3, ..Default::default() })
-        .expect("the via is placed in a negative quadrant");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [-3.0, -4.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed in a negative quadrant");
     add_footprint(
         handle,
         AddFootprintRequest {
@@ -8204,7 +8357,9 @@ fn negative_coordinates_reach_every_fabrication_writer() {
     let text = fs::read_to_string(&netlist).expect("the netlist is readable");
     assert!(text.contains("X-003000Y-004000"), "the probe coordinate carries its sign; got {text}");
 
-    for (format, name) in [("svg", "negative.svg"), ("pdf", "negative.pdf"), ("kicad_pcb", "negative.kicad_pcb"), ("ipc2581", "negative.xml")] {
+    for (format, name) in
+        [("svg", "negative.svg"), ("pdf", "negative.pdf"), ("kicad_pcb", "negative.kicad_pcb"), ("ipc2581", "negative.xml")]
+    {
         let path = directory.join(name);
         export(handle, format, &path).unwrap_or_else(|error| panic!("`{format}` failed: {}", error.message));
         assert!(fs::metadata(&path).expect("the file exists").len() > 0, "`{format}` wrote an empty file");
@@ -8239,15 +8394,7 @@ fn mil_board_writes_millimetre_gerber_geometry() {
         y: 2000.0,
         rotation: 0.0,
         layer: "F.Cu".to_string(),
-        pads: vec![Pad {
-            number: "1".to_string(),
-            x: 0.0,
-            y: 0.0,
-            w: 400.0,
-            h: 200.0,
-            net: None,
-            drill: None,
-        }],
+        pads: vec![Pad { number: "1".to_string(), x: 0.0, y: 0.0, w: 400.0, h: 200.0, net: None, drill: None }],
     });
     let handle = store::insert(board);
     let directory = TempDir::new();

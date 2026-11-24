@@ -556,10 +556,20 @@ const DEFAULT_HOLE_TO_EDGE_MM: f64 = 0.3;
 /// Default solder-mask expansion around a pad, per side and in mm.
 const DEFAULT_SOLDER_MASK_EXPANSION_MM: f64 = 0.05;
 
+/// Default stencil foil thickness, in mm.
+const DEFAULT_STENCIL_THICKNESS_MM: f64 = 0.12;
+
+/// Default minimum stencil opening area ratio.
+const DEFAULT_STENCIL_AREA_RATIO: f64 = 0.66;
+
+/// Default minimum stencil opening aspect ratio.
+const DEFAULT_STENCIL_ASPECT_RATIO: f64 = 1.5;
+
 /// Design-rule values the inspection checks read.
 ///
-/// Every field carries a serde default, so documents written before the rules
-/// existed reopen with the documented values instead of zeroed ones.
+/// Distances are in millimetres and ratios are dimensionless. Every field
+/// carries a serde default, so documents written before the rules existed
+/// reopen with the documented values instead of zeroed ones.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct DesignRules {
@@ -573,6 +583,14 @@ pub(crate) struct DesignRules {
     pub(crate) hole_to_edge: f64,
     /// Solder-mask expansion around each pad, per side and in millimetres.
     pub(crate) solder_mask_expansion: f64,
+    /// Stencil foil thickness, in millimetres.
+    pub(crate) stencil_thickness: f64,
+    /// Minimum stencil opening area ratio: opening area divided by the
+    /// opening perimeter times the thickness.
+    pub(crate) stencil_area_ratio: f64,
+    /// Minimum stencil opening aspect ratio: short side divided by the
+    /// thickness.
+    pub(crate) stencil_aspect_ratio: f64,
 }
 
 impl Default for DesignRules {
@@ -583,6 +601,9 @@ impl Default for DesignRules {
             component_to_edge: DEFAULT_COMPONENT_TO_EDGE_MM,
             hole_to_edge: DEFAULT_HOLE_TO_EDGE_MM,
             solder_mask_expansion: DEFAULT_SOLDER_MASK_EXPANSION_MM,
+            stencil_thickness: DEFAULT_STENCIL_THICKNESS_MM,
+            stencil_area_ratio: DEFAULT_STENCIL_AREA_RATIO,
+            stencil_aspect_ratio: DEFAULT_STENCIL_ASPECT_RATIO,
         }
     }
 }
@@ -2597,6 +2618,9 @@ impl Board {
             && request.component_to_edge.is_none()
             && request.hole_to_edge.is_none()
             && request.solder_mask_expansion.is_none()
+            && request.stencil_thickness.is_none()
+            && request.stencil_area_ratio.is_none()
+            && request.stencil_aspect_ratio.is_none()
         {
             return Err(crate::argument("a rules update needs at least one design rule value"));
         }
@@ -2615,6 +2639,15 @@ impl Board {
         }
         if let Some(value) = request.solder_mask_expansion {
             rules.solder_mask_expansion = non_negative(value, "solderMaskExpansion")?;
+        }
+        if let Some(value) = request.stencil_thickness {
+            rules.stencil_thickness = positive(value, "stencilThickness")?;
+        }
+        if let Some(value) = request.stencil_area_ratio {
+            rules.stencil_area_ratio = positive(value, "stencilAreaRatio")?;
+        }
+        if let Some(value) = request.stencil_aspect_ratio {
+            rules.stencil_aspect_ratio = positive(value, "stencilAspectRatio")?;
         }
         self.rules = rules;
         self.revision += 1;
@@ -3000,6 +3033,16 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
         checks(value, &format!("design rule `{field}`"))?;
         if value < 0.0 {
             return Err(crate::invalid(format!("design rule `{field}` must not be negative")));
+        }
+    }
+    for (value, field) in [
+        (board.rules.stencil_thickness, "stencilThickness"),
+        (board.rules.stencil_area_ratio, "stencilAreaRatio"),
+        (board.rules.stencil_aspect_ratio, "stencilAspectRatio"),
+    ] {
+        checks(value, &format!("design rule `{field}`"))?;
+        if value <= 0.0 {
+            return Err(crate::invalid(format!("design rule `{field}` must be greater than zero")));
         }
     }
     if let Some(stackup) = &board.stackup {
@@ -4077,6 +4120,12 @@ pub struct SetRulesRequest {
     pub hole_to_edge: Option<f64>,
     /// Solder-mask expansion around each pad, per side and in millimetres.
     pub solder_mask_expansion: Option<f64>,
+    /// Stencil foil thickness, in millimetres; greater than zero.
+    pub stencil_thickness: Option<f64>,
+    /// Minimum stencil opening area ratio; greater than zero.
+    pub stencil_area_ratio: Option<f64>,
+    /// Minimum stencil opening aspect ratio; greater than zero.
+    pub stencil_aspect_ratio: Option<f64>,
 }
 
 /// Request of [`crate::set_stackup`].
