@@ -2793,7 +2793,7 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
     assert!(
         fs::read_to_string(gbr.join("F_SilkS.gbr"))
             .expect("the front silkscreen is readable")
-            .contains("%TF.FileFunction,Legend,Top*%")
+            .contains("%TF.FileFunction,Silkscreen,Top*%")
     );
     assert!(
         fs::read_to_string(gbr.join("B_Mask.gbr"))

@@ -74,10 +74,11 @@ pub(crate) fn manifest(board: &Board) -> Value {
                 format!("silkscreen layer `{layer_id}` is not declared; its Gerber file is written empty"),
             ));
         }
-        let objects = board.tracks.iter().filter(|track| track.layer == layer_id).count();
+        let objects = board.tracks.iter().filter(|track| track.layer == layer_id).count()
+            + board.texts.iter().filter(|text| text.layer == layer_id).count();
         files.push(PlannedFile {
             name: gerber_name(layer_id),
-            function: format!("Legend,{side}"),
+            function: format!("Silkscreen,{side}"),
             kind: "silkscreen",
             layer: Some(layer_id.to_string()),
             objects,

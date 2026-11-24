@@ -250,8 +250,8 @@ fn aperture_function(file_function: &str) -> &'static str {
     if file_function.starts_with("Copper") {
         "Conductor"
     }
-    else if file_function.starts_with("Legend") {
-        "Legend"
+    else if file_function.starts_with("Silkscreen") {
+        "ElectronicLabel"
     }
     else if file_function.starts_with("Soldermask") {
         "Soldermask"
@@ -358,7 +358,8 @@ fn copper(board: &Board, layer: &str) -> String {
 }
 
 /// Writes one silkscreen layer: the document stores legend geometry as tracks
-/// on the same layer ids the copper stack uses.
+/// on the same layer ids the copper stack uses, plus legend text rendered as
+/// stroke segments of the built-in 5×7 font.
 fn silkscreen(board: &Board, layer: &str) -> String {
     let scale = board.millimetres();
     let mut gerber = Gerber::default();
@@ -369,8 +370,54 @@ fn silkscreen(board: &Board, layer: &str) -> String {
             [track.to[0] * scale, track.to[1] * scale],
         );
     }
+    for text in board.texts.iter().filter(|text| text.layer == layer) {
+        gerber_text(&mut gerber, text, scale);
+    }
     let position = if layer.starts_with("B.") { "Bot" } else { "Top" };
-    gerber.render(&format!("Legend,{position}"))
+    gerber.render(&format!("Silkscreen,{position}"))
+}
+
+/// Renders one legend text as horizontal stroke runs of the 5×7 glyph bitmap.
+/// The anchor is the left end of the baseline; positive rotation turns the text
+/// counter-clockwise, matching the SVG and PDF projections.
+fn gerber_text(gerber: &mut Gerber, text: &crate::board::TextItem, scale: f64) {
+    let unit = text.size / 7.0;
+    if !(unit > 0.0) {
+        return;
+    }
+    let stroke = if text.thickness > 0.0 { text.thickness } else { unit };
+    let definition = format!("C,{:.6}", stroke * scale);
+    let angle = text.rotation.to_radians();
+    let cos = angle.cos();
+    let sin = angle.sin();
+    let point = |dx: f64, dy: f64| [(text.at[0] + dx * cos + dy * sin) * scale, (text.at[1] - dx * sin + dy * cos) * scale];
+    let mut cursor = 0.0;
+    for character in text.text.chars() {
+        let Some(rows) = glyph(character) else {
+            cursor += 6.0 * unit;
+            continue;
+        };
+        for (row, bits) in rows.iter().enumerate() {
+            let mut column = 0;
+            while column < 5 {
+                if bits & (0b10000 >> column) == 0 {
+                    column += 1;
+                    continue;
+                }
+                let start = column;
+                while column < 5 && bits & (0b10000 >> column) != 0 {
+                    column += 1;
+                }
+                let dy = -(6.5 - row as f64) * unit;
+                gerber.draw(
+                    definition.clone(),
+                    point(cursor + start as f64 * unit, dy),
+                    point(cursor + column as f64 * unit, dy),
+                );
+            }
+        }
+        cursor += 6.0 * unit;
+    }
 }
 
 /// Writes one solder-mask layer: every pad on the matching copper side is a
