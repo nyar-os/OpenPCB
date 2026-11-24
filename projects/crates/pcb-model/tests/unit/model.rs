@@ -7937,3 +7937,37 @@ fn testpoint_coverage_classifies_covered_uncovered_and_unconnected_nets() {
     let missing = testpoint_coverage(handle).expect_err("a closed handle is rejected");
     assert_eq!(missing.code, "board/not-found");
 }
+
+#[test]
+fn empty_board_exports_every_supported_format_without_panic() {
+    let dir = TempDir::new();
+    let handle = store::insert(crafted());
+    for format in [
+        "gbr",
+        "drl",
+        "drill_map",
+        "bom",
+        "pos",
+        "placement",
+        "testpoints",
+        "ipc_d_356",
+        "svg",
+        "pdf",
+        "kicad_pcb",
+        "ipc2581",
+        "png",
+    ] {
+        let target = dir.join(&format!("empty.{format}"));
+        let result = export(handle, format, &target);
+        if matches!(format, "gbr" | "png") {
+            let error = result.expect_err("`{format}` should need an outline");
+            assert_eq!(error.code, "format/invalid", "{format} error code");
+        }
+        else {
+            let report = result.unwrap_or_else(|error| panic!("`{format}` failed: {}", error.message));
+            let bytes = report["bytes"].as_u64().expect("the report counts bytes");
+            assert!(bytes > 0, "`{format}` wrote an empty file for an empty board");
+        }
+    }
+    close(handle).expect("the board closes");
+}
