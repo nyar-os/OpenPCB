@@ -89,6 +89,8 @@ open-pcb inspect <file> [--checks <list>]
 `--checks` is a comma-separated list. Omitting it runs every supported check.
 Exit code is `1` when `passed` is false. `solder-mask` reports merged mask
 openings of different nets as errors and mask webs under 0.1 mm as warnings.
+`stencil` reports outer-layer paste openings whose area ratio or aspect ratio is
+below the stencil design-rule minimum; both are warnings.
 
 ```bash
 open-pcb inspect board.opcb --checks drc,connectivity,unrouted
@@ -430,6 +432,8 @@ The outline is one rectangle.
 open-pcb rules show <file>
 open-pcb rules set <file> [--hole-clearance <mm>] [--copper-to-edge <mm>]
     [--component-to-edge <mm>] [--hole-to-edge <mm>] [--solder-mask-expansion <mm>]
+    [--stencil-thickness <mm>] [--stencil-area-ratio <ratio>]
+    [--stencil-aspect-ratio <ratio>]
 
 open-pcb stackup set <file> --copper-thickness <mm> --dielectric-height <mm>
     --dielectric-constant <er>
@@ -453,7 +457,9 @@ open-pcb stackup report <file>
     [--copper-thickness <mm>]
 ```
 
-`rules set` needs at least one option. `stackup set` needs all three values;
+`rules set` needs at least one option. `--stencil-thickness` defaults to
+0.12 mm, and the area-ratio and aspect-ratio minima default to 0.66 and 1.5; all
+three must be greater than zero, and the ratios are dimensionless. `stackup set` needs all three values;
 `--dielectric-constant` must be at least 1. `stackup impedance` needs a positive
 `--width`; `stackup width` needs a positive `--impedance`. `--gap` is required
 for `diffMicrostrip` and `diffStripline`, and rejected for the single-ended

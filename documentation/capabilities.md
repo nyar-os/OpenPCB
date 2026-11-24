@@ -57,7 +57,7 @@ outline          silkscreen         courtyard          netlist
 hole-to-hole     hole-to-track      hole-to-pad        copper-to-edge
 edge-clearance   silkscreen-over-pad diffpair          dangling-copper
 netclass         keepout            via-in-pad         pad-overlap
-solder-mask      testpoints
+solder-mask      testpoints         stencil
 ```
 
 `annular_rings` and `annular-ring` are both accepted spellings.
@@ -90,6 +90,17 @@ error, because no mask separates the nets; a web narrower than 0.1 mm reports
 thermal or merged same-net opening stays clean, and a web at exactly 0.1 mm is
 accepted.
 
+`stencil` measures the solder-paste windows of outer-layer pads. Each window is
+the pad's copper rectangle, because the paste writer applies no expansion and
+vias stay tented. The area ratio is the opening area divided by the opening
+perimeter times the stencil thickness; the aspect ratio is the opening's short
+side divided by the thickness. An area ratio below 0.66 reports
+`drc/stencil-area-ratio` and an aspect ratio below 1.5 reports
+`drc/stencil-aspect-ratio`, both as warnings. The foil thickness, area-ratio
+minimum and aspect-ratio minimum are design rules and default to 0.12 mm, 0.66
+and 1.5. The model stores rectangular pads, so every window is measured as a
+rectangle; there is no round or polygon aperture geometry to approximate.
+
 ## Feature matrix
 
 | Capability | Level |
@@ -119,6 +130,7 @@ accepted.
 | Fabrication file manifest (`fab manifest`, `Board.fabManifest`) | `supported` |
 | Panelization (`panel`, `Board.panelize`) | `supported` |
 | Solder-mask aperture check (`solder-mask`) | `supported` |
+| Stencil aperture check (`stencil`) | `supported` |
 | Panel tooling holes and breakaway report (`panel`) | `supported` |
 | Polygon outline geometry (`Board.outlineGeometry`, SDK only) | `supported` |
 | Net classes (checks and opt-in routing targets, editable in place) | `supported` |
@@ -325,6 +337,13 @@ being approximated.
   copper are not compared. The Gerber mask writer still emits an unrotated
   rectangle per pad, so a rotated pad is measured by the check's rotated box
   rather than by the written aperture.
+- `stencil` reads the paste windows the paste writer implies: each outer-layer
+  pad's rectangle sized to the copper pad, with no expansion. The check measures
+  the area ratio and the short-side aspect ratio in millimetres against the
+  stencil design rules; both findings are warnings. Inner copper and vias open
+  no paste and are skipped, and the pad's stored rectangle is measured directly,
+  so footprint rotation does not change either ratio. The model has no round or
+  polygon pad aperture, so an odd-shaped opening cannot occur.
 - `diffpair` infers pairs from net naming only: one shared base name with `_P`
   and `_N` (or `+` and `-`). Length is the sum of straight track segments, so
   via barrels and copper inside pads are not counted. An inferred pair uses the
