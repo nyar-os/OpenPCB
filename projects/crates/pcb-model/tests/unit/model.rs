@@ -7971,3 +7971,292 @@ fn empty_board_exports_every_supported_format_without_panic() {
     }
     close(handle).expect("the board closes");
 }
+
+#[test]
+fn gerber_pads_follow_footprint_rotation() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("R1".to_string()),
+            value: Some("10k".to_string()),
+            footprint: Some("0603".to_string()),
+            x: Some(10.0),
+            y: Some(10.0),
+            rotation: Some(90.0),
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the quarter-turn footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 2.0,
+            y: 0.0,
+            w: 1.0,
+            h: 0.5,
+            net: Some("VCC".to_string()),
+            drill: Some(0.3),
+        },
+    )
+    .expect("the pad is added");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("R2".to_string()),
+            value: Some("22k".to_string()),
+            footprint: Some("0805".to_string()),
+            x: Some(20.0),
+            y: Some(20.0),
+            rotation: Some(45.0),
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the angled footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-2".to_string(),
+            number: "1".to_string(),
+            x: 2.0,
+            y: 0.0,
+            w: 2.0,
+            h: 1.0,
+            net: Some("VCC".to_string()),
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+
+    let directory = TempDir::new();
+    let gbr = directory.join("gerber");
+    export(handle, "gbr", &gbr).expect("the gerber directory writes");
+    let copper = fs::read_to_string(gbr.join("F_Cu.gbr")).expect("the copper layer is readable");
+    assert!(copper.contains("%ADD10R,0.500000X1.000000*%"), "a quarter turn swaps the aperture sides; got {copper}");
+    assert!(copper.contains("X10000000Y12000000D03*"), "the rotated pad lands at its folded centre; got {copper}");
+    assert!(copper.contains("G36*"), "the angled pad is drawn as a region; got {copper}");
+    assert!(copper.contains("X21060660Y20353553D02*"), "the region starts at the rotated corner; got {copper}");
+    let mask = fs::read_to_string(gbr.join("F_Mask.gbr")).expect("the mask layer is readable");
+    assert!(mask.contains("%ADD10R,0.600000X1.100000*%"), "the mask opening keeps the swap and the expansion; got {mask}");
+    assert!(mask.contains("X10000000Y12000000D03*"), "the mask opening follows the rotated centre; got {mask}");
+    let paste = fs::read_to_string(gbr.join("F_Paste.gbr")).expect("the paste layer is readable");
+    assert!(paste.contains("X10000000Y12000000D03*"), "the stencil window follows the rotated centre; got {paste}");
+    assert!(paste.contains("G36*"), "the angled pad opens a rotated stencil window; got {paste}");
+
+    let drill = directory.join("rotated.drl");
+    export(handle, "drl", &drill).expect("the drill file writes");
+    let text = fs::read_to_string(&drill).expect("the drill file is readable");
+    assert!(text.contains("X10.000Y12.000"), "the drilled pad hits the same centre as the copper; got {text}");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn four_layer_gerber_and_drill_carry_the_via_spans() {
+    let handle = created();
+    inner_layers(handle, &["In1.Cu", "In2.Cu"]);
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("VCC".to_string()),
+            layer: "In1.Cu".to_string(),
+            width: 0.2,
+            from: [10.0, 10.0],
+            to: [40.0, 10.0],
+        },
+    )
+    .expect("the inner track is routed");
+    for (at, from, to) in
+        [([5.0, 5.0], None, None), ([6.0, 6.0], Some("F.Cu"), Some("In1.Cu")), ([7.0, 7.0], Some("In1.Cu"), Some("In2.Cu"))]
+    {
+        add_via(
+            handle,
+            AddViaRequest {
+                net: Some("VCC".to_string()),
+                at,
+                diameter: 0.6,
+                drill: 0.3,
+                from_layer: from.map(str::to_string),
+                to_layer: to.map(str::to_string),
+                ..Default::default()
+            },
+        )
+        .expect("the via is placed");
+    }
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [50.0, 40.0] }).expect("the outline is set");
+
+    let directory = TempDir::new();
+    let gbr = directory.join("gerber");
+    let report = export(handle, "gbr", &gbr).expect("the gerber directory writes");
+    let names = report["artifacts"]
+        .as_array()
+        .expect("artifacts is an array")
+        .iter()
+        .map(|item| item["name"].as_str().expect("a name").to_string())
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"In1_Cu.gbr".to_string()) && names.contains(&"In2_Cu.gbr".to_string()), "inner layers are written");
+    let read = |name: &str| fs::read_to_string(gbr.join(name)).expect("the gerber file is readable");
+    let top = read("F_Cu.gbr");
+    assert!(top.contains("%TF.FileFunction,Copper,L1,Top*%"), "the top layer stays L1 in a four-layer stack");
+    assert!(top.contains("X5000000Y5000000D03*") && top.contains("X6000000Y6000000D03*"), "through and blind vias reach the top");
+    assert!(!top.contains("X7000000Y7000000"), "a buried via never reaches an outer layer");
+    let in1 = read("In1_Cu.gbr");
+    assert!(in1.contains("%TF.FileFunction,Copper,L2,Inr*%"), "the first inner layer is L2,Inr");
+    assert!(
+        in1.contains("X5000000Y5000000D03*") && in1.contains("X6000000Y6000000D03*") && in1.contains("X7000000Y7000000D03*"),
+        "every via span covers the first inner layer"
+    );
+    assert!(in1.contains("D01*"), "the inner track is drawn on its own layer");
+    let in2 = read("In2_Cu.gbr");
+    assert!(in2.contains("%TF.FileFunction,Copper,L3,Inr*%"), "the second inner layer is L3,Inr");
+    assert!(in2.contains("X7000000Y7000000D03*") && !in2.contains("X6000000Y6000000"), "only the buried span reaches In2");
+    let bottom = read("B_Cu.gbr");
+    assert!(bottom.contains("%TF.FileFunction,Copper,L4,Bot*%"), "the bottom layer becomes L4");
+    assert!(bottom.contains("X5000000Y5000000D03*") && !bottom.contains("X6000000Y6000000"), "only the through via reaches the bottom");
+
+    let drill = directory.join("stack.drl");
+    let report = export(handle, "drl", &drill).expect("the drill file writes");
+    assert_eq!(report["losses"][0]["code"], "drl/partial-span-via", "partial spans are a reported loss");
+    let text = fs::read_to_string(&drill).expect("the drill file is readable");
+    assert!(
+        text.contains("X5.000Y5.000") && text.contains("X6.000Y6.000") && text.contains("X7.000Y7.000"),
+        "every via still contributes a hit; got {text}"
+    );
+    close(handle).expect("the board closes");
+
+    let plain = created();
+    add_via(plain, AddViaRequest { at: [5.0, 5.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the through via is placed");
+    let through_drill = directory.join("through.drl");
+    let report = export(plain, "drl", &through_drill).expect("the through drill file writes");
+    assert!(report.get("losses").is_none(), "a through-only board loses nothing");
+    close(plain).expect("the board closes");
+}
+
+#[test]
+fn negative_coordinates_reach_every_fabrication_writer() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    set_outline(handle, SetOutlineRequest { from: [-30.0, -20.0], to: [30.0, 20.0] }).expect("the outline is set");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("VCC".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [-10.0, -5.0],
+            to: [10.0, 5.0],
+        },
+    )
+    .expect("the track crosses the origin");
+    add_via(handle, AddViaRequest { net: Some("VCC".to_string()), at: [-3.0, -4.0], diameter: 0.6, drill: 0.3, ..Default::default() })
+        .expect("the via is placed in a negative quadrant");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("C1".to_string()),
+            value: Some("100n".to_string()),
+            footprint: Some("0402".to_string()),
+            x: Some(-15.0),
+            y: Some(-10.0),
+            rotation: Some(0.0),
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the footprint is placed");
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 2.0,
+            y: 1.0,
+            w: 1.0,
+            h: 1.0,
+            net: Some("VCC".to_string()),
+            drill: Some(0.4),
+        },
+    )
+    .expect("the pad is added");
+
+    let directory = TempDir::new();
+    let gbr = directory.join("gerber");
+    export(handle, "gbr", &gbr).expect("the gerber directory writes");
+    let copper = fs::read_to_string(gbr.join("F_Cu.gbr")).expect("the copper layer is readable");
+    assert!(copper.contains("X-10000000Y-5000000D02*"), "the track keeps its negative start; got {copper}");
+    assert!(copper.contains("X-3000000Y-4000000D03*"), "the via keeps its negative centre; got {copper}");
+    assert!(copper.contains("X-13000000Y-9000000D03*"), "the pad keeps its negative centre; got {copper}");
+    let edges = fs::read_to_string(gbr.join("Edge_Cuts.gbr")).expect("edge cuts are readable");
+    assert!(edges.contains("X-30000000Y-20000000D02*"), "the outline keeps its negative corner; got {edges}");
+
+    let drill = directory.join("negative.drl");
+    export(handle, "drl", &drill).expect("the drill file writes");
+    let text = fs::read_to_string(&drill).expect("the drill file is readable");
+    assert!(text.contains("X-3.000Y-4.000"), "the via hit keeps its sign; got {text}");
+    assert!(text.contains("X-13.000Y-9.000"), "the pad hit keeps its sign; got {text}");
+
+    let netlist = directory.join("negative.ipc");
+    export(handle, "ipc_d_356", &netlist).expect("the netlist writes");
+    let text = fs::read_to_string(&netlist).expect("the netlist is readable");
+    assert!(text.contains("X-003000Y-004000"), "the probe coordinate carries its sign; got {text}");
+
+    for (format, name) in [("svg", "negative.svg"), ("pdf", "negative.pdf"), ("kicad_pcb", "negative.kicad_pcb"), ("ipc2581", "negative.xml")] {
+        let path = directory.join(name);
+        export(handle, format, &path).unwrap_or_else(|error| panic!("`{format}` failed: {}", error.message));
+        assert!(fs::metadata(&path).expect("the file exists").len() > 0, "`{format}` wrote an empty file");
+    }
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn gerber_rejects_coordinates_beyond_its_declared_format() {
+    let handle = created();
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [12_000.0, 80.0] }).expect("the oversized outline is set");
+    let directory = TempDir::new();
+    let gbr = directory.join("gerber");
+    let error = export(handle, "gbr", &gbr).expect_err("coordinates beyond 4.6 must fail instead of misparsing");
+    assert_eq!(error.code, "format/invalid", "the error names the format");
+    assert!(error.message.contains("4.6"), "the error explains the declared format; got {}", error.message);
+    assert!(!gbr.join("F_Cu.gbr").exists(), "no layer file is written for a rejected export");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn mil_board_writes_millimetre_gerber_geometry() {
+    let mut board = crafted();
+    board.units = crate::board::Units::Mil;
+    board.outline = Some(crate::board::Outline { from: [0.0, 0.0], to: [4000.0, 3000.0] });
+    board.footprints.push(Footprint {
+        id: "fp-mil".to_string(),
+        ref_: "U1".to_string(),
+        value: String::new(),
+        footprint: String::new(),
+        x: 1000.0,
+        y: 2000.0,
+        rotation: 0.0,
+        layer: "F.Cu".to_string(),
+        pads: vec![Pad {
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 400.0,
+            h: 200.0,
+            net: None,
+            drill: None,
+        }],
+    });
+    let handle = store::insert(board);
+    let directory = TempDir::new();
+    let gbr = directory.join("gerber");
+    export(handle, "gbr", &gbr).expect("the mil board exports");
+    let copper = fs::read_to_string(gbr.join("F_Cu.gbr")).expect("the copper layer is readable");
+    assert!(copper.contains("%ADD10R,10.160000X5.080000*%"), "pad sizes are converted to millimetres; got {copper}");
+    assert!(copper.contains("X25400000Y50800000D03*"), "placement is converted to millimetres; got {copper}");
+    let mask = fs::read_to_string(gbr.join("F_Mask.gbr")).expect("the mask layer is readable");
+    assert!(mask.contains("%ADD10R,10.260000X5.180000*%"), "the millimetre rule expands after the unit scale; got {mask}");
+    close(handle).expect("the board closes");
+}

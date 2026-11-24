@@ -185,6 +185,13 @@ being approximated.
 - PDF text uses the base-14 Helvetica encoding, so characters outside printable
   ASCII degrade to `?`. The export then reports one `pdf/text-encoding` loss
   with the dropped character count; `svg` keeps full Unicode.
+- One Excellon file cannot carry per-hole depth, so blind, buried and micro
+  vias are drilled as through holes. The export then reports one
+  `drl/partial-span-via` loss with the affected count; `ipc2581` keeps the
+  exact spans.
+- Gerber files declare the 4.6 coordinate format. A board whose geometry
+  exceeds ±9999.999999 mm fails the `gbr` export with a clear error instead of
+  writing coordinates a reader would misparse.
 - PNG is a fixed 1024 × 768 top-down raster. It draws copper, silkscreen
   outlines and text through a built-in 5 × 7 font, but has no viewport and no
   anti-aliasing.

@@ -66,7 +66,16 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
     }
     let mut losses = Vec::new();
     let content = match format {
-        "drl" => drill(board).into_bytes(),
+        "drl" => {
+            let partial = board.vias.iter().filter(|via| board.via_kind(via) != "through").count();
+            if partial > 0 {
+                losses.push(json!({
+                    "code": "drl/partial-span-via",
+                    "detail": format!("{partial} blind, buried or micro via(s) are written as through holes; one Excellon file cannot carry per-hole depth, export `ipc2581` for the exact spans"),
+                }));
+            }
+            drill(board).into_bytes()
+        }
         "drill_map" => drill_map(board).into_bytes(),
         "bom" => bom(board).into_bytes(),
         "pos" => position(board).into_bytes(),
@@ -122,14 +131,20 @@ fn gerber(board: &Board, path: &Path) -> Result<Value, ServiceError> {
         fs::create_dir_all(path).map_err(|error| crate::invalid(format!("cannot create `{}`: {error}", path.display())))?;
     }
 
-    let mut files = board.copper_stack().into_iter().map(|id| (gerber_name(id), copper(board, id))).collect::<Vec<_>>();
-    files.push(("F_SilkS.gbr".to_string(), silkscreen(board, "F.SilkS")));
-    files.push(("B_SilkS.gbr".to_string(), silkscreen(board, "B.SilkS")));
-    files.push(("F_Mask.gbr".to_string(), solder_mask(board, "F.Cu")));
-    files.push(("B_Mask.gbr".to_string(), solder_mask(board, "B.Cu")));
-    files.push(("F_Paste.gbr".to_string(), solder_paste(board, "F.Cu")));
-    files.push(("B_Paste.gbr".to_string(), solder_paste(board, "B.Cu")));
-    files.push(("Edge_Cuts.gbr".to_string(), edge_cuts(outline.from, outline.to, board.millimetres())));
+    let mut drafts = board.copper_stack().into_iter().map(|id| (gerber_name(id), copper(board, id))).collect::<Vec<_>>();
+    drafts.push(("F_SilkS.gbr".to_string(), silkscreen(board, "F.SilkS")));
+    drafts.push(("B_SilkS.gbr".to_string(), silkscreen(board, "B.SilkS")));
+    drafts.push(("F_Mask.gbr".to_string(), solder_mask(board, "F.Cu")));
+    drafts.push(("B_Mask.gbr".to_string(), solder_mask(board, "B.Cu")));
+    drafts.push(("F_Paste.gbr".to_string(), solder_paste(board, "F.Cu")));
+    drafts.push(("B_Paste.gbr".to_string(), solder_paste(board, "B.Cu")));
+    drafts.push(("Edge_Cuts.gbr".to_string(), edge_cuts(outline.from, outline.to, board.millimetres())));
+    if drafts.iter().any(|(_, (_, out_of_range))| *out_of_range) {
+        return Err(crate::invalid(
+            "a coordinate exceeds the ±9999.999999 mm range of the declared 4.6 Gerber format; keep the board inside a 10 m panel",
+        ));
+    }
+    let files: Vec<(String, String)> = drafts.into_iter().map(|(name, (content, _))| (name, content)).collect();
     let mut artifacts = Vec::new();
     let mut total = 0u64;
     for (name, content) in files {
@@ -152,6 +167,8 @@ fn gerber(board: &Board, path: &Path) -> Result<Value, ServiceError> {
 struct Gerber {
     apertures: Vec<String>,
     body: String,
+    /// Whether any coordinate exceeds the declared `X46Y46` format.
+    out_of_range: bool,
 }
 
 impl Gerber {
@@ -171,6 +188,9 @@ impl Gerber {
     /// Draws one segment with optional X2 object attributes.
     fn draw_with(&mut self, definition: String, from: [f64; 2], to: [f64; 2], attributes: &[String]) {
         let code = self.aperture(definition);
+        for value in [from[0], from[1], to[0], to[1]] {
+            self.note(value);
+        }
         for attribute in attributes {
             self.body.push_str(attribute);
         }
@@ -185,18 +205,59 @@ impl Gerber {
         self.close_attributes(attributes);
     }
 
-    fn flash(&mut self, definition: String, at: [f64; 2]) {
-        self.flash_with(definition, at, &[]);
-    }
-
     /// Flashes one aperture with optional X2 object attributes.
     fn flash_with(&mut self, definition: String, at: [f64; 2], attributes: &[String]) {
         let code = self.aperture(definition);
+        self.note(at[0]);
+        self.note(at[1]);
         for attribute in attributes {
             self.body.push_str(attribute);
         }
         let _ = writeln!(self.body, "D{code}*\nX{}Y{}D03*", gerber_number(at[0]), gerber_number(at[1]));
         self.close_attributes(attributes);
+    }
+
+    /// Marks a coordinate the declared `X46Y46` format cannot carry.
+    fn note(&mut self, value: f64) {
+        if !value.is_finite() || value.abs() > 9_999.999_999 {
+            self.out_of_range = true;
+        }
+    }
+
+    /// Draws one footprint pad honouring the footprint rotation.
+    ///
+    /// An axis-aligned footprint flashes its rectangle, swapping the aperture
+    /// sides at a quarter turn; any other angle draws the rotated rectangle as
+    /// a `G36` region so the copper lands where the pad actually sits.
+    /// `expansion` grows every side of the rectangle in millimetres.
+    fn pad(
+        &mut self,
+        footprint: &crate::board::Footprint,
+        pad: &crate::board::Pad,
+        scale: f64,
+        expansion: f64,
+        attributes: &[String],
+    ) {
+        let center = pad_center(footprint, pad);
+        let width = pad.w * scale + expansion;
+        let height = pad.h * scale + expansion;
+        let quarter = (footprint.rotation / 90.0).round();
+        let at = [center[0] * scale, center[1] * scale];
+        if (footprint.rotation - quarter * 90.0).abs() <= 1e-9 {
+            let (w, h) = if quarter.rem_euclid(2.0) == 1.0 { (height, width) } else { (width, height) };
+            self.flash_with(format!("R,{w:.6}X{h:.6}"), at, attributes);
+            return;
+        }
+        let angle = footprint.rotation.to_radians();
+        let (sin, cos) = angle.sin_cos();
+        let points = [
+            [-width / 2.0, -height / 2.0],
+            [width / 2.0, -height / 2.0],
+            [width / 2.0, height / 2.0],
+            [-width / 2.0, height / 2.0],
+        ]
+        .map(|[x, y]| [at[0] + x * cos - y * sin, at[1] + x * sin + y * cos]);
+        self.region(&points, 1.0, attributes);
     }
 
     /// Ends an object attribute block; Gerber X2 requires it after the object.
@@ -211,13 +272,21 @@ impl Gerber {
     /// The contour starts with a `D02` move and continues with `D01` draws; the
     /// first vertex is repeated to close the polygon. A small circular aperture
     /// is selected first so readers that expect a current aperture still parse
-    /// the region.
-    fn region(&mut self, points: &[[f64; 2]], scale: f64) {
+    /// the region. Optional X2 object attributes wrap the region like they wrap
+    /// a flash.
+    fn region(&mut self, points: &[[f64; 2]], scale: f64, attributes: &[String]) {
         if points.len() < 3 {
             return;
         }
         let code = self.aperture("C,0.100000".to_string());
         let scaled: Vec<[f64; 2]> = points.iter().map(|point| [point[0] * scale, point[1] * scale]).collect();
+        for point in &scaled {
+            self.note(point[0]);
+            self.note(point[1]);
+        }
+        for attribute in attributes {
+            self.body.push_str(attribute);
+        }
         let _ = writeln!(self.body, "D{code}*\nG36*");
         for (index, point) in scaled.iter().enumerate() {
             let operation = if index == 0 { "D02" } else { "D01" };
@@ -225,6 +294,7 @@ impl Gerber {
         }
         let first = scaled[0];
         let _ = writeln!(self.body, "X{}Y{}D01*\nG37*", gerber_number(first[0]), gerber_number(first[1]));
+        self.close_attributes(attributes);
     }
 
     /// Renders the file with Gerber X2 file, aperture and object attributes.
@@ -316,12 +386,14 @@ fn pad_attributes(net: Option<&str>, reference: &str, pin: &str) -> Vec<String> 
     attributes
 }
 
-/// Writes one copper layer: tracks as draws, pads and covered vias as flashes.
+/// Writes one copper layer: tracks as draws, pads as rotated flashes or regions
+/// and covered vias as flashes.
 ///
 /// Each object carries its X2 attributes: tracks and vias declare their net, and
 /// a pad declares its net, component reference and pin. The block is closed with
-/// `%TD*%` after the object so attributes never leak into the next one.
-fn copper(board: &Board, layer: &str) -> String {
+/// `%TD*%` after the object so attributes never leak into the next one. The
+/// second element of the result reports a coordinate beyond the declared format.
+fn copper(board: &Board, layer: &str) -> (String, bool) {
     let scale = board.millimetres();
     let mut gerber = Gerber::default();
     for track in board.tracks.iter().filter(|track| track.layer == layer) {
@@ -334,11 +406,7 @@ fn copper(board: &Board, layer: &str) -> String {
     }
     for footprint in board.footprints.iter().filter(|footprint| footprint.layer == layer) {
         for pad in &footprint.pads {
-            gerber.flash_with(
-                format!("R,{:.6}X{:.6}", pad.w * scale, pad.h * scale),
-                [(footprint.x + pad.x) * scale, (footprint.y + pad.y) * scale],
-                &pad_attributes(pad.net.as_deref(), &footprint.ref_, &pad.number),
-            );
+            gerber.pad(footprint, pad, scale, 0.0, &pad_attributes(pad.net.as_deref(), &footprint.ref_, &pad.number));
         }
     }
     for via in board.vias.iter().filter(|via| board.via_covers(via, layer)) {
@@ -349,7 +417,7 @@ fn copper(board: &Board, layer: &str) -> String {
         );
     }
     for zone in board.zones.iter().filter(|zone| zone.layer == layer) {
-        gerber.region(&zone.points, scale);
+        gerber.region(&zone.points, scale, &[]);
     }
     let stack = board.copper_stack();
     let index = stack.iter().position(|id| *id == layer).unwrap_or(0);
@@ -362,13 +430,14 @@ fn copper(board: &Board, layer: &str) -> String {
     else {
         "Inr"
     };
-    gerber.render(&format!("Copper,L{},{}", index + 1, position))
+    let content = gerber.render(&format!("Copper,L{},{}", index + 1, position));
+    (content, gerber.out_of_range)
 }
 
 /// Writes one silkscreen layer: the document stores legend geometry as tracks
 /// on the same layer ids the copper stack uses, plus legend text rendered as
 /// stroke segments of the built-in 5×7 font.
-fn silkscreen(board: &Board, layer: &str) -> String {
+fn silkscreen(board: &Board, layer: &str) -> (String, bool) {
     let scale = board.millimetres();
     let mut gerber = Gerber::default();
     for track in board.tracks.iter().filter(|track| track.layer == layer) {
@@ -382,7 +451,8 @@ fn silkscreen(board: &Board, layer: &str) -> String {
         gerber_text(&mut gerber, text, scale);
     }
     let position = if layer.starts_with("B.") { "Bot" } else { "Top" };
-    gerber.render(&format!("Silkscreen,{position}"))
+    let content = gerber.render(&format!("Silkscreen,{position}"));
+    (content, gerber.out_of_range)
 }
 
 /// Renders one legend text as horizontal stroke runs of the 5×7 glyph bitmap.
@@ -390,7 +460,7 @@ fn silkscreen(board: &Board, layer: &str) -> String {
 /// counter-clockwise, matching the SVG and PDF projections.
 fn gerber_text(gerber: &mut Gerber, text: &crate::board::TextItem, scale: f64) {
     let unit = text.size / 7.0;
-    if !(unit > 0.0) {
+    if unit <= 0.0 || unit.is_nan() {
         return;
     }
     let stroke = if text.thickness > 0.0 { text.thickness } else { unit };
@@ -431,41 +501,37 @@ fn gerber_text(gerber: &mut Gerber, text: &crate::board::TextItem, scale: f64) {
 /// Writes one solder-mask layer: every pad on the matching copper side is a
 /// rectangular opening expanded by the document's solder-mask rule per side.
 /// Vias stay tented, so they contribute no opening.
-fn solder_mask(board: &Board, layer: &str) -> String {
+fn solder_mask(board: &Board, layer: &str) -> (String, bool) {
     let scale = board.millimetres();
     let expansion = board.rules.solder_mask_expansion * 2.0;
     let mut gerber = Gerber::default();
     for footprint in board.footprints.iter().filter(|footprint| footprint.layer == layer) {
         for pad in &footprint.pads {
-            gerber.flash(
-                format!("R,{:.6}X{:.6}", pad.w * scale + expansion, pad.h * scale + expansion),
-                [(footprint.x + pad.x) * scale, (footprint.y + pad.y) * scale],
-            );
+            gerber.pad(footprint, pad, scale, expansion, &[]);
         }
     }
     let position = if layer.starts_with("B.") { "Bot" } else { "Top" };
-    gerber.render(&format!("Soldermask,{position}"))
+    let content = gerber.render(&format!("Soldermask,{position}"));
+    (content, gerber.out_of_range)
 }
 
 /// Writes one solder-paste layer: every outer-layer pad opens a stencil window
 /// sized exactly to the copper pad. Vias stay tented and contribute no paste.
-fn solder_paste(board: &Board, layer: &str) -> String {
+fn solder_paste(board: &Board, layer: &str) -> (String, bool) {
     let scale = board.millimetres();
     let mut gerber = Gerber::default();
     for footprint in board.footprints.iter().filter(|footprint| footprint.layer == layer) {
         for pad in &footprint.pads {
-            gerber.flash(
-                format!("R,{:.6}X{:.6}", pad.w * scale, pad.h * scale),
-                [(footprint.x + pad.x) * scale, (footprint.y + pad.y) * scale],
-            );
+            gerber.pad(footprint, pad, scale, 0.0, &[]);
         }
     }
     let position = if layer.starts_with("B.") { "Bot" } else { "Top" };
-    gerber.render(&format!("Paste,{position}"))
+    let content = gerber.render(&format!("Paste,{position}"));
+    (content, gerber.out_of_range)
 }
 
 /// Writes the rectangular Edge.Cuts outline as four draws.
-fn edge_cuts(from: [f64; 2], to: [f64; 2], scale: f64) -> String {
+fn edge_cuts(from: [f64; 2], to: [f64; 2], scale: f64) -> (String, bool) {
     let mut gerber = Gerber::default();
     let lower_left = [from[0] * scale, from[1] * scale];
     let lower_right = [to[0] * scale, from[1] * scale];
@@ -476,7 +542,8 @@ fn edge_cuts(from: [f64; 2], to: [f64; 2], scale: f64) -> String {
     {
         gerber.draw("C,0.100000".to_string(), start, end);
     }
-    gerber.render("Profile,NP")
+    let content = gerber.render("Profile,NP");
+    (content, gerber.out_of_range)
 }
 
 /// Formats millimetres in the 4.6 coordinate format used by every file.
