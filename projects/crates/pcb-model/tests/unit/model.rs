@@ -2883,6 +2883,25 @@ fn exports_write_real_content_and_reject_unimplemented_targets() {
 }
 
 #[test]
+fn pdf_export_reports_characters_the_base_font_cannot_encode() {
+    let directory = TempDir::new();
+    let path = directory.join("unicode.pdf");
+    let handle = create(CreateRequest { title: Some("电源板".to_string()), template: Some("blank".to_string()) })
+        .expect("the board is created")["handle"]
+        .as_u64()
+        .expect("the handle is a number");
+    add_full_board(handle);
+
+    let report = export(handle, "pdf", &path).expect("PDF export writes");
+    assert_eq!(report["losses"][0]["code"], "pdf/text-encoding");
+    assert!(report["losses"][0]["detail"].as_str().expect("detail").starts_with("3 character(s)"));
+    let bytes = fs::read(&path).expect("the PDF is readable");
+    assert!(String::from_utf8_lossy(&bytes).contains("???"), "the Chinese title degrades to question marks");
+
+    close(handle).expect("the board closes");
+}
+
+#[test]
 fn gerber_writes_x2_object_attributes_and_closes_each_block() {
     let directory = TempDir::new();
     let handle = created();

@@ -182,6 +182,9 @@ being approximated.
 ### Import and export
 
 - STEP is neither imported nor exported.
+- PDF text uses the base-14 Helvetica encoding, so characters outside printable
+  ASCII degrade to `?`. The export then reports one `pdf/text-encoding` loss
+  with the dropped character count; `svg` keeps full Unicode.
 - PNG is a fixed 1024 × 768 top-down raster. It draws copper, silkscreen
   outlines and text through a built-in 5 × 7 font, but has no viewport and no
   anti-aliasing.

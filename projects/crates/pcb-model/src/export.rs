@@ -70,6 +70,7 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
     if format == "png" {
         return png(board, path);
     }
+    let mut losses = Vec::new();
     let content = match format {
         "drl" => drill(board).into_bytes(),
         "drill_map" => drill_map(board).into_bytes(),
@@ -79,7 +80,16 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
         "ipc_d_356" => ipc_d_356(board).into_bytes(),
         "placement" => placement(board)?.into_bytes(),
         "svg" => svg(board)?.into_bytes(),
-        "pdf" => pdf(board)?,
+        "pdf" => {
+            let (bytes, dropped) = pdf(board)?;
+            if dropped > 0 {
+                losses.push(json!({
+                    "code": "pdf/text-encoding",
+                    "detail": format!("{dropped} character(s) outside printable ASCII were written as `?` in the PDF; export SVG for full Unicode text"),
+                }));
+            }
+            bytes
+        }
         "kicad_pcb" => crate::kicad_pcb::write(board).into_bytes(),
         "ipc2581" => crate::ipc2581::write(board).into_bytes(),
         other => {
@@ -90,13 +100,17 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
         }
     };
     let bytes = crate::atomic_write(path, &content)?;
-    Ok(json!({
+    let mut report = json!({
         "revision": board.revision,
         "format": format,
         "path": path.display().to_string(),
         "bytes": bytes,
         "editable": false,
-    }))
+    });
+    if !losses.is_empty() {
+        report["losses"] = json!(losses);
+    }
+    Ok(report)
 }
 
 /// Writes a Gerber RS-274X directory and reports each artifact.
@@ -1095,7 +1109,9 @@ fn trim_mm(value: f64) -> String {
 /// owns the geometry lowering and the PDF backend, so this writer only places
 /// the same outline, tracks, pads and vias the preview draws, plus a title
 /// band at the top and a layer legend band at the bottom.
-fn pdf(board: &Board) -> Result<Vec<u8>, ServiceError> {
+/// Renders the board as a one-page PDF and counts the characters outside
+/// printable ASCII that the base-14 fonts degrade to `?`.
+fn pdf(board: &Board) -> Result<(Vec<u8>, usize), ServiceError> {
     let scale = board.millimetres();
     let (min, max) = drawing_bounds(board);
     let board_width = (max[0] - min[0]) * scale * PT_PER_MM;
@@ -1114,7 +1130,18 @@ fn pdf(board: &Board) -> Result<Vec<u8>, ServiceError> {
     };
     let mut drawing = build_drawing(board, &layout, None, true);
     draw_pdf_title_block(board, &mut drawing, page_width, page_height, &legend);
-    drawing.to_pdf().map_err(|error| crate::invalid(format!("cannot render the PDF preview: {error}")))
+    let dropped = drawing
+        .elements
+        .iter()
+        .filter_map(|element| match &element.shape {
+            Shape::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .flat_map(|text| text.chars())
+        .filter(|character| !character.is_ascii())
+        .count();
+    let bytes = drawing.to_pdf().map_err(|error| crate::invalid(format!("cannot render the PDF preview: {error}")))?;
+    Ok((bytes, dropped))
 }
 
 /// Places the title and the layer legend on a PDF page.
