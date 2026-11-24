@@ -84,7 +84,8 @@ export type InspectCheck =
     | 'netclass'
     | 'keepout'
     | 'via-in-pad'
-    | 'testpoints';
+    | 'testpoints'
+    | 'stencil';
 
 /** Rectangular board outline in board units. */
 export interface BoardOutline {
@@ -98,7 +99,7 @@ export type LayerKind = 'copper' | 'silkscreen' | 'soldermask' | 'assembly' | 'm
 /** Coordinate unit of one board document. */
 export type BoardUnits = 'mm' | 'mil';
 
-/** Design-rule values the inspection checks and writers read, in millimetres. */
+/** Design-rule values the inspection checks and writers read. Distances are in millimetres and ratios are dimensionless. */
 export interface BoardRules {
     /** Minimum gap between two drill holes of different nets. */
     readonly holeClearance: number;
@@ -110,6 +111,12 @@ export interface BoardRules {
     readonly holeToEdge: number;
     /** Solder-mask expansion around each pad, per side. */
     readonly solderMaskExpansion: number;
+    /** Stencil foil thickness. */
+    readonly stencilThickness: number;
+    /** Minimum stencil opening area ratio: opening area divided by the opening perimeter times the thickness. */
+    readonly stencilAreaRatio: number;
+    /** Minimum stencil opening aspect ratio: short side divided by the thickness. */
+    readonly stencilAspectRatio: number;
 }
 
 /** Physical layer stack used by controlled-impedance calculations. */
@@ -1748,6 +1755,12 @@ export interface SetRulesOptions {
     readonly componentToEdge?: number;
     readonly holeToEdge?: number;
     readonly solderMaskExpansion?: number;
+    /** Stencil foil thickness, in millimetres; greater than zero. */
+    readonly stencilThickness?: number;
+    /** Minimum stencil opening area ratio; greater than zero. */
+    readonly stencilAreaRatio?: number;
+    /** Minimum stencil opening aspect ratio; greater than zero. */
+    readonly stencilAspectRatio?: number;
 }
 
 /** Options of `board.setStackup()`. */

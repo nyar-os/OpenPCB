@@ -172,6 +172,7 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.checks.outline, 'supported');
     assert.equal(matrix.checks.silkscreen, 'supported');
     assert.equal(matrix.checks.courtyard, 'supported');
+    assert.equal(matrix.checks.stencil, 'supported');
     assert.equal(matrix.renderers.svg, 'supported');
     assert.equal(matrix.renderers.png, 'unsupported');
     assert.equal(matrix.designRules, 'supported');
@@ -360,6 +361,52 @@ test('waivers and severity overrides change the inspection verdict', { skip: wit
 
     await board.deleteWaiver('waiver-1');
     assert.equal((await board.inspect({ checks })).passed, false);
+    await board.close();
+    await pcb.dispose();
+});
+
+test('stencil check measures paste openings and honours rules and waivers', { skip: withAddon }, async () => {
+    const pcb = new OpenPCB();
+    const board = await pcb.create();
+    await board.addFootprint({ reference: 'U1', value: 'QFN', footprint: 'QFN', x: 0, y: 0, rotation: 0, layer: 'F.Cu' });
+    await board.addPad({ footprint: 'fp-1', number: '1', x: 0, y: 0, w: 1, h: 1 });
+    await board.addPad({ footprint: 'fp-1', number: '2', x: 0, y: 5, w: 0.3, h: 0.3 });
+    await board.addPad({ footprint: 'fp-1', number: '3', x: 5, y: 0, w: 0.17, h: 20 });
+
+    const checks = ['stencil'] as const;
+    const report = await board.inspect({ checks });
+    assert.deepEqual(
+        report.issues.map((issue) => [issue.code, issue.objectId]),
+        [
+            ['drc/stencil-area-ratio', 'fp-1:2'],
+            ['drc/stencil-aspect-ratio', 'fp-1:3'],
+        ],
+        'the clean pad stays quiet and both ratio failures carry their pad',
+    );
+    assert.equal(report.issues[0].layerId, 'F.Cu');
+    assert.equal(report.issues[0].severity, 'warning');
+    assert.equal(report.passed, true, 'stencil findings warn without failing the board');
+
+    const repeated = await board.inspect({ checks });
+    assert.deepEqual(repeated.issues, report.issues, 'repeated runs are identical');
+    const filtered = await board.inspect({ checks: ['silkscreen'] });
+    assert.equal(
+        filtered.issues.some((issue) => issue.code.startsWith('drc/stencil-')),
+        false,
+        'the check list filters the run',
+    );
+
+    await board.addWaiver({ code: 'drc/stencil-area-ratio', object: 'fp-1:2', reason: 'prototype stencil' });
+    const waived = await board.inspect({ checks });
+    assert.equal(waived.issues[0].waived, true);
+    assert.equal(waived.waived, 1);
+    assert.equal(waived.active, 1);
+
+    const relaxed = await board.setRules({ stencilThickness: 0.1, stencilAreaRatio: 0.5, stencilAspectRatio: 1 });
+    assert.equal(relaxed.board.rules.stencilThickness, 0.1);
+    assert.equal(relaxed.board.rules.stencilAreaRatio, 0.5);
+    const clean = await board.inspect({ checks });
+    assert.equal(clean.issues.length, 0, 'the configured stencil rules accept every opening');
     await board.close();
     await pcb.dispose();
 });
@@ -1122,6 +1169,16 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
             'drc,connectivity,clearance,annular_rings,stackup,outline,silkscreen,courtyard,netlist,hole-to-pad',
         );
         assert.match(inspected, /passed=true/);
+
+        assert.match(run('rules', 'show', document), /stencilThickness=0\.12 stencilAreaRatio=0\.66 stencilAspectRatio=1\.5/);
+        run('footprint', 'pad', 'add', document, '--footprint', 'fp-1', '--number', '1', '--x', '0', '--y', '0', '--w', '0.3', '--h', '0.3');
+        const stencil = run('inspect', document, '--checks', 'stencil');
+        assert.match(stencil, /drc\/stencil-area-ratio/);
+        assert.doesNotMatch(stencil, /solder-mask/);
+        assert.equal(stencil, run('inspect', document, '--checks', 'stencil'), 'the check output is deterministic');
+        run('rules', 'set', document, '--stencil-thickness', '0.1', '--stencil-area-ratio', '0.5');
+        assert.match(run('rules', 'show', document), /stencilThickness=0\.1 stencilAreaRatio=0\.5/);
+        assert.match(run('inspect', document, '--checks', 'stencil'), /passed=true/);
 
         for (const format of ['drl', 'drill_map', 'bom', 'pos', 'placement', 'svg'] as const) {
             run('export', document, '--format', format, '--out', path.join(directory, `blinker.${format}`));

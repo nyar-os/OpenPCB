@@ -225,6 +225,9 @@ function describeRules(rules: BoardRules): string {
         `componentToEdge=${rules.componentToEdge}`,
         `holeToEdge=${rules.holeToEdge}`,
         `solderMaskExpansion=${rules.solderMaskExpansion}`,
+        `stencilThickness=${rules.stencilThickness}`,
+        `stencilAreaRatio=${rules.stencilAreaRatio}`,
+        `stencilAspectRatio=${rules.stencilAspectRatio}`,
     ].join(' ');
 }
 
@@ -2194,13 +2197,25 @@ rules
     .option('--component-to-edge <mm>', 'cli.opt.component-to-edge')
     .option('--hole-to-edge <mm>', 'cli.opt.hole-to-edge')
     .option('--solder-mask-expansion <mm>', 'cli.opt.solder-mask-expansion')
+    .option('--stencil-thickness <mm>', 'cli.opt.stencil-thickness')
+    .option('--stencil-area-ratio <ratio>', 'cli.opt.stencil-area-ratio')
+    .option('--stencil-aspect-ratio <ratio>', 'cli.opt.stencil-aspect-ratio')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         if (file === undefined) {
             ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
             return 2;
         }
-        const keys = ['hole-clearance', 'copper-to-edge', 'component-to-edge', 'hole-to-edge', 'solder-mask-expansion'] as const;
+        const keys = [
+            'hole-clearance',
+            'copper-to-edge',
+            'component-to-edge',
+            'hole-to-edge',
+            'solder-mask-expansion',
+            'stencil-thickness',
+            'stencil-area-ratio',
+            'stencil-aspect-ratio',
+        ] as const;
         const values = new Map<string, number>();
         for (const key of keys) {
             const raw = text(options, key);
@@ -2225,6 +2240,9 @@ rules
                 componentToEdge: values.get('component-to-edge'),
                 holeToEdge: values.get('hole-to-edge'),
                 solderMaskExpansion: values.get('solder-mask-expansion'),
+                stencilThickness: values.get('stencil-thickness'),
+                stencilAreaRatio: values.get('stencil-area-ratio'),
+                stencilAspectRatio: values.get('stencil-aspect-ratio'),
             });
             ctx.emitResult(result, `rules revision=${result.revision} ${describeRules(result.board.rules)}`);
             return 0;
