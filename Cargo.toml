@@ -17,6 +17,7 @@ repository = "https://github.com/nyar-os/OpenPCB"
 # the same commit.
 wae = { git = "https://github.com/doki-land/wae-framework.git", rev = "f92f818fde7174154d77a87b55a5e44b367034c9", default-features = false, features = ["webview"] }
 serde_json = "1"
+flate2 = "1"
 # Shared crates from boost.rs `dev`, pinned to the full 40-character revision
 # so local builds and CI resolve the same commit.
 boost-fs = { git = "https://github.com/oovm/boost.rs.git", rev = "f0c76fc60090650eefa1de1a4f2c2cbb29cba8d9" }

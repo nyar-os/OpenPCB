@@ -5543,6 +5543,7 @@ fn png_export_writes_a_valid_deterministic_raster() {
 
     let bytes = fs::read(&first).expect("the PNG is readable");
     assert_eq!(&bytes[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a], "PNG signature");
+    assert!(bytes.len() < 300_000, "the PNG is deflate-compressed, not stored: {} bytes", bytes.len());
     let mut offset = 8;
     let mut saw_ihdr = false;
     while offset < bytes.len() {

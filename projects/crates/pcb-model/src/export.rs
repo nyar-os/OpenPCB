@@ -5,13 +5,7 @@
 //! file. Every writer is atomic: the file appears only after the full content
 //! was written and renamed into place.
 
-use std::{
-    collections::BTreeMap,
-    fmt::Write as _,
-    fs,
-    path::Path,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::{collections::BTreeMap, fmt::Write as _, fs, path::Path};
 
 use document_drawing::{Color, Drawing, Element, Point as DrawPoint, Shape, Size, Style};
 use serde_json::{Value, json};
@@ -1596,14 +1590,11 @@ const PNG_BACK: [u8; 3] = [47, 111, 176];
 const PNG_SILK: [u8; 3] = [230, 230, 230];
 /// Drilled-hole colour.
 const PNG_DRILL: [u8; 3] = [12, 20, 16];
-/// Monotonic suffix for the temporary file the encoder writes before the
-/// atomic rename, so concurrent exports never collide.
-static PNG_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Writes a top-down raster preview as a valid 8-bit RGBA PNG.
 ///
-/// Encoding is delegated to `media-codec`; the image bytes are staged in a
-/// temporary file in the destination directory and then published atomically.
+/// The pixels are encoded in memory with zlib-deflate at best compression and
+/// published through the shared atomic writer.
 fn png(board: &Board, path: &Path) -> Result<Value, ServiceError> {
     let scale = board.millimetres();
     let has_pads = board.footprints.iter().any(|footprint| !footprint.pads.is_empty());
@@ -1727,21 +1718,7 @@ fn png(board: &Board, path: &Path) -> Result<Value, ServiceError> {
     for pixel in canvas.data.as_chunks::<3>().0 {
         rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 0xff]);
     }
-    let temporary = path.with_file_name(format!(
-        ".{}.png-{}-{}.tmp",
-        path.file_name().unwrap_or_default().to_string_lossy(),
-        std::process::id(),
-        PNG_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    let staged = (|| {
-        media_codec::write_png(&temporary, PNG_WIDTH, PNG_HEIGHT, &rgba)
-            .map_err(|error| crate::invalid(format!("cannot encode `{}`: {error}", path.display())))?;
-        let bytes = fs::read(&temporary)
-            .map_err(|error| crate::invalid(format!("cannot read the encoded `{}`: {error}", path.display())))?;
-        crate::atomic_write(path, &bytes)
-    })();
-    let _ = fs::remove_file(&temporary);
-    let written = staged?;
+    let written = crate::atomic_write(path, &encode_png_compressed(PNG_WIDTH, PNG_HEIGHT, &rgba))?;
     Ok(json!({
         "revision": board.revision,
         "format": "png",
@@ -1757,6 +1734,55 @@ fn png(board: &Board, path: &Path) -> Result<Value, ServiceError> {
             "vias": board.vias.len(),
         },
     }))
+}
+
+/// CRC-32 as required by the PNG chunk format.
+fn png_crc32(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for byte in data {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320 & (crc & 1).wrapping_neg());
+        }
+    }
+    !crc
+}
+
+/// Writes one PNG chunk: length, type plus payload, and the CRC over both.
+fn png_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    let mut body = Vec::with_capacity(4 + data.len());
+    body.extend_from_slice(kind);
+    body.extend_from_slice(data);
+    out.extend_from_slice(&body);
+    out.extend_from_slice(&png_crc32(&body).to_be_bytes());
+}
+
+/// Encodes RGBA8 pixels as PNG bytes with a zlib-deflate IDAT stream at best
+/// compression, so a flat preview raster stays in the tens of kilobytes
+/// instead of the megabytes a stored-block encoder would emit.
+fn encode_png_compressed(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+    let stride = (width as usize) * 4;
+    let mut raw = Vec::with_capacity((height as usize) * (stride + 1));
+    for row in rgba.chunks_exact(stride) {
+        raw.push(0u8);
+        raw.extend_from_slice(row);
+    }
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(&raw).expect("in-memory compression cannot fail");
+    let idat = encoder.finish().expect("in-memory compression cannot fail");
+    let mut out: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+    png_chunk(&mut out, b"IHDR", &ihdr);
+    png_chunk(&mut out, b"IDAT", &idat);
+    png_chunk(&mut out, b"IEND", &[]);
+    out
 }
 
 /// Maps board millimetres onto image pixels with the same Y direction as the
