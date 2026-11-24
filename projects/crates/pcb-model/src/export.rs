@@ -1194,14 +1194,21 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>, with
             },
             Style::stroke(silk, 0.15 * layout.scale),
         ));
-        drawing.push(Element::new(
-            Shape::Text {
-                at: layout.point(min[0] * scale, (min[1] - 0.6) * scale),
-                text: footprint.ref_.clone(),
-                size: REFERENCE_SIZE * layout.scale,
-            },
-            fill_style(silk),
-        ));
+        if !footprint.ref_.is_empty() {
+            let at = layout.point(min[0] * scale, (min[1] - 0.6) * scale);
+            let size = REFERENCE_SIZE * layout.scale;
+            let pad = 0.3 * layout.scale;
+            let glyph_width = footprint.ref_.chars().count() as f64 * size * 0.6;
+            let knockout = background.unwrap_or(Color::rgb(255, 255, 255));
+            let corners = [
+                DrawPoint::new(at.x - pad, at.y - size - pad),
+                DrawPoint::new(at.x + glyph_width + pad, at.y - size - pad),
+                DrawPoint::new(at.x + glyph_width + pad, at.y + pad),
+                DrawPoint::new(at.x - pad, at.y + pad),
+            ];
+            drawing.push(Element::new(Shape::Polygon { points: corners.to_vec() }, fill_style(knockout)));
+            drawing.push(Element::new(Shape::Text { at, text: footprint.ref_.clone(), size }, fill_style(silk)));
+        }
     }
     for via in &board.vias {
         let center = layout.point(via.at[0] * scale, via.at[1] * scale);
@@ -1435,13 +1442,26 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
         && let Some(index) = content.rfind("</svg>")
     {
         let mut group = String::from("    <g class=\"board-text\">\n");
+        let knockout = PREVIEW_BACKGROUND.to_css();
         for text in &board.texts {
             let x = (text.at[0] * scale - layout.origin_x) * layout.scale;
             let y = (text.at[1] * scale - layout.origin_y) * layout.scale;
+            let size = text.size * scale * layout.scale;
+            let glyph_width = text.text.chars().count() as f64 * size * 0.6;
+            let pad = 0.3;
+            let _ = writeln!(
+                group,
+                "      <rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"{knockout}\" transform=\"rotate({:.3} {x:.3} {y:.3})\"/>",
+                x - pad,
+                y - size - pad,
+                glyph_width + 2.0 * pad,
+                size + 2.0 * pad,
+                -text.rotation
+            );
             let _ = writeln!(
                 group,
                 "      <text x=\"{x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"{:.3}\" fill=\"{}\" transform=\"rotate({:.3} {x:.3} {y:.3})\">{}</text>",
-                text.size * scale * layout.scale,
+                size,
                 layer_color(board, &text.layer),
                 -text.rotation,
                 xml(&text.text)
