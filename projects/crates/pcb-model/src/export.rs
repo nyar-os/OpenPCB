@@ -471,7 +471,8 @@ fn gerber_text(gerber: &mut Gerber, text: &crate::board::TextItem, scale: f64) {
     let point = |dx: f64, dy: f64| [(text.at[0] + dx * cos + dy * sin) * scale, (text.at[1] - dx * sin + dy * cos) * scale];
     let mut cursor = 0.0;
     for character in text.text.chars() {
-        let Some(rows) = glyph(character) else {
+        let Some(rows) = glyph(character)
+        else {
             cursor += 6.0 * unit;
             continue;
         };
@@ -1291,8 +1292,12 @@ fn draw_pdf_title_block(board: &Board, drawing: &mut Drawing, page_width: f64, p
     for (x, row, color, label) in &legend.items {
         let y = legend.band - legend.size * 2.0 - row;
         if let Some(color) = color {
-            let corners =
-                [[*x, y + 1.0], [x + legend.swatch, y + 1.0], [x + legend.swatch, y - legend.swatch + 1.0], [*x, y - legend.swatch + 1.0]];
+            let corners = [
+                [*x, y + 1.0],
+                [x + legend.swatch, y + 1.0],
+                [x + legend.swatch, y - legend.swatch + 1.0],
+                [*x, y - legend.swatch + 1.0],
+            ];
             drawing.push(Element::new(
                 Shape::Polygon { points: corners.iter().map(|corner| DrawPoint::new(corner[0], corner[1])).collect() },
                 fill_style(color_from_hex(color)),
@@ -1895,9 +1900,8 @@ fn png_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
 /// compression, so a flat preview raster stays in the tens of kilobytes
 /// instead of the megabytes a stored-block encoder would emit.
 fn encode_png_compressed(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    use flate2::{Compression, write::ZlibEncoder};
     use std::io::Write as _;
-    use flate2::Compression;
-    use flate2::write::ZlibEncoder;
     let stride = (width as usize) * 4;
     let mut raw = Vec::with_capacity((height as usize) * (stride + 1));
     for row in rgba.chunks_exact(stride) {

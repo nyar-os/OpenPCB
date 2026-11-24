@@ -3,8 +3,9 @@
 use std::path::Path;
 
 use open_pcb_model::{
-    AddFootprintRequest, AddNetRequest, AddPadRequest, AddTestPointRequest, AddTextRequest, AddTrackRequest, AddViaRequest, CreateRequest,
-    SetOutlineRequest, add_footprint, add_net, add_pad, add_test_point, add_text, add_track, add_via, create, export, set_outline,
+    AddFootprintRequest, AddNetRequest, AddPadRequest, AddTestPointRequest, AddTextRequest, AddTrackRequest, AddViaRequest,
+    CreateRequest, SetOutlineRequest, add_footprint, add_net, add_pad, add_test_point, add_text, add_track, add_via, create,
+    export, set_outline,
 };
 use serde_json::Value;
 
@@ -17,7 +18,14 @@ fn id_of(value: &Value) -> String {
         .to_string()
 }
 
-fn footprint(handle: u64, reference: &str, value: &str, footprint: &str, x: f64, y: f64) -> Result<String, Box<dyn std::error::Error>> {
+fn footprint(
+    handle: u64,
+    reference: &str,
+    value: &str,
+    footprint: &str,
+    x: f64,
+    y: f64,
+) -> Result<String, Box<dyn std::error::Error>> {
     let created = add_footprint(
         handle,
         AddFootprintRequest {
@@ -33,8 +41,27 @@ fn footprint(handle: u64, reference: &str, value: &str, footprint: &str, x: f64,
     Ok(id_of(&created))
 }
 
-fn pad(handle: u64, fp: &str, number: &str, at: [f64; 2], size: [f64; 2], net: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    add_pad(handle, AddPadRequest { footprint: fp.into(), number: number.into(), x: at[0], y: at[1], w: size[0], h: size[1], net: net.map(str::to_string), drill: None })?;
+fn pad(
+    handle: u64,
+    fp: &str,
+    number: &str,
+    at: [f64; 2],
+    size: [f64; 2],
+    net: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: fp.into(),
+            number: number.into(),
+            x: at[0],
+            y: at[1],
+            w: size[0],
+            h: size[1],
+            net: net.map(str::to_string),
+            drill: None,
+        },
+    )?;
     Ok(())
 }
 
@@ -55,7 +82,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (index, net) in u1_nets.iter().enumerate() {
         let column = (index % 4) as f64;
         let row = (index / 4) as f64;
-        pad(handle, &u1, &(index + 1).to_string(), [-3.6 + column * 2.4, -1.2 + row * 2.4], [1.5, 1.0], (!net.is_empty()).then_some(net))?;
+        pad(
+            handle,
+            &u1,
+            &(index + 1).to_string(),
+            [-3.6 + column * 2.4, -1.2 + row * 2.4],
+            [1.5, 1.0],
+            (!net.is_empty()).then_some(net),
+        )?;
     }
     let r1 = footprint(handle, "R1", "10k", "0603", 16.0, 44.0)?;
     pad(handle, &r1, "1", [-1.6, 0.0], [1.2, 1.4], Some("IO1"))?;
@@ -97,7 +131,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let via_ids = [([38.8, 20.0], "IO1"), ([43.6, 36.0], "GND"), ([61.6, 36.0], "GND")];
     let mut via_refs = Vec::new();
     for (at, net) in via_ids {
-        let created = add_via(handle, AddViaRequest { net: Some(net.into()), at, diameter: 1.4, drill: 0.7, ..Default::default() })?;
+        let created =
+            add_via(handle, AddViaRequest { net: Some(net.into()), at, diameter: 1.4, drill: 0.7, ..Default::default() })?;
         via_refs.push(id_of(&created));
     }
 
@@ -105,11 +140,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for target in [format!("{r1}:1"), format!("{c1}:2"), via_refs[0].clone()] {
         add_test_point(handle, AddTestPointRequest { target })?;
     }
-    for (text, at) in [("MCU", [46.5, 35.5]), ("10k", [13.0, 48.5]), ("1k", [60.0, 10.5]), ("100n", [58.0, 48.5]), ("LED", [66.0, 10.5])] {
-        add_text(handle, AddTextRequest { text: text.into(), layer: "F.SilkS".into(), at, rotation: None, size: Some(2.0), thickness: None })?;
+    for (text, at) in
+        [("MCU", [46.5, 35.5]), ("10k", [13.0, 48.5]), ("1k", [60.0, 10.5]), ("100n", [58.0, 48.5]), ("LED", [66.0, 10.5])]
+    {
+        add_text(
+            handle,
+            AddTextRequest { text: text.into(), layer: "F.SilkS".into(), at, rotation: None, size: Some(2.0), thickness: None },
+        )?;
     }
 
-    for format in ["gbr", "drl", "drill_map", "bom", "pos", "placement", "testpoints", "ipc_d_356", "svg", "pdf", "kicad_pcb", "ipc2581", "png"] {
+    for format in [
+        "gbr",
+        "drl",
+        "drill_map",
+        "bom",
+        "pos",
+        "placement",
+        "testpoints",
+        "ipc_d_356",
+        "svg",
+        "pdf",
+        "kicad_pcb",
+        "ipc2581",
+        "png",
+    ] {
         let target = out.join(format!("demo-board.{format}"));
         match export(handle, format, &target) {
             Ok(report) => println!("OK {format}: {report}"),
