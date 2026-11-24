@@ -146,8 +146,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         add_via(handle, AddViaRequest { net: Some(net.into()), at, diameter: 1.4, drill: 0.7, ..Default::default() })?;
     }
 
+    // Value text sits above the designator line; at 12.5 it collided with the
+    // reference text the exporter draws just above each body outline.
     for (text, at) in
-        [("MCU", [46.5, 35.5]), ("10k", [13.0, 48.5]), ("1k", [60.0, 12.5]), ("100n", [58.0, 48.5]), ("LED", [66.0, 12.5])]
+        [("MCU", [46.5, 35.5]), ("10k", [13.0, 48.5]), ("1k", [60.0, 10.5]), ("100n", [58.0, 48.5]), ("LED", [66.0, 10.5])]
     {
         add_text(
             handle,
