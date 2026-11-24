@@ -8308,7 +8308,10 @@ fn four_layer_gerber_and_drill_carry_the_via_spans() {
         .iter()
         .map(|item| item["name"].as_str().expect("a name").to_string())
         .collect::<Vec<_>>();
-    assert!(names.contains(&"In1_Cu.gbr".to_string()) && names.contains(&"In2_Cu.gbr".to_string()), "inner layers are written");
+    assert!(
+        names.iter().any(|name| name == "In1_Cu.gbr") && names.iter().any(|name| name == "In2_Cu.gbr"),
+        "inner layers are written"
+    );
     let read = |name: &str| fs::read_to_string(gbr.join(name)).expect("the gerber file is readable");
     let top = read("F_Cu.gbr");
     assert!(top.contains("%TF.FileFunction,Copper,L1,Top*%"), "the top layer stays L1 in a four-layer stack");
