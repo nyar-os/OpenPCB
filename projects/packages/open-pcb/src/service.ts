@@ -139,7 +139,7 @@ export function open(path: string): BoardHandle {
     return decode<BoardHandle>(() => binding('open').board_open(path));
 }
 
-/** Imports one KiCad PCB or IPC-2581 file and returns its handle plus the loss ledger. */
+/** Imports one KiCad PCB, IPC-2581 or DXF outline file and returns its handle plus the loss ledger. */
 export function importBoard(path: string): ImportReport {
     return decode<ImportReport>(() => binding('import').board_import(path));
 }

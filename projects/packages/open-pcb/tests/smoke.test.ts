@@ -115,7 +115,7 @@ test('open rejects ambiguous input before reaching the engine', async () => {
 });
 
 test('format registry classifies the board format family', () => {
-    const expected = ['kicad_pcb', 'gbr', 'drl', 'drill_map', 'pos', 'placement', 'bom', 'step', 'ipc2581', 'svg', 'pdf', 'png'];
+    const expected = ['kicad_pcb', 'gbr', 'drl', 'drill_map', 'dxf', 'pos', 'placement', 'bom', 'step', 'ipc2581', 'svg', 'pdf', 'png'];
     assert.deepEqual([...boardFormats].sort(), [...expected].sort());
 
     assert.equal(formatInfo('kicad_pcb').family, 'board');
@@ -127,6 +127,8 @@ test('format registry classifies the board format family', () => {
     assert.equal(formatInfo('drl').family, 'fabrication');
     assert.equal(formatInfo('drill_map').family, 'fabrication');
     assert.equal(formatInfo('drill_map').opensAs, 'none');
+    assert.equal(formatInfo('dxf').family, 'fabrication');
+    assert.equal(formatInfo('dxf').opensAs, 'exchange');
     assert.equal(formatInfo('pos').family, 'assembly');
     assert.equal(formatInfo('placement').family, 'assembly');
     assert.equal(formatInfo('placement').markup, 'json');
@@ -141,6 +143,7 @@ test('format registry classifies the board format family', () => {
 
     assert.equal(formatFromPath('BLINKER.KICAD_PCB'), 'kicad_pcb');
     assert.equal(formatFromPath('BLINKER.GBR'), 'gbr');
+    assert.equal(formatFromPath('board.DXF'), 'dxf');
     assert.equal(formatFromPath('blinker.opcb'), undefined);
     assert.equal(formatFromPath('no-extension'), undefined);
 });
@@ -151,13 +154,15 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.project.import, 'partial');
     assert.equal(matrix.project.edit, 'partial');
     assert.equal(matrix.project.export, 'partial');
-    for (const format of ['gbr', 'drl', 'drill_map', 'bom', 'pos', 'placement', 'svg', 'pdf', 'kicad_pcb', 'ipc2581', 'png'] as const) {
+    for (const format of ['gbr', 'drl', 'drill_map', 'dxf', 'bom', 'pos', 'placement', 'svg', 'pdf', 'kicad_pcb', 'ipc2581', 'png'] as const) {
         assert.equal(matrix.formats[format].export, 'supported');
     }
     for (const format of ['gbr', 'drl', 'drill_map', 'bom', 'pos', 'placement', 'svg', 'pdf', 'png'] as const) {
         assert.equal(matrix.formats[format].import, 'unsupported');
     }
     assert.equal(matrix.formats.kicad_pcb.import, 'supported');
+    assert.equal(matrix.formats.dxf.import, 'supported');
+    assert.ok(matrix.formats.dxf.lossCodes.includes('dxf/construct-not-imported'), 'DXF loss codes are listed');
     assert.ok(matrix.formats.kicad_pcb.lossCodes.includes('kicad/construct-not-imported'));
     assert.ok(matrix.formats.kicad_pcb.lossCodes.includes('kicad/outline-not-rectangular'));
     assert.equal(matrix.formats.ipc2581.import, 'supported');
@@ -327,6 +332,12 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         assert.equal(ipcImported.board.summary.counts.vias, 1);
         assert.deepEqual(ipcImported.losses, [], 'the exported IPC-2581 document round trips without losses');
         await ipcImported.board.close();
+
+        const dxfImported = await pcb.importBoard({ path: path.join(directory, 'blinker.dxf') });
+        assert.equal(dxfImported.format, 'dxf');
+        assert.deepEqual(dxfImported.losses, [], 'the exported DXF outline round trips without losses');
+        assert.deepEqual(dxfImported.board.summary.outline, { from: [0, 0], to: [100, 80] }, 'the outline survives the round trip');
+        await dxfImported.board.close();
 
         await assert.rejects(
             board.export({ format: 'step', target: path.join(directory, 'blinker.step') }),
@@ -1239,6 +1250,10 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         const ipcImported = path.join(directory, 'imported-ipc.opcb');
         assert.match(run('import', ipc, '--out', ipcImported), /imported ipc2581 .*losses=0/);
         assert.match(run('list', ipcImported), /nets=1 footprints=1 tracks=2 vias=1/);
+
+        const dxfImported = path.join(directory, 'imported-dxf.opcb');
+        assert.match(run('import', path.join(directory, 'blinker.dxf'), '--out', dxfImported), /imported dxf .*losses=0/);
+        assert.match(run('list', dxfImported), /footprints=0/);
 
         run('footprint', 'delete', document, '--id', 'fp-1');
         assert.match(run('list', document), /footprints=0/);

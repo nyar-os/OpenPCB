@@ -1169,11 +1169,11 @@ export interface KicadImportOptions {
 }
 
 /** Exchange board formats the engine can read into an editable document. */
-export type BoardImportFormat = 'kicad_pcb' | 'ipc2581';
+export type BoardImportFormat = 'kicad_pcb' | 'ipc2581' | 'dxf';
 
 /** Options of `OpenPCB.importBoard()`. */
 export interface BoardImportOptions {
-    /** KiCad PCB or IPC-2581 file to read. The engine detects the format from the content. */
+    /** KiCad PCB, IPC-2581 or DXF outline file to read. The engine detects the format from the content. */
     readonly path: string;
     /** Native `.opcb` document to write after import; the board keeps it as its target. */
     readonly target?: string;

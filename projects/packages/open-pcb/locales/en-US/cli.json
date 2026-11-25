@@ -5,7 +5,7 @@
             "capabilities": "Print what this build supports, honestly",
             "create": "Create a native board document and save it to a project file",
             "open": "Open a board document and print its committed revision and layers",
-            "import": "Import a KiCad PCB file into a native board document",
+            "import": "Import a KiCad PCB, IPC-2581 or DXF outline file into a native board document",
             "list": "List the revision, stackup and object counts of a board document",
             "undo": "Restore the previous snapshot and write the document back in place",
             "redo": "Reapply the next snapshot and write the document back in place",

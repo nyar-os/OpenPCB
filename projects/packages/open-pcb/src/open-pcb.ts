@@ -172,8 +172,8 @@ export class OpenPCB {
     /**
      * Imports one exchange board file and wraps the native handle in a `Board`.
      *
-     * Both KiCad PCB and IPC-2581 documents are read; the engine detects the
-     * format from the content and reports it on the result. With `target` the
+     * KiCad PCB, IPC-2581 and DXF outline documents are read; the engine detects
+     * the format from the content and reports it on the result. With `target` the
      * imported document is saved immediately and the board keeps that path as
      * its target, so later edits write it back in place.
      */

@@ -10,7 +10,8 @@
 //! outputs derived from them. Every entry point reads the same capability
 //! matrix, so no surface can claim a different set of features.
 //!
-//! Implemented today: create, open, import a KiCad PCB or IPC-2581 document,
+//! Implemented today: create, open, import a KiCad PCB, IPC-2581 or DXF outline
+//! document,
 //! save, inspect, summary, close, undo and redo, layer management, footprint
 //! moves and pad add/update/delete, track and via deletion, plated routed slots,
 //! a rectangular outline, editable design rules, waivable findings with per-code
@@ -29,6 +30,7 @@
 mod board;
 mod copper;
 mod drill;
+mod dxf_import;
 mod export;
 mod fab;
 mod impedance;
@@ -115,7 +117,7 @@ const EXPORT_TARGETS: &[&str] = &[
 ];
 
 /// Formats this build can read into the native document.
-const SUPPORTED_IMPORTS: &[&str] = &["kicad_pcb", "ipc2581"];
+const SUPPORTED_IMPORTS: &[&str] = &["kicad_pcb", "ipc2581", "dxf"];
 
 /// Stable failure of one board operation.
 #[derive(Debug)]
@@ -173,6 +175,7 @@ pub fn capabilities() -> Value {
         let loss_codes: Vec<Value> = match format {
             "kicad_pcb" => kicad_import::LOSS_CODES.iter().map(|code| Value::String((*code).to_string())).collect(),
             "ipc2581" => ipc2581_import::LOSS_CODES.iter().map(|code| Value::String((*code).to_string())).collect(),
+            "dxf" => dxf_import::LOSS_CODES.iter().map(|code| Value::String((*code).to_string())).collect(),
             _ => Vec::new(),
         };
         formats.insert(
@@ -295,7 +298,8 @@ pub fn open(path: &Path) -> Result<Value, ServiceError> {
 /// Imports one exchange board file as a native board and returns its handle.
 ///
 /// The format is detected from the content: a document starting with `<` is
-/// read as IPC-2581, one starting with `(` as a KiCad PCB. The report follows
+/// read as IPC-2581, one starting with `(` as a KiCad PCB, and one starting
+/// with a `0` group code as a DXF outline. The report follows
 /// the export report shape and adds the loss ledger: every construct the
 /// document cannot hold is listed with a stable code. The board is validated
 /// before it receives a handle, so a successful import can always be saved to
@@ -308,7 +312,7 @@ pub fn import(path: &Path) -> Result<Value, ServiceError> {
     let trimmed = text.trim_start();
     let Some(first) = trimmed.chars().next()
     else {
-        return Err(invalid(format!("`{}` is empty; expected a KiCad PCB or IPC-2581 document", path.display())));
+        return Err(invalid(format!("`{}` is empty; expected a KiCad PCB, IPC-2581 or DXF document", path.display())));
     };
     let (board, losses, format) = if first == '<' {
         let imported = ipc2581_import::parse(&text, format!("ipc2581-{digest:016x}"))?;
@@ -318,9 +322,13 @@ pub fn import(path: &Path) -> Result<Value, ServiceError> {
         let imported = kicad_import::parse(&text, format!("kicad-{digest:016x}"))?;
         (imported.board, imported.losses, "kicad_pcb")
     }
+    else if first == '0' {
+        let imported = dxf_import::parse(&text, format!("dxf-{digest:016x}"))?;
+        (imported.board, imported.losses, "dxf")
+    }
     else {
         return Err(invalid(format!(
-            "`{}` is neither a KiCad PCB nor an IPC-2581 document; it starts with `{first}`",
+            "`{}` is neither a KiCad PCB, an IPC-2581 document nor a DXF outline; it starts with `{first}`",
             path.display()
         )));
     };

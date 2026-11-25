@@ -287,7 +287,7 @@ cli
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         if (file === undefined) {
-            ctx.fail('open-pcb.cli.file-required', { message: 'a KiCad PCB or IPC-2581 file is required' });
+            ctx.fail('open-pcb.cli.file-required', { message: 'a KiCad PCB, IPC-2581 or DXF file is required' });
             return 2;
         }
         const out = text(options, 'out');

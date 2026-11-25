@@ -202,7 +202,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         assert_eq!(matrix["formats"][format]["export"], "supported", "{format} export");
         assert_eq!(matrix["formats"][format]["edit"], "unsupported", "{format} edit");
     }
-    for format in ["gbr", "drl", "drill_map", "dxf", "layers", "asm", "bom", "pos", "placement", "svg", "pdf", "png"] {
+    for format in ["gbr", "drl", "drill_map", "layers", "asm", "bom", "pos", "placement", "svg", "pdf", "png"] {
         assert_eq!(matrix["formats"][format]["import"], "unsupported", "{format} import");
     }
     assert_eq!(matrix["formats"]["kicad_pcb"]["import"], "supported", "KiCad import is implemented");
@@ -224,6 +224,16 @@ fn capability_matrix_matches_the_implemented_pack() {
         .collect();
     for code in ["ipc2581/construct-not-imported", "ipc2581/outline-not-rectangular", "ipc2581/pin-without-size"] {
         assert!(ipc_codes.contains(&code), "IPC-2581 loss codes include {code}; got {ipc_codes:?}");
+    }
+    assert_eq!(matrix["formats"]["dxf"]["import"], "supported", "DXF import is implemented");
+    let dxf_codes: Vec<&str> = matrix["formats"]["dxf"]["lossCodes"]
+        .as_array()
+        .expect("DXF import lists loss codes")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    for code in ["dxf/construct-not-imported", "dxf/outline-not-rectangular"] {
+        assert!(dxf_codes.contains(&code), "DXF loss codes include {code}; got {dxf_codes:?}");
     }
     assert_eq!(matrix["formats"]["step"]["export"], "unsupported", "step export");
     assert_eq!(matrix["formats"]["step"]["import"], "unsupported", "step import");
@@ -3671,6 +3681,91 @@ fn view_directory_exports_reject_a_file_target() {
         fs::write(&file, "occupied").expect("a file exists at the target");
         let refused = export(handle, format, &file).expect_err("a file target is rejected");
         assert_eq!(refused.code, "format/invalid", "{format} rejects a file target");
+    }
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn dxf_import_round_trips_an_exported_outline() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    let path = directory.join("outline.dxf");
+    export(handle, "dxf", &path).expect("the DXF outline writes");
+    let imported = import(&path).expect("the DXF outline imports");
+    assert_eq!(imported["format"], "dxf");
+    assert_eq!(imported["editable"], true);
+    assert_eq!(imported["losses"].as_array().expect("losses is an array").len(), 0, "the writer's own file loses nothing");
+    assert_eq!(imported["document"]["outline"]["from"][0], 0.0);
+    assert_eq!(imported["document"]["outline"]["from"][1], 0.0);
+    assert_eq!(imported["document"]["outline"]["to"][0], 100.0);
+    assert_eq!(imported["document"]["outline"]["to"][1], 80.0);
+    let second = import(&path).expect("the same file imports again");
+    assert_eq!(imported["document"], second["document"], "the same bytes import to the same document");
+    close(handle).expect("the board closes");
+    close(handle_of(&imported)).expect("the imported board closes");
+    close(handle_of(&second)).expect("the second import closes");
+}
+
+#[test]
+fn dxf_import_keeps_the_outline_and_reports_foreign_entities() {
+    let directory = TempDir::new();
+    let path = directory.join("mixed.dxf");
+    let text = "  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1009\n  0\nENDSEC\n  0\nSECTION\n  2\nENTITIES\n  0\nLINE\n  8\nEdge.Cuts\n 10\n0.000\n 20\n0.000\n 30\n0.000\n 11\n20.000\n 21\n0.000\n 31\n0.000\n  0\nLINE\n  8\nEdge.Cuts\n 10\n20.000\n 20\n0.000\n 30\n0.000\n 11\n20.000\n 21\n10.000\n 31\n0.000\n  0\nLINE\n  8\nEdge.Cuts\n 10\n20.000\n 20\n10.000\n 30\n0.000\n 11\n0.000\n 21\n10.000\n 31\n0.000\n  0\nLINE\n  8\nEdge.Cuts\n 10\n0.000\n 20\n10.000\n 30\n0.000\n 11\n0.000\n 21\n0.000\n 31\n0.000\n  0\nCIRCLE\n  8\nF.Cu\n 10\n5.000\n 20\n5.000\n 30\n0.000\n 40\n2.500\n  0\nLINE\n  8\nF.Cu\n 10\n1.000\n 20\n1.000\n 30\n0.000\n 11\n2.000\n 21\n2.000\n 31\n0.000\n  0\nENDSEC\n  0\nEOF\n";
+    fs::write(&path, text).expect("the fixture is written");
+    let imported = import(&path).expect("the mixed drawing imports");
+    assert_eq!(imported["document"]["outline"]["to"][0], 20.0, "the outline survives the foreign entities");
+    assert_eq!(imported["document"]["outline"]["to"][1], 10.0);
+    let losses = imported["losses"].as_array().expect("losses is an array");
+    assert_eq!(losses.len(), 2, "the circle and the copper line are reported");
+    let codes: Vec<&str> =
+        imported["lossCodes"].as_array().expect("codes are listed").iter().filter_map(Value::as_str).collect();
+    assert!(codes.contains(&"dxf/construct-not-imported"), "got {codes:?}");
+    assert_eq!(codes.len(), 1, "only the construct code appears");
+    close(handle_of(&imported)).expect("the imported board closes");
+}
+
+#[test]
+fn dxf_import_refuses_a_non_rectangular_outline() {
+    let directory = TempDir::new();
+    let path = directory.join("triangle.dxf");
+    let text = "  0\nSECTION\n  2\nENTITIES\n  0\nLINE\n  8\nEdge.Cuts\n 10\n0.000\n 20\n0.000\n 11\n10.000\n 21\n0.000\n  0\nLINE\n  8\nEdge.Cuts\n 10\n10.000\n 20\n0.000\n 11\n0.000\n 21\n10.000\n  0\nLINE\n  8\nEdge.Cuts\n 10\n0.000\n 20\n10.000\n 11\n0.000\n 21\n0.000\n  0\nENDSEC\n  0\nEOF\n";
+    fs::write(&path, text).expect("the fixture is written");
+    let imported = import(&path).expect("the triangle imports without an outline");
+    assert_eq!(imported["document"]["outline"], Value::Null, "a triangle is not approximated by its bounding box");
+    let codes: Vec<&str> =
+        imported["lossCodes"].as_array().expect("codes are listed").iter().filter_map(Value::as_str).collect();
+    assert!(codes.contains(&"dxf/outline-not-rectangular"), "got {codes:?}");
+    close(handle_of(&imported)).expect("the imported board closes");
+}
+
+#[test]
+fn dxf_import_reads_an_empty_entities_section_without_losses() {
+    let directory = TempDir::new();
+    let path = directory.join("empty.dxf");
+    let text = "  0\nSECTION\n  2\nHEADER\n  0\nENDSEC\n  0\nSECTION\n  2\nENTITIES\n  0\nENDSEC\n  0\nEOF\n";
+    fs::write(&path, text).expect("the fixture is written");
+    let imported = import(&path).expect("the empty drawing imports");
+    assert_eq!(imported["document"]["outline"], Value::Null, "an empty drawing has no outline");
+    assert_eq!(imported["losses"].as_array().expect("losses is an array").len(), 0, "nothing was dropped");
+    close(handle_of(&imported)).expect("the imported board closes");
+}
+
+#[test]
+fn dxf_import_rejects_unreadable_content() {
+    let directory = TempDir::new();
+    let handle = created();
+    let cases = [
+        ("broken.dxf", "0\nNOTSECTION\n"),
+        ("no-entities.dxf", "  0\nSECTION\n  2\nHEADER\n  0\nENDSEC\n  0\nEOF\n"),
+        ("odd.dxf", "  0\nSECTION\n  2\nENTITIES\n  0\n"),
+        ("dangling.dxf", "  0\nSECTION\n  2\nENTITIES\n  0\nLINE\n  8\nEdge.Cuts\n 10\n0.000\n 20\n"),
+    ];
+    for (name, text) in cases {
+        let path = directory.join(name);
+        fs::write(&path, text).expect("the fixture is written");
+        let refused = import(&path).expect_err("`{name}` is not a readable DXF");
+        assert_eq!(refused.code, "format/invalid", "{name} error code");
     }
     close(handle).expect("the board closes");
 }
@@ -7157,7 +7252,7 @@ fn ipc2581_import_rejects_unknown_content() {
     fs::write(&path, "not a board").expect("the fixture is written");
     let error = import(&path).expect_err("unknown content is rejected");
     assert_eq!(error.code, "format/invalid");
-    assert!(error.message.contains("neither a KiCad PCB nor an IPC-2581 document"), "{}", error.message);
+    assert!(error.message.contains("neither a KiCad PCB, an IPC-2581 document nor a DXF outline"), "{}", error.message);
 }
 
 #[test]
