@@ -28,12 +28,14 @@ direction.
 | `ipc2581` | `supported` | `supported` | Import reports a loss ledger. |
 | `gbr` | `unsupported` | `supported` | Writes a directory of Gerber files. |
 | `drl` | `unsupported` | `supported` | Excellon drill file with via, pad and routed-slot holes. |
-| `drill_map` | `unsupported` | `supported` | SVG hole map covering vias, pad drills and routed slots. The tool legend numbers circular drills in ascending diameter and lists routed slots on their own row. |
+| `drill_map` | `unsupported` | `supported` | SVG hole map covering vias, pad drills and routed slots. Each tool gets its own symbol (circle, square, diamond, triangle, cross, hexagon) and its numbered legend row, and routed slots keep a row of their own. |
 | `dxf` | `supported` | `supported` | AutoCAD R12 board outline: four `LINE` entities on `Edge.Cuts` in millimetres. Needs an outline. Import reads back `Edge.Cuts` lines that close exactly one axis-aligned rectangle; other entities are reported one by one in the loss ledger (`dxf/construct-not-imported`, `dxf/outline-not-rectangular`) and never approximated. |
-| `layers` | `unsupported` | `supported` | Directory of single-layer fabrication views: every declared copper, silkscreen, soldermask, assembly and mechanical layer, one synthesized solder-paste stencil per side that carries pads, and a `Drill.svg` hole film. Each view keeps the board outline and shares one canvas and coordinate mapping with a sheet frame, title block and a legend that lists only the styles it draws, so the files stack like Gerber layers. |
-| `asm` | `unsupported` | `supported` | Directory of assembly sheets: `F_Asm.svg` and `B_Asm.svg` carry the outline, component outlines, references, pad-1 polarity marks, BOM item bubbles and the grouped BOM table below each board. |
+| `layers` | `unsupported` | `supported` | Directory of single-layer fabrication views: every declared copper, silkscreen, soldermask, assembly and mechanical layer, one synthesized solder-paste stencil per side that carries pads, and a `Drill.svg` hole film. Every view prints on white paper with dark ink, keeps the board outline and shares one content canvas, so the files stack like Gerber layers. |
+| `asm` | `unsupported` | `supported` | Directory of assembly sheets: `F_Asm.svg` and `B_Asm.svg` carry the outline, component outlines, references, pad-1 polarity marks, BOM item bubbles and the grouped BOM table below each board. The board is scaled to fill at least 60% of the page width, each reference takes the first collision-free of eight candidate positions (moving further out with a leader line when all eight are taken), and BOM columns are measured from their content with numeric columns right-aligned. |
 | `stackup` | `unsupported` | `supported` | Directory with `Stackup.svg` and `Stackup.pdf`: copper/dielectric cross-section with thickness callouts and an impedance sample. An undeclared stackup falls back to 1 oz copper and 0.2 mm FR-4 (εr 4.2) and the sheet says `ASSUMED STACKUP`. |
 | `panel` | `unsupported` | `supported` | Directory with `Panel.svg` and `Panel.pdf`: a 2 × 2 V-CUT panel with 2 mm gaps, a 5 mm rail and four Ø3 mm tooling holes, because the CLI has no per-export option channel. Needs a rectangular outline and fails with the panel report's codes otherwise. |
+| `drc` | `unsupported` | `supported` | Directory with `Drc.svg` and `Drc.pdf`: every finding of the default inspection run as a `Severity`/`Code`/`Layer`/`Message` table plus a findings-per-layer bar chart. Messages wrap to their measured column, so nothing leaves the page; a clean board prints `No findings`. |
+| `drill` | `unsupported` | `supported` | Directory with `Drill.svg` and `Drill.pdf`: aperture distribution bar chart plus a tool table (symbol, tool, diameter, holes, plated, note) and a routed-slot row. The symbols are the ones the drill map marks every hole with, so the two drawings read together. |
 | `pos` | `unsupported` | `supported` | Pick-and-place CSV. |
 | `placement` | `unsupported` | `supported` | Millimetre JSON. |
 | `bom` | `unsupported` | `supported` | Bill of materials CSV. |
@@ -47,7 +49,7 @@ direction.
 Declared preview renderers: `svg` is `supported`; `png` and `pdf` are
 `unsupported` as preview renderers even though they are export targets.
 
-Declared export targets: all nineteen formats above. Every target is
+Declared export targets: all twenty-one formats above. Every target is
 `supported` except `step`.
 
 ## Checks

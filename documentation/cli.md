@@ -108,17 +108,20 @@ open-pcb export <file> --format <target> --out <file-or-directory>
 ```
 
 Targets: `kicad_pcb`, `gbr`, `drl`, `drill_map`, `dxf`, `layers`, `stackup`,
-`panel`, `pos`, `placement`, `asm`, `testpoints`, `ipc_d_356`, `step`,
-`ipc2581`, `pdf`, `svg`, `png`. `step` rejects with
+`panel`, `drc`, `drill`, `pos`, `placement`, `asm`, `testpoints`, `ipc_d_356`,
+`step`, `ipc2581`, `pdf`, `svg`, `png`. `step` rejects with
 `capability/not-implemented` before writing. `gbr`, `layers`, `stackup`,
-`panel` and `asm` write a directory of files; `--out` names that directory.
+`panel`, `drc`, `drill` and `asm` write a directory of files; `--out` names that directory.
 `layers` writes one SVG per declared copper, silkscreen, soldermask, assembly
 and mechanical layer, a solder-paste stencil per padded side and a `Drill.svg`
-film on one shared canvas; `asm` writes the `F_Asm.svg` and `B_Asm.svg`
+film on white paper; `asm` writes the `F_Asm.svg` and `B_Asm.svg`
 assembly sheets with their BOM tables; `stackup` writes `Stackup.svg` and
 `Stackup.pdf` and falls back to a stated assumed stackup when the board
 declares none; `panel` writes `Panel.svg` and `Panel.pdf` with the documented
-2 × 2 V-CUT defaults and needs a rectangular outline. `dxf` writes the board
+2 × 2 V-CUT defaults and needs a rectangular outline; `drc` writes `Drc.svg`
+and `Drc.pdf` with the inspection findings and a per-layer chart; `drill`
+writes `Drill.svg` and `Drill.pdf` with the aperture bars and the tool table
+that shares its symbols with `drill_map`. `dxf` writes the board
 outline as four R12 `LINE` entities on `Edge.Cuts` and needs an outline.
 
 ```bash
@@ -127,6 +130,8 @@ open-pcb export board.opcb --format bom --out bom.csv
 open-pcb export board.opcb --format layers --out views
 open-pcb export board.opcb --format stackup --out stackup
 open-pcb export board.opcb --format panel --out panel
+open-pcb export board.opcb --format drc --out drc
+open-pcb export board.opcb --format drill --out drill
 open-pcb export board.opcb --format asm --out assembly
 ```
 
