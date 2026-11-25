@@ -3556,7 +3556,9 @@ fn drill_map_writes_holes_tool_legend_and_back_drill_marks() {
     ] {
         assert!(text.contains(marker), "drill map contains {marker}");
     }
-    assert_eq!(text.matches("<circle").count(), 3, "two holes and one back-drill ring");
+    assert_eq!(text.matches("class=\"drill-hole\"").count(), 2, "two holes");
+    assert_eq!(text.matches("stroke-dasharray").count(), 1, "one back-drill ring");
+    assert!(text.contains("class=\"drill-hole\" x="), "the second tool uses its own square symbol");
     close(handle).expect("the board closes");
 }
 
@@ -3681,8 +3683,12 @@ fn layers_writes_aligned_single_layer_views() {
     let read = |name: &str| fs::read_to_string(target.join(name)).expect("the view is readable");
     let body = |name: &str| {
         let text = read(name);
-        let end = text.find("class=\"title-block\"").unwrap_or(text.len());
-        text[..end].to_string()
+        let start = text
+            .find("class=\"sheet-body\"")
+            .and_then(|index| text[index..].find('>').map(|offset| index + offset + 1))
+            .unwrap_or(0);
+        let end = text[start..].find("</g>").map(|offset| start + offset).unwrap_or(text.len());
+        text[start..end].to_string()
     };
     let front = body("F_Cu.svg");
     assert!(front.contains("<line"), "the front copper view keeps the front track");
@@ -3697,13 +3703,13 @@ fn layers_writes_aligned_single_layer_views() {
     assert!(!silk.contains("<line"), "the silkscreen view holds no copper track");
     let back_silk = body("B_SilkS.svg");
     assert!(!back_silk.contains(">U1<"), "a front footprint is not drawn on the back silkscreen");
-    let view_box = |name: &str| {
+    let page_width = |name: &str| {
         let text = read(name);
         let start = text.find("viewBox=\"").expect("a viewBox") + 9;
-        text[start..].split('"').next().expect("a viewBox value").to_string()
+        text[start..].split_whitespace().nth(2).expect("a viewBox width").to_string()
     };
     for name in &names[1..] {
-        assert_eq!(view_box(name), view_box(names[0]), "{name} shares the canvas of the other views");
+        assert_eq!(page_width(name), page_width(names[0]), "{name} shares the canvas width of the other views");
     }
     close(handle).expect("the board closes");
 }
@@ -3777,8 +3783,8 @@ fn asm_writes_both_sides_with_polarity_and_bom() {
     }
     assert!(front.contains("Top side"), "the front sheet names its side");
     assert!(back.contains("Bottom side"), "the back sheet names its side");
-    assert_eq!(front.matches("<polygon").count(), 2, "the front sheet draws one pad and one outline");
-    assert_eq!(back.matches("<polygon").count(), 3, "the back sheet draws two pads and one outline");
+    assert_eq!(front.matches("<polygon").count(), 3, "the front sheet draws its silk boxes, pads and outline");
+    assert_eq!(back.matches("<polygon").count(), 4, "the back sheet draws its silk boxes, two pads and outline");
     close(handle).expect("the board closes");
 }
 
@@ -8445,7 +8451,7 @@ fn excellon_and_drill_map_include_pad_holes() {
     let map = directory.join("holes.drill-map.svg");
     export(handle, "drill_map", &map).expect("the drill map writes");
     let map = fs::read_to_string(&map).expect("the drill map is readable");
-    assert_eq!(map.matches("<circle").count(), 2, "the via and the pad each draw one hole");
+    assert_eq!(map.matches("class=\"drill-hole\"").count(), 2, "the via and the pad each draw one hole");
     assert!(map.contains("T1 dia 0.300 mm plated x1"), "the via tool is in the legend; got {map}");
     assert!(map.contains("T2 dia 0.400 mm plated x1"), "the pad tool is in the legend; got {map}");
     close(handle).expect("the board closes");
@@ -8600,7 +8606,7 @@ fn pads_without_drills_add_no_fabrication_output() {
     let map = directory.join("plain.drill-map.svg");
     export(handle, "drill_map", &map).expect("the drill map writes");
     let map = fs::read_to_string(&map).expect("the drill map is readable");
-    assert_eq!(map.matches("<circle").count(), 1, "only the via draws a hole");
+    assert_eq!(map.matches("class=\"drill-hole\"").count(), 1, "only the via draws a hole");
     assert!(!map.contains("X10.000"), "the pad contributes no hit");
 
     let kicad = directory.join("plain.kicad_pcb");
@@ -8694,7 +8700,7 @@ fn svg_export_carries_the_title_layer_legend_and_board_size() {
     }
     assert!(!svg.contains("Front copper"), "the legend omits a style the sheet does not use");
     assert!(!svg.contains("Drill hole"), "the legend omits a style the sheet does not use");
-    assert!(svg.contains("class=\"title-block\""), "the title block is grouped");
+    assert!(svg.contains("class=\"sheet-body\""), "the drawing body is grouped");
     close(handle).expect("the board closes");
 }
 

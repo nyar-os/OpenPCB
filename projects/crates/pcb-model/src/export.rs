@@ -105,10 +105,235 @@ fn sheet_padding(span: f64) -> f64 {
     (span * SHEET_PADDING_FRACTION).max(SHEET_PADDING_MIN)
 }
 
+/// Estimated advance width of one monospace run at `size`, in page millimetres.
+///
+/// Every sheet writer measures with this factor, so a fit computed for layout
+/// and a fit asserted by a test always agree. `0.6` is the advance of the
+/// 10-pixel monospace cell the drawing helpers use, rounded up.
+fn text_width(text: &str, size: f64) -> f64 {
+    text.chars().count() as f64 * size * 0.6
+}
+
 /// Shrinks a font until its estimated width fits `max_width`.
 fn fit_font(text: &str, max_width: f64, desired: f64) -> f64 {
-    let width = (text.chars().count() as f64 * desired * 0.6).max(1e-6);
+    let width = text_width(text, desired).max(1e-6);
     if width <= max_width { desired } else { (desired * max_width / width).max(1.4) }
+}
+
+/// Splits one sentence into lines that each fit `max_width` at `size`.
+///
+/// Words longer than the column are split by character so a long identifier
+/// still stays inside the page instead of being clipped.
+fn wrap_text(text: &str, max_width: f64, size: f64) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let mut word = word.to_string();
+        while text_width(&word, size) > max_width && word.chars().count() > 1 {
+            let take = ((max_width / (size * 0.6)).floor() as usize).max(1);
+            let head: String = word.chars().take(take).collect();
+            let tail: String = word.chars().skip(take).collect();
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            lines.push(head);
+            word = tail;
+        }
+        if current.is_empty() {
+            current = word;
+        }
+        else if text_width(&format!("{current} {word}"), size) <= max_width {
+            current.push(' ');
+            current.push_str(&word);
+        }
+        else {
+            lines.push(std::mem::take(&mut current));
+            current = word;
+        }
+    }
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+/// White paper every drawing sheet is printed on.
+const SHEET_PAPER: Color = Color::rgb(255, 255, 255);
+
+/// Ink of sheet chrome: frame, title block and table rules.
+const SHEET_INK_HEX: &str = "#111111";
+
+/// One legend entry of a composed sheet: x position, swatch colour, mark and
+/// label.
+type LegendEntry = (f64, Option<String>, LegendMark, String);
+
+/// Wraps one drawing in a printable sheet: white paper, frame, a title band
+/// whose text stays inside its cells, the content translated below the band
+/// and an optional legend under the drawing.
+///
+/// The content keeps its own coordinates (`0..width`, `0..height`) and is moved
+/// down by the band height inside a `<g transform>`. Nothing is placed at a
+/// negative coordinate, so every viewer — including ones that ignore a negative
+/// `viewBox` origin — shows the whole title block.
+fn compose_sheet(
+    content: &str,
+    width: f64,
+    height: f64,
+    title: &str,
+    subtitle: &str,
+    number: &str,
+    legend: &[(Option<String>, LegendMark, String)],
+) -> String {
+    let Some(start) = content.find("<svg")
+    else {
+        return content.to_string();
+    };
+    let Some(offset) = content[start..].find('>')
+    else {
+        return content.to_string();
+    };
+    let root_end = start + offset;
+    let Some(index) = content.rfind("</svg>")
+    else {
+        return content.to_string();
+    };
+    let band = SHEET_TITLE_BAND;
+    let size = 2.6;
+    let swatch = 2.6;
+    let row_gap = 5.2;
+    let mut legend_rows: Vec<Vec<LegendEntry>> = Vec::new();
+    let mut row: Vec<LegendEntry> = Vec::new();
+    let mut x = 4.0;
+    for (color, mark, label) in legend {
+        let entry_width = text_width(label, size) + if color.is_some() { swatch + size * 0.4 } else { 0.0 };
+        if x + entry_width > width - 4.0 && !row.is_empty() {
+            legend_rows.push(std::mem::take(&mut row));
+            x = 4.0;
+        }
+        row.push((x, color.clone(), *mark, label.clone()));
+        x += entry_width + size * 1.6;
+    }
+    if !row.is_empty() {
+        legend_rows.push(row);
+    }
+    let legend_band = if legend_rows.is_empty() { 0.0 } else { 6.0 + legend_rows.len() as f64 * row_gap };
+    let total = band + height + legend_band;
+    let number_text = format!("DWG {number}");
+    let number_width = text_width(&number_text, 2.4);
+    let name_size = fit_font(title, (width - 14.0 - number_width).max(12.0), 4.2);
+    let subtitle_size = fit_font(subtitle, width - 8.0, 2.3);
+    let mut out = String::new();
+    if start > 0 {
+        out.push_str(&content[..start]);
+    }
+    let _ = writeln!(
+        out,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{:.0}\" height=\"{:.0}\" viewBox=\"0 0 {width:.3} {total:.3}\">",
+        width * SVG_PREVIEW_PX_PER_MM,
+        total * SVG_PREVIEW_PX_PER_MM
+    );
+    let _ = writeln!(out, "<rect x=\"0\" y=\"0\" width=\"{width:.3}\" height=\"{total:.3}\" fill=\"#ffffff\"/>");
+    let _ = writeln!(
+        out,
+        "<rect x=\"{SHEET_FRAME_INSET}\" y=\"{SHEET_FRAME_INSET}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"{SHEET_INK_HEX}\" stroke-width=\"0.25\"/>",
+        width - SHEET_FRAME_INSET * 2.0,
+        total - SHEET_FRAME_INSET * 2.0
+    );
+    let _ = writeln!(
+        out,
+        "<line x1=\"{SHEET_FRAME_INSET}\" y1=\"{band:.3}\" x2=\"{:.3}\" y2=\"{band:.3}\" stroke=\"{SHEET_INK_HEX}\" stroke-width=\"0.2\"/>",
+        width - SHEET_FRAME_INSET
+    );
+    let _ = writeln!(
+        out,
+        "<text x=\"4\" y=\"8.600\" font-family=\"monospace\" font-size=\"{name_size:.3}\" fill=\"{SHEET_INK_HEX}\">{}</text>",
+        xml(title)
+    );
+    let _ = writeln!(
+        out,
+        "<text x=\"{:.3}\" y=\"8.600\" font-family=\"monospace\" font-size=\"2.4\" fill=\"{SHEET_INK_HEX}\" text-anchor=\"end\">{}</text>",
+        width - 4.0,
+        xml(&number_text)
+    );
+    let _ = writeln!(
+        out,
+        "<text x=\"4\" y=\"13.900\" font-family=\"monospace\" font-size=\"{subtitle_size:.3}\" fill=\"{SHEET_INK_HEX}\">{}</text>",
+        xml(subtitle)
+    );
+    let _ = writeln!(out, "<g class=\"sheet-body\" transform=\"translate(0,{band:.3})\">");
+    out.push_str(&content[root_end + 1..index]);
+    out.push_str("</g>\n");
+    if legend_rows.is_empty() {
+        out.push_str("</svg>\n");
+        return out;
+    }
+    let separator = band + height;
+    let _ = writeln!(
+        out,
+        "<line x1=\"{SHEET_FRAME_INSET}\" y1=\"{separator:.3}\" x2=\"{:.3}\" y2=\"{separator:.3}\" stroke=\"{SHEET_INK_HEX}\" stroke-width=\"0.2\"/>",
+        width - SHEET_FRAME_INSET
+    );
+    for (row_index, entries) in legend_rows.iter().enumerate() {
+        let baseline = separator + 5.0 + row_index as f64 * row_gap;
+        for (x, color, mark, label) in entries {
+            if let Some(color) = color {
+                out.push_str(&legend_mark_svg(*x, baseline, swatch, *mark, color));
+            }
+            let text_x = x + if color.is_some() { swatch + size * 0.4 } else { 0.0 };
+            let _ = writeln!(
+                out,
+                "<text x=\"{text_x:.3}\" y=\"{baseline:.3}\" font-family=\"monospace\" font-size=\"{size}\" fill=\"{SHEET_INK_HEX}\">{}</text>",
+                xml(label)
+            );
+        }
+    }
+    out.push_str("</svg>\n");
+    out
+}
+
+/// One legend mark drawn in page coordinates, above `baseline`.
+fn legend_mark_svg(x: f64, baseline: f64, swatch: f64, mark: LegendMark, color: &str) -> String {
+    let mut out = String::new();
+    match mark {
+        LegendMark::Area => {
+            let _ = writeln!(
+                out,
+                "<rect x=\"{x:.3}\" y=\"{:.3}\" width=\"{swatch:.3}\" height=\"{swatch:.3}\" fill=\"{color}\" stroke=\"{SHEET_INK_HEX}\" stroke-width=\"0.15\"/>",
+                baseline - swatch
+            );
+        }
+        LegendMark::Line => {
+            let _ = writeln!(
+                out,
+                "<line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.8\"/>",
+                baseline - swatch / 2.0,
+                x + swatch,
+                baseline - swatch / 2.0
+            );
+        }
+        LegendMark::Hole => {
+            let _ = writeln!(
+                out,
+                "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"0.35\"/>",
+                x + swatch / 2.0,
+                baseline - swatch / 2.0,
+                swatch * 0.32
+            );
+        }
+        LegendMark::Edge => {
+            let _ = writeln!(
+                out,
+                "<line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.3\"/>\n<line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.3\"/>",
+                baseline - swatch * 0.8,
+                x + swatch,
+                baseline - swatch * 0.8,
+                baseline - swatch * 0.2,
+                x + swatch,
+                baseline - swatch * 0.2
+            );
+        }
+    }
+    out
 }
 
 /// Writes one export target and returns its report.
@@ -683,13 +908,82 @@ fn drill(board: &Board) -> String {
     out
 }
 
-/// Drill map with one circle per drilled hole, a tool legend and back-drill marks.
+/// Tool symbols that mark holes on the drill map and in the drill chart.
 ///
-/// The map is a standalone SVG in millimetres. Every via and every drilled pad
-/// contributes one plated hole, and routed slots are drawn as lines.
-/// Back-drilled vias keep their hole and gain a dashed outer ring plus a legend
-/// line, so a reader can tell which hits are back drilled without re-reading the
-/// Excellon file.
+/// Both drawings index the same symbol by tool number, so a reader can match a
+/// bar in the chart to the marks on the map.
+const DRILL_SYMBOLS: &[&str] = &["circle", "square", "diamond", "triangle", "cross", "hexagon"];
+
+/// Name of the symbol of one zero-based tool index.
+fn drill_symbol_name(index: usize) -> &'static str {
+    DRILL_SYMBOLS[index % DRILL_SYMBOLS.len()]
+}
+
+/// Mark of one tool, drawn as an outline on the drill map.
+fn drill_symbol_svg(x: f64, y: f64, radius: f64, index: usize) -> String {
+    let radius = radius.max(0.4);
+    let ink = "#111111";
+    match drill_symbol_name(index) {
+        "square" => format!(
+            "<rect class=\"drill-hole\" x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"{ink}\" stroke-width=\"0.12\"/>",
+            x - radius,
+            y - radius,
+            radius * 2.0,
+            radius * 2.0
+        ),
+        "diamond" => format!(
+            "<polygon class=\"drill-hole\" points=\"{:.3},{:.3} {:.3},{:.3} {:.3},{:.3} {:.3},{:.3}\" fill=\"none\" stroke=\"{ink}\" stroke-width=\"0.12\"/>",
+            x,
+            y - radius,
+            x + radius,
+            y,
+            x,
+            y + radius,
+            x - radius,
+            y
+        ),
+        "triangle" => format!(
+            "<polygon class=\"drill-hole\" points=\"{:.3},{:.3} {:.3},{:.3} {:.3},{:.3}\" fill=\"none\" stroke=\"{ink}\" stroke-width=\"0.12\"/>",
+            x,
+            y - radius,
+            x + radius * 0.9,
+            y + radius * 0.8,
+            x - radius * 0.9,
+            y + radius * 0.8
+        ),
+        "cross" => format!(
+            "<line class=\"drill-hole\" x1=\"{:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{ink}\" stroke-width=\"0.18\"/>\n<line class=\"drill-hole\" x1=\"{:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{ink}\" stroke-width=\"0.18\"/>",
+            x - radius,
+            y,
+            x + radius,
+            y,
+            x,
+            y - radius,
+            x,
+            y + radius
+        ),
+        "hexagon" => {
+            let points = (0..6)
+                .map(|corner| {
+                    let angle = std::f64::consts::PI / 3.0 * corner as f64;
+                    format!("{:.3},{:.3}", x + radius * angle.cos(), y + radius * angle.sin())
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("<polygon class=\"drill-hole\" points=\"{points}\" fill=\"none\" stroke=\"{ink}\" stroke-width=\"0.12\"/>")
+        }
+        _ => format!(
+            "<circle class=\"drill-hole\" cx=\"{x:.3}\" cy=\"{y:.3}\" r=\"{radius:.3}\" fill=\"none\" stroke=\"{ink}\" stroke-width=\"0.12\"/>"
+        ),
+    }
+}
+
+/// Drill map with one symbol per drilled hole, a tool legend and back-drill marks.
+///
+/// The map is a standalone white SVG in millimetres. Every via and every drilled
+/// pad contributes one plated hole, marked with the symbol of its tool, and
+/// routed slots are drawn as lines. The sheet is composed like the other
+/// drawings, so the title block and the legend stay on the page.
 fn drill_map(board: &Board) -> String {
     let scale = board.millimetres();
     let (min, max) = match board.outline {
@@ -723,28 +1017,29 @@ fn drill_map(board: &Board) -> String {
 
     let mut circles: Vec<(f64, usize)> = tools.values().copied().collect();
     circles.sort_by(|left, right| left.0.total_cmp(&right.0));
-    let mut legend: Vec<(String, String)> = circles
+    let tool_of = |diameter: f64| circles.iter().position(|(size, _)| (size - diameter).abs() < 1e-6).unwrap_or(0);
+    let mut legend: Vec<(Option<String>, LegendMark, String)> = circles
         .iter()
         .enumerate()
         .map(|(index, (diameter, count))| {
-            ("#111111".to_string(), format!("T{} dia {:.3} mm plated x{}", index + 1, diameter, count))
+            (
+                Some(SHEET_INK_HEX.to_string()),
+                LegendMark::Hole,
+                format!("T{} dia {:.3} mm plated x{}", index + 1, diameter, count),
+            )
         })
         .collect();
     if !board.slots.is_empty() {
-        legend.push(("#111111".to_string(), format!("routed slots x{} (line)", board.slots.len())));
+        legend.push((Some(SHEET_INK_HEX.to_string()), LegendMark::Line, format!("routed slots x{} (line)", board.slots.len())));
     }
     if back_drilled > 0 {
-        legend.push(("#b03a2e".to_string(), format!("back drill x{back_drilled} (dashed ring)")));
+        legend.push((Some("#b03a2e".to_string()), LegendMark::Hole, format!("back drill x{back_drilled} (dashed ring)")));
     }
 
-    let row_height = 6.0;
-    let legend_band = 6.0 + legend.len() as f64 * row_height;
     let width = span_x + margin * 2.0;
-    let content_height = span_y + margin * 2.0;
-    let height = SHEET_TITLE_BAND + content_height + legend_band;
+    let height = span_y + margin * 2.0;
     let map_x = |x: f64| x - min[0] + margin;
-    let map_y = |y: f64| SHEET_TITLE_BAND + margin + (max[1] - y);
-
+    let map_y = |y: f64| y - min[1] + margin;
     let mut out = String::new();
     let _ = writeln!(out, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
     let _ = writeln!(
@@ -756,66 +1051,21 @@ fn drill_map(board: &Board) -> String {
     let _ = writeln!(out, "<rect x=\"0\" y=\"0\" width=\"{width:.3}\" height=\"{height:.3}\" fill=\"#ffffff\"/>");
     let _ = writeln!(
         out,
-        "<rect x=\"{SHEET_FRAME_INSET}\" y=\"{SHEET_FRAME_INSET}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"#111111\" stroke-width=\"0.2\"/>",
-        width - SHEET_FRAME_INSET * 2.0,
-        height - SHEET_FRAME_INSET * 2.0
+        "<rect x=\"0.5\" y=\"0.5\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"#8a6d1f\" stroke-width=\"0.2\"/>",
+        width - 1.0,
+        height - 1.0
     );
-    let _ = writeln!(
-        out,
-        "<line x1=\"{SHEET_FRAME_INSET}\" y1=\"{SHEET_TITLE_BAND}\" x2=\"{:.3}\" y2=\"{SHEET_TITLE_BAND}\" stroke=\"#111111\" stroke-width=\"0.2\"/>",
-        width - SHEET_FRAME_INSET
-    );
-    let name = "OpenPCB drill map";
-    let name_size = fit_font(name, width * 0.5, 4.0);
-    let _ = writeln!(
-        out,
-        "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{name_size:.3}\" fill=\"#111111\">{name}</text>",
-        SHEET_TITLE_BAND - 8.0
-    );
-    let number = format!("DWG {}", xml(board.id.as_str()));
-    let _ = writeln!(
-        out,
-        "<text x=\"{:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.4\" fill=\"#111111\" text-anchor=\"end\">{number}</text>",
-        width - 4.0,
-        SHEET_TITLE_BAND - 8.0
-    );
-    let subtitle = format!(
-        "{} · SCALE 1:1 · UNITS mm · {} holes",
-        xml(board_title(board)),
-        board.vias.len() + board.placed_pads().into_iter().filter(|pad| pad.drill.is_some()).count()
-    );
-    let subtitle_size = fit_font(&subtitle, width - 8.0, 2.4);
-    let _ = writeln!(
-        out,
-        "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{subtitle_size:.3}\" fill=\"#111111\">{subtitle}</text>",
-        SHEET_TITLE_BAND - 2.8
-    );
-    if let Some(outline) = board.outline {
-        let _ = writeln!(
-            out,
-            "<rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"#8a6d1f\" stroke-width=\"0.15\"/>",
-            map_x(outline.from[0] * scale),
-            map_y(outline.to[1] * scale),
-            span_x,
-            span_y
-        );
-    }
     for via in &vias {
         let diameter = via.drill * scale;
-        let radius = (diameter / 2.0).max(0.12);
-        let _ = writeln!(
-            out,
-            "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{radius:.3}\" fill=\"#111111\" stroke=\"#000000\" stroke-width=\"0.05\"/>",
-            map_x(via.at[0] * scale),
-            map_y(via.at[1] * scale)
-        );
+        let radius = (diameter / 2.0).max(0.35);
+        out.push_str(&drill_symbol_svg(map_x(via.at[0] * scale), map_y(via.at[1] * scale), radius, tool_of(diameter)));
         if via.back_drill.is_some() {
             let _ = writeln!(
                 out,
-                "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"#b03a2e\" stroke-width=\"0.08\" stroke-dasharray=\"0.4 0.3\"/>",
+                "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"#b03a2e\" stroke-width=\"0.1\" stroke-dasharray=\"0.4 0.3\"/>",
                 map_x(via.at[0] * scale),
                 map_y(via.at[1] * scale),
-                radius + 0.5
+                radius + 0.6
             );
         }
     }
@@ -825,13 +1075,8 @@ fn drill_map(board: &Board) -> String {
             continue;
         };
         let diameter = drill * scale;
-        let radius = (diameter / 2.0).max(0.12);
-        let _ = writeln!(
-            out,
-            "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{radius:.3}\" fill=\"#111111\" stroke=\"#000000\" stroke-width=\"0.05\"/>",
-            map_x(pad.at[0] * scale),
-            map_y(pad.at[1] * scale)
-        );
+        let radius = (diameter / 2.0).max(0.35);
+        out.push_str(&drill_symbol_svg(map_x(pad.at[0] * scale), map_y(pad.at[1] * scale), radius, tool_of(diameter)));
     }
     for slot in &board.slots {
         let slot_width = slot.width * scale;
@@ -844,21 +1089,13 @@ fn drill_map(board: &Board) -> String {
             map_y(slot.to[1] * scale)
         );
     }
-    let legend_top = SHEET_TITLE_BAND + content_height + 2.0;
-    let _ = writeln!(
-        out,
-        "<line x1=\"{SHEET_FRAME_INSET}\" y1=\"{legend_top:.3}\" x2=\"{:.3}\" y2=\"{legend_top:.3}\" stroke=\"#111111\" stroke-width=\"0.15\"/>",
-        width - SHEET_FRAME_INSET
+    let subtitle = format!(
+        "{} · SCALE 1:1 · UNITS mm · {} holes",
+        board_title(board),
+        board.vias.len() + board.placed_pads().into_iter().filter(|pad| pad.drill.is_some()).count()
     );
-    for (index, (color, label)) in legend.iter().enumerate() {
-        let y = legend_top + 5.0 + index as f64 * row_height;
-        let _ = writeln!(
-            out,
-            "<text x=\"{margin:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"3\" fill=\"{color}\">{label}</text>"
-        );
-    }
-    let _ = writeln!(out, "</svg>");
-    out
+    out.push_str("</svg>\n");
+    compose_sheet(&out, width, height, "OpenPCB drill map", &subtitle, &board.id, &legend)
 }
 
 /// Creates or validates one export target directory shared by the multi-file writers.
@@ -1017,19 +1254,19 @@ fn layer_view(board: &Board, view: &str) -> Result<String, ServiceError> {
             Some(crate::board::LayerKind::Soldermask) => mask_layer_drawing(board, &layout, view),
             Some(crate::board::LayerKind::Assembly) => assembly_layer_drawing(board, &layout, view),
             _ if view == "Drill" => drill_layer_drawing(board, &layout),
-            _ => build_drawing(board, &layout, Some(PREVIEW_BACKGROUND), true, preview_ink, Some(view)),
+            _ => build_drawing(board, &layout, None, true, print_color, Some(view)),
         }
     };
-    let mut content =
+    let content =
         drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the `{view}` layer view: {error}")))?;
-    content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
-    Ok(add_view_title(board, content, width, height, view))
+    let subtitle = format!("{} · SCALE 1:1 · UNITS mm · LAYER {view}", board_title(board));
+    Ok(compose_sheet(&content, width, height, &view_title(board, view), &subtitle, &board.id, &view_legend(board, view)))
 }
 
-/// Starts one single-layer drawing with the preview background and outline.
+/// Starts one single-layer drawing on white paper with the board outline.
 fn layer_drawing(board: &Board, layout: &Layout) -> Drawing {
     let scale = board.millimetres();
-    let mut drawing = Drawing::new(Size::new(layout.width, layout.height)).with_background(PREVIEW_BACKGROUND);
+    let mut drawing = Drawing::new(Size::new(layout.width, layout.height)).with_background(SHEET_PAPER);
     if let Some(outline) = board.outline {
         let corners = [
             [outline.from[0], outline.from[1]],
@@ -1041,7 +1278,7 @@ fn layer_drawing(board: &Board, layout: &Layout) -> Drawing {
             Shape::Polygon {
                 points: corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect(),
             },
-            Style::stroke(preview_ink(layer_color_value(board, "Edge.Cuts")), 0.15 * layout.scale),
+            Style::stroke(print_color(layer_color_value(board, "Edge.Cuts")), 0.2 * layout.scale),
         ));
     }
     drawing
@@ -1052,7 +1289,7 @@ const MASK_INK_HEX: &str = "#7aa874";
 
 /// Ink of one solder-mask film, declared or synthesized.
 fn mask_ink(board: &Board, view: &str) -> Color {
-    if board.layer(view).is_some() { preview_ink(layer_color_value(board, view)) } else { color_from_hex(MASK_INK_HEX) }
+    if board.layer(view).is_some() { print_color(layer_color_value(board, view)) } else { color_from_hex(MASK_INK_HEX) }
 }
 
 /// Renders one solder-mask film: every pad opening on the matching side.
@@ -1081,7 +1318,7 @@ fn paste_layer_drawing(board: &Board, layout: &Layout, view: &str) -> Drawing {
     let scale = board.millimetres();
     let side = if view.starts_with("B.") { "B." } else { "F." };
     let copper = format!("{side}Cu");
-    let ink = preview_ink(layer_color_value(board, &copper));
+    let ink = print_color(layer_color_value(board, &copper));
     let mut drawing = layer_drawing(board, layout);
     for footprint in board.footprints.iter().filter(|footprint| footprint.layer == copper) {
         for pad in &footprint.pads {
@@ -1101,7 +1338,7 @@ fn paste_layer_drawing(board: &Board, layout: &Layout, view: &str) -> Drawing {
 fn assembly_layer_drawing(board: &Board, layout: &Layout, view: &str) -> Drawing {
     let scale = board.millimetres();
     let side = if view.starts_with("B.") { "B." } else { "F." };
-    let ink = preview_ink(layer_color_value(board, view));
+    let ink = print_color(layer_color_value(board, view));
     let mut drawing = layer_drawing(board, layout);
     for footprint in board.footprints.iter().filter(|footprint| footprint.layer.starts_with(side)) {
         for pad in &footprint.pads {
@@ -1142,7 +1379,7 @@ fn assembly_layer_drawing(board: &Board, layout: &Layout, view: &str) -> Drawing
 fn drill_layer_drawing(board: &Board, layout: &Layout) -> Drawing {
     let scale = board.millimetres();
     let mut drawing = layer_drawing(board, layout);
-    let hole_ink = Color::rgb(232, 232, 232);
+    let hole_ink = Color::rgb(17, 17, 17);
     let mut holes: Vec<[f64; 3]> = Vec::new();
     for via in &board.vias {
         holes.push([via.at[0], via.at[1], via.drill]);
@@ -1177,13 +1414,31 @@ fn drill_layer_drawing(board: &Board, layout: &Layout) -> Drawing {
     drawing
 }
 
+#[derive(Clone, Copy)]
+struct Box2 {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+impl Box2 {
+    fn overlaps(&self, other: &Box2) -> bool {
+        self.x < other.x + other.w + 0.3
+            && other.x < self.x + self.w + 0.3
+            && self.y < other.y + other.h + 0.3
+            && other.y < self.y + self.h + 0.3
+    }
+}
+
 /// Renders one assembly sheet: outline, component outlines, references,
 /// polarity marks, BOM item bubbles and the BOM table below the board.
 ///
-/// The sheet is a standalone white SVG in millimetres. Item numbers follow the
-/// global bill of materials, so the same part on either side carries the same
-/// bubble number. Coordinates keep the document's Y direction, matching the
-/// composite preview and the layer views.
+/// Coordinates are content-page millimetres; the shared sheet composer adds
+/// the frame and title band. The board is scaled to fill at least 60% of the
+/// page width, references move around their component to the first of eight
+/// candidate positions that collides with nothing, and the BOM columns are
+/// measured from their content, so nothing leaves the page.
 fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
     let scale = board.millimetres();
     let bottom = side == "Bottom";
@@ -1203,83 +1458,97 @@ fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
     };
     for footprint in &parts {
         if let Some((silk_min, silk_max)) = footprint_silk(footprint) {
-            include(&mut min, &mut max, (silk_min[0] - 1.0) * scale, (silk_min[1] - 3.5) * scale);
-            include(&mut min, &mut max, (silk_max[0] + 3.5) * scale, (silk_max[1] + 1.0) * scale);
+            include(&mut min, &mut max, (silk_min[0] - 0.5) * scale, (silk_min[1] - 0.5) * scale);
+            include(&mut min, &mut max, (silk_max[0] + 0.5) * scale, (silk_max[1] + 0.5) * scale);
         }
     }
     let span_x = (max[0] - min[0]).max(1.0);
     let span_y = (max[1] - min[1]).max(1.0);
-    let margin = sheet_padding(span_x.max(span_y));
-    let title_band = SHEET_TITLE_BAND;
-    let row_height = 3.4;
-    let columns = [0.0, 10.0, 18.0, 40.0, 66.0];
-    let designator_width = groups
-        .values()
-        .map(|designators| {
-            let characters =
-                designators.iter().map(|name| name.chars().count()).sum::<usize>() + designators.len().saturating_sub(1);
-            characters as f64 * 2.5 * 0.6
-        })
-        .fold("Designators".chars().count() as f64 * 2.5 * 0.6, f64::max)
-        + 3.0;
-    let table_width = columns[4] + designator_width;
-    let width = (span_x + margin * 2.0).max(table_width + margin * 2.0);
-    let table_top = title_band + margin + span_y + margin + 6.0;
-    let height = table_top + (groups.len() + 1) as f64 * row_height + margin;
-    let map_x = |x: f64| margin + (x - min[0]);
-    let map_y = |y: f64| title_band + margin + (y - min[1]);
+    let margin = 8.0;
+    let width = (span_x * 1.25 + margin * 2.0).max(150.0);
+    let fit = ((width - margin * 2.0) / span_x).max(0.1);
+    let board_height = span_y * fit;
+    let map_x = |x: f64| margin + (x - min[0]) * fit;
+    let map_y = |y: f64| margin + (y - min[1]) * fit;
+
+    // Bill-of-materials table geometry, measured from the content.
+    let headers = ["Item", "Qty", "Value", "Footprint", "Designators"];
+    let mut rows: Vec<(usize, Vec<String>)> = Vec::new();
+    for (index, ((value, package), designators)) in groups.iter().enumerate() {
+        let mut designators = designators.clone();
+        designators.sort_unstable();
+        rows.push((
+            index + 1,
+            vec![(index + 1).to_string(), designators.len().to_string(), value.clone(), package.clone(), designators.join(" ")],
+        ));
+    }
+    let table_width = width - margin * 2.0;
+    let mut font = 2.4;
+    let gap = 4.0;
+    let mut designator_lines: Vec<Vec<String>>;
+    let (widths, designator_lines) = loop {
+        let fixed: f64 = headers
+            .iter()
+            .take(4)
+            .zip(0..4)
+            .map(|(header, column)| {
+                rows.iter().map(|row| text_width(&row.1[column], font)).fold(text_width(header, font), f64::max) + 3.0
+            })
+            .sum::<f64>()
+            + gap * 4.0;
+        let designator_width = (table_width - fixed).max(16.0);
+        designator_lines = rows.iter().map(|row| wrap_text(&row.1[4], designator_width, font)).collect();
+        let mut widths = vec![0.0_f64; headers.len()];
+        for (column, header) in headers.iter().enumerate() {
+            let content = if column == 4 {
+                designator_lines
+                    .iter()
+                    .map(|lines| lines.iter().map(|line| text_width(line, font)).fold(0.0, f64::max))
+                    .fold(0.0, f64::max)
+            }
+            else {
+                rows.iter().map(|row| text_width(&row.1[column], font)).fold(0.0, f64::max)
+            };
+            widths[column] = content.max(text_width(header, font)) + 3.0;
+        }
+        let total = widths.iter().sum::<f64>() + gap * 4.0;
+        if total <= table_width || font <= 1.8 {
+            break (widths, designator_lines);
+        }
+        font *= table_width / total;
+    };
+    let mut column_x = Vec::with_capacity(widths.len());
+    let mut cursor = margin;
+    for (column, column_width) in widths.iter().enumerate() {
+        column_x.push(cursor);
+        cursor += column_width + if column + 1 < widths.len() { gap } else { 0.0 };
+    }
+    let row_heights: Vec<f64> = designator_lines.iter().map(|lines| lines.len().max(1) as f64 * (font * 1.7) + 1.4).collect();
+    let table_height = 7.0 + row_heights.iter().sum::<f64>() + 3.0;
+    let content_height = margin + board_height + 12.0 + table_height + margin;
 
     let mut out = String::new();
     let _ = writeln!(out, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
     let _ = writeln!(
         out,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{:.0}\" height=\"{:.0}\" viewBox=\"0 0 {width:.3} {height:.3}\">",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{:.0}\" height=\"{:.0}\" viewBox=\"0 0 {width:.3} {content_height:.3}\">",
         width * SVG_PREVIEW_PX_PER_MM,
-        height * SVG_PREVIEW_PX_PER_MM
+        content_height * SVG_PREVIEW_PX_PER_MM
     );
-    let _ = writeln!(out, "<rect x=\"0\" y=\"0\" width=\"{width:.3}\" height=\"{height:.3}\" fill=\"#ffffff\"/>");
-    let _ = writeln!(
-        out,
-        "<rect x=\"{SHEET_FRAME_INSET}\" y=\"{SHEET_FRAME_INSET}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"#111111\" stroke-width=\"0.2\"/>",
-        width - SHEET_FRAME_INSET * 2.0,
-        height - SHEET_FRAME_INSET * 2.0
-    );
-    let _ = writeln!(
-        out,
-        "<line x1=\"{SHEET_FRAME_INSET}\" y1=\"{title_band}\" x2=\"{:.3}\" y2=\"{title_band}\" stroke=\"#111111\" stroke-width=\"0.2\"/>",
-        width - SHEET_FRAME_INSET
-    );
-    let name = format!("Assembly drawing - {side} side");
-    let name_size = fit_font(&name, width * 0.55, 4.0);
-    let _ = writeln!(
-        out,
-        "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{name_size:.3}\" fill=\"#111111\">{name}</text>",
-        title_band - 8.0
-    );
-    let number = format!("DWG {}", xml(board.id.as_str()));
-    let _ = writeln!(
-        out,
-        "<text x=\"{:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.4\" fill=\"#111111\" text-anchor=\"end\">{number}</text>",
-        width - 4.0,
-        title_band - 8.0
-    );
-    let subtitle = format!("{} · SCALE 1:1 · UNITS mm · {side} side", xml(board_title(board)));
-    let subtitle_size = fit_font(&subtitle, width - 8.0, 2.4);
-    let _ = writeln!(
-        out,
-        "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{subtitle_size:.3}\" fill=\"#111111\">{subtitle}</text>",
-        title_band - 2.8
-    );
+    let _ = writeln!(out, "<rect x=\"0\" y=\"0\" width=\"{width:.3}\" height=\"{content_height:.3}\" fill=\"#ffffff\"/>");
     if let Some(outline) = board.outline {
-        let _ = writeln!(
-            out,
-            "<rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"#8a6d1f\" stroke-width=\"0.2\"/>",
-            map_x(outline.from[0] * scale),
-            map_y(outline.from[1] * scale),
-            (outline.to[0] - outline.from[0]) * scale,
-            (outline.to[1] - outline.from[1]) * scale
-        );
+        let corners = [
+            (outline.from[0] * scale, outline.from[1] * scale),
+            (outline.to[0] * scale, outline.from[1] * scale),
+            (outline.to[0] * scale, outline.to[1] * scale),
+            (outline.from[0] * scale, outline.to[1] * scale),
+        ];
+        let points = corners.iter().map(|(x, y)| format!("{:.3},{:.3}", map_x(*x), map_y(*y))).collect::<Vec<_>>().join(" ");
+        let _ = writeln!(out, "<polygon points=\"{points}\" fill=\"none\" stroke=\"#8a6d1f\" stroke-width=\"0.3\"/>");
     }
+
+    let mut occupied: Vec<Box2> = Vec::new();
+    let mut bubbles: Vec<(&crate::board::Footprint, usize, f64, f64)> = Vec::new();
     for footprint in &parts {
         for pad in &footprint.pads {
             let points = pad_corners(footprint, pad)
@@ -1295,7 +1564,7 @@ fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
                     "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"#111111\" stroke-width=\"0.1\"/>",
                     map_x(center[0] * scale),
                     map_y(center[1] * scale),
-                    drill * scale / 2.0
+                    drill * scale * fit / 2.0
                 );
             }
         }
@@ -1303,23 +1572,21 @@ fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
         else {
             continue;
         };
-        let corners =
-            [[silk_min[0], silk_min[1]], [silk_max[0], silk_min[1]], [silk_max[0], silk_max[1]], [silk_min[0], silk_max[1]]];
-        let points = corners
-            .iter()
-            .map(|corner| format!("{:.3},{:.3}", map_x(corner[0] * scale), map_y(corner[1] * scale)))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let _ = writeln!(out, "<polygon points=\"{points}\" fill=\"none\" stroke=\"#111111\" stroke-width=\"0.15\"/>");
-        if !footprint.ref_.is_empty() {
-            let _ = writeln!(
-                out,
-                "<text x=\"{:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2\" fill=\"#111111\">{}</text>",
-                map_x(silk_min[0] * scale),
-                map_y((silk_min[1] - 0.6) * scale),
-                xml(&footprint.ref_)
-            );
-        }
+        let corners = [
+            (silk_min[0] * scale, silk_min[1] * scale),
+            (silk_max[0] * scale, silk_min[1] * scale),
+            (silk_max[0] * scale, silk_max[1] * scale),
+            (silk_min[0] * scale, silk_max[1] * scale),
+        ];
+        let points = corners.iter().map(|(x, y)| format!("{:.3},{:.3}", map_x(*x), map_y(*y))).collect::<Vec<_>>().join(" ");
+        let _ = writeln!(out, "<polygon points=\"{points}\" fill=\"none\" stroke=\"#111111\" stroke-width=\"0.18\"/>");
+        let boxed = Box2 {
+            x: map_x(silk_min[0] * scale),
+            y: map_y(silk_min[1] * scale),
+            w: (silk_max[0] - silk_min[0]) * scale * fit,
+            h: (silk_max[1] - silk_min[1]) * scale * fit,
+        };
+        occupied.push(boxed);
         if footprint.pads.iter().any(|pad| pad.number == "1") {
             let _ = writeln!(
                 out,
@@ -1330,50 +1597,157 @@ fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
         }
         if let Some(item) = item_of.get(&(footprint.value.clone(), footprint.footprint.clone())) {
             let cx = map_x((silk_max[0] + 1.8) * scale);
-            let cy = map_y((silk_min[1] - 1.8) * scale);
-            let _ = writeln!(
-                out,
-                "<circle cx=\"{cx:.3}\" cy=\"{cy:.3}\" r=\"1.5\" fill=\"#ffffff\" stroke=\"#111111\" stroke-width=\"0.12\"/>"
-            );
-            let _ = writeln!(
-                out,
-                "<text x=\"{cx:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"1.6\" fill=\"#111111\" text-anchor=\"middle\">{item}</text>",
-                cy + 0.55
-            );
+            let cy = map_y((silk_max[1] + 1.8) * scale);
+            bubbles.push((footprint, *item, cx, cy));
+            occupied.push(Box2 { x: cx - 1.6, y: cy - 1.6, w: 3.2, h: 3.2 });
         }
     }
+    for (_, item, cx, cy) in &bubbles {
+        let _ = writeln!(
+            out,
+            "<circle cx=\"{cx:.3}\" cy=\"{cy:.3}\" r=\"1.5\" fill=\"#ffffff\" stroke=\"#111111\" stroke-width=\"0.12\"/>"
+        );
+        let _ = writeln!(
+            out,
+            "<text x=\"{cx:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"1.6\" fill=\"#111111\" text-anchor=\"middle\">{item}</text>",
+            cy + 0.55
+        );
+    }
 
+    // Place every reference at the first collision-free candidate around its
+    // component; a label that has to move further out gains a leader line.
+    let label_size = 2.6;
+    let label_height = label_size + 0.9;
+    for footprint in &parts {
+        if footprint.ref_.is_empty() {
+            continue;
+        }
+        let Some((silk_min, silk_max)) = footprint_silk(footprint)
+        else {
+            continue;
+        };
+        let x0 = map_x(silk_min[0] * scale);
+        let x1 = map_x(silk_max[0] * scale);
+        let y0 = map_y(silk_min[1] * scale);
+        let y1 = map_y(silk_max[1] * scale);
+        let label_width = text_width(&footprint.ref_, label_size) + 0.6;
+        let candidates = [
+            (x0, y0 - label_height - 0.6),
+            (x1 - label_width, y0 - label_height - 0.6),
+            ((x0 + x1) / 2.0 - label_width / 2.0, y0 - label_height - 0.6),
+            (x0, y1 + 0.6),
+            (x1 - label_width, y1 + 0.6),
+            (x0 - label_width - 0.6, (y0 + y1) / 2.0 - label_height / 2.0),
+            (x1 + 0.6, (y0 + y1) / 2.0 - label_height / 2.0),
+            ((x0 + x1) / 2.0 - label_width / 2.0, y0 - label_height - 3.4),
+        ];
+        let in_page = |candidate: Box2| {
+            candidate.x >= margin - 1.0
+                && candidate.x + candidate.w <= width - margin + 1.0
+                && candidate.y >= 2.0
+                && candidate.y + candidate.h <= margin + board_height
+        };
+        let mut placed = candidates
+            .iter()
+            .map(|(x, y)| Box2 { x: *x, y: *y, w: label_width, h: label_height })
+            .find(|candidate| in_page(*candidate) && occupied.iter().all(|other| !candidate.overlaps(other)));
+        let mut leader = None;
+        if placed.is_none() {
+            let x = (x0 + x1) / 2.0 - label_width / 2.0;
+            let y = (y0 - label_height - 3.4).max(2.0);
+            let candidate = Box2 { x, y, w: label_width, h: label_height };
+            leader = Some((x + label_width / 2.0, y + label_height, (x0 + x1) / 2.0, y0));
+            placed = Some(candidate);
+        }
+        let Some(placed) = placed
+        else {
+            continue;
+        };
+        if let Some((fx, fy, tx, ty)) = leader {
+            let _ = writeln!(
+                out,
+                "<line x1=\"{fx:.3}\" y1=\"{fy:.3}\" x2=\"{tx:.3}\" y2=\"{ty:.3}\" stroke=\"#111111\" stroke-width=\"0.1\"/>"
+            );
+        }
+        let _ = writeln!(
+            out,
+            "<rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"#ffffff\"/>",
+            placed.x - 0.2,
+            placed.y,
+            placed.w + 0.4,
+            placed.h
+        );
+        let _ = writeln!(
+            out,
+            "<text x=\"{:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{label_size}\" fill=\"#111111\">{}</text>",
+            placed.x,
+            placed.y + label_size,
+            xml(&footprint.ref_)
+        );
+        occupied.push(placed);
+    }
+
+    // Bill of materials below the drawing, aligned per measured column.
+    let table_top = margin + board_height + 12.0;
+    let _ = writeln!(
+        out,
+        "<line x1=\"{margin:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"#111111\" stroke-width=\"0.2\"/>",
+        table_top - 4.0,
+        width - margin,
+        table_top - 4.0
+    );
+    for (column, header) in headers.iter().enumerate() {
+        let (x, anchor) =
+            if column < 2 { (column_x[column] + widths[column] - 1.0, "end") } else { (column_x[column], "start") };
+        let _ = writeln!(
+            out,
+            "<text x=\"{x:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{font:.3}\" fill=\"#111111\" text-anchor=\"{anchor}\">{header}</text>",
+            table_top
+        );
+    }
     let _ = writeln!(
         out,
         "<line x1=\"{margin:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"#111111\" stroke-width=\"0.15\"/>",
-        table_top - 2.0,
+        table_top + 2.4,
         width - margin,
-        table_top - 2.0
+        table_top + 2.4
     );
-    for (x, header) in columns.iter().zip(["Item", "Qty", "Value", "Footprint", "Designators"]) {
-        let _ = writeln!(
-            out,
-            "<text x=\"{:.3}\" y=\"{table_top:.3}\" font-family=\"monospace\" font-size=\"2.5\" fill=\"#111111\">{header}</text>",
-            margin + x
-        );
-    }
-    for (index, ((value, package), designators)) in groups.iter().enumerate() {
-        let mut designators = designators.clone();
-        designators.sort_unstable();
-        let y = table_top + (index + 1) as f64 * row_height;
-        let cells =
-            [(index + 1).to_string(), designators.len().to_string(), value.clone(), package.clone(), designators.join(" ")];
-        for (x, cell) in columns.iter().zip(cells) {
+    let mut y = table_top + 2.4;
+    for (index, (_, cells)) in rows.iter().enumerate() {
+        let lines = &designator_lines[index];
+        for column in 0..4 {
+            if cells[column].is_empty() {
+                continue;
+            }
+            let (x, anchor) =
+                if column < 2 { (column_x[column] + widths[column] - 1.0, "end") } else { (column_x[column], "start") };
             let _ = writeln!(
                 out,
-                "<text x=\"{:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"2.5\" fill=\"#111111\">{}</text>",
-                margin + x,
-                xml(&cell)
+                "<text x=\"{x:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{font:.3}\" fill=\"#111111\" text-anchor=\"{anchor}\">{}</text>",
+                y + font * 1.5,
+                xml(&cells[column])
             );
         }
+        for (line, text) in lines.iter().enumerate() {
+            let _ = writeln!(
+                out,
+                "<text x=\"{:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{font:.3}\" fill=\"#111111\">{}</text>",
+                column_x[4],
+                y + font * 1.5 + line as f64 * font * 1.7,
+                xml(text)
+            );
+        }
+        y += row_heights[index];
     }
-    let _ = writeln!(out, "</svg>");
-    Ok(out)
+    let _ = writeln!(
+        out,
+        "<line x1=\"{margin:.3}\" y1=\"{y:.3}\" x2=\"{:.3}\" y2=\"{y:.3}\" stroke=\"#111111\" stroke-width=\"0.2\"/>",
+        width - margin
+    );
+
+    let subtitle = format!("{} · SCALE NTS · UNITS mm · {side} side", board_title(board));
+    out.push_str("</svg>\n");
+    Ok(compose_sheet(&out, width, content_height, &format!("Assembly drawing - {side} side"), &subtitle, &board.id, &[]))
 }
 
 /// Human name of one layer view: a layer id, a paste film or the drill map.
@@ -1438,137 +1812,6 @@ fn view_legend(board: &Board, view: &str) -> Vec<(Option<String>, LegendMark, St
         Some(crate::board::LayerKind::Mechanical) => vec![(Some(color), LegendMark::Edge, "Board outline".to_string())],
         _ => vec![(Some(color), LegendMark::Line, format!("{view} geometry"))],
     }
-}
-
-/// Adds the sheet frame, title block and legend band to one layer view.
-fn add_view_title(board: &Board, content: String, width: f64, height: f64, label: &str) -> String {
-    let Some(start) = content.find("<svg")
-    else {
-        return content;
-    };
-    let Some(offset) = content[start..].find('>')
-    else {
-        return content;
-    };
-    let root_end = start + offset;
-    let Some(index) = content.rfind("</svg>")
-    else {
-        return content;
-    };
-    let band = SHEET_TITLE_BAND;
-    let legend_band = 9.0;
-    let total = band + height + legend_band;
-    let mut root = content[start..=root_end].to_string();
-    root = set_svg_attribute(&root, "height", &format!("{:.0}", total * SVG_PREVIEW_PX_PER_MM));
-    root = set_svg_attribute(&root, "viewBox", &format!("0 -{band} {width} {total}"));
-    let background = PREVIEW_BACKGROUND.to_css();
-    let silk = layer_color(board, "F.SilkS");
-    let name = view_title(board, label);
-    let name_size = fit_font(&name, width * 0.58, 4.0);
-    let mut block = String::from("    <g class=\"title-block\">\n");
-    let _ = writeln!(block, "      <rect x=\"0\" y=\"-{band}\" width=\"{width:.3}\" height=\"{band}\" fill=\"{background}\"/>");
-    let _ = writeln!(
-        block,
-        "      <rect x=\"0\" y=\"{height:.3}\" width=\"{width:.3}\" height=\"{legend_band}\" fill=\"{background}\"/>"
-    );
-    let _ = writeln!(
-        block,
-        "      <rect x=\"{SHEET_FRAME_INSET}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"{silk}\" stroke-width=\"0.25\"/>",
-        -band + SHEET_FRAME_INSET,
-        width - SHEET_FRAME_INSET * 2.0,
-        total - SHEET_FRAME_INSET * 2.0
-    );
-    let _ = writeln!(
-        block,
-        "      <line x1=\"{SHEET_FRAME_INSET}\" y1=\"0\" x2=\"{:.3}\" y2=\"0\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
-        width - SHEET_FRAME_INSET
-    );
-    let _ = writeln!(
-        block,
-        "      <text x=\"4\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"{name_size:.3}\" fill=\"{}\">{}</text>",
-        band - 8.0,
-        layer_color(board, "Edge.Cuts"),
-        xml(&name)
-    );
-    let _ = writeln!(
-        block,
-        "      <text x=\"{:.3}\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"2.4\" fill=\"{silk}\" text-anchor=\"end\">DWG {}</text>",
-        width - 4.0,
-        band - 8.0,
-        xml(board.id.as_str())
-    );
-    let _ = writeln!(
-        block,
-        "      <text x=\"4\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"{silk}\">{} · SCALE 1:1 · UNITS mm · LAYER {}</text>",
-        2.8,
-        xml(board_title(board)),
-        xml(label)
-    );
-    let _ = writeln!(
-        block,
-        "      <line x1=\"{SHEET_FRAME_INSET}\" y1=\"{height:.3}\" x2=\"{:.3}\" y2=\"{height:.3}\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
-        width - SHEET_FRAME_INSET
-    );
-    let mut x = 3.0;
-    for (color, mark, text) in view_legend(board, label) {
-        let swatch = 2.6;
-        let y = height + 5.0;
-        if let Some(color) = &color {
-            match mark {
-                LegendMark::Area => {
-                    let _ = writeln!(
-                        block,
-                        "      <rect x=\"{x:.3}\" y=\"{:.3}\" width=\"{swatch}\" height=\"{swatch}\" fill=\"{color}\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
-                        y - swatch
-                    );
-                }
-                LegendMark::Line => {
-                    let _ = writeln!(
-                        block,
-                        "      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.8\"/>",
-                        y - swatch / 2.0,
-                        x + swatch,
-                        y - swatch / 2.0
-                    );
-                }
-                LegendMark::Hole => {
-                    let _ = writeln!(
-                        block,
-                        "      <circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"0.35\"/>",
-                        x + swatch / 2.0,
-                        y - swatch / 2.0,
-                        swatch * 0.32
-                    );
-                }
-                LegendMark::Edge => {
-                    let _ = writeln!(
-                        block,
-                        "      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.3\"/>\n      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.3\"/>",
-                        y - swatch * 0.8,
-                        x + swatch,
-                        y - swatch * 0.8,
-                        y - swatch * 0.2,
-                        x + swatch,
-                        y - swatch * 0.2
-                    );
-                }
-            }
-        }
-        let text_x = x + if color.is_some() { swatch + 1.0 } else { 0.0 };
-        let _ = writeln!(
-            block,
-            "      <text x=\"{text_x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"2.6\" fill=\"{silk}\">{text}</text>"
-        );
-        x = text_x + text.chars().count() as f64 * 2.6 * 0.6 + 6.0;
-    }
-    block.push_str("    </g>\n");
-    let mut result = String::with_capacity(content.len() + block.len());
-    result.push_str(&content[..start]);
-    result.push_str(&root);
-    result.push_str(&content[root_end + 1..index]);
-    result.push_str(&block);
-    result.push_str(&content[index..]);
-    result
 }
 
 /// Bill of materials grouped by value and package.
@@ -1834,160 +2077,16 @@ fn round3(value: f64) -> f64 {
 
 /// Top and bottom composite of tracks, pads and vias with a title block.
 fn svg(board: &Board) -> Result<String, ServiceError> {
-    let (content, width, height) = svg_preview(board)?;
-    Ok(add_title_block(board, content, width, height))
-}
-
-/// Extends an exported SVG with a title band above the board and a layer
-/// legend band below it.
-///
-/// The preview keeps its own canvas; the root `viewBox` grows upward by the
-/// title band and downward by the legend, so existing coordinates stay put.
-fn add_title_block(board: &Board, content: String, width: f64, height: f64) -> String {
-    let Some(start) = content.find("<svg")
-    else {
-        return content;
-    };
-    let Some(offset) = content[start..].find('>')
-    else {
-        return content;
-    };
-    let root_end = start + offset;
-    let Some(index) = content.rfind("</svg>")
-    else {
-        return content;
-    };
-    let legend = layout_legend(board, width, 3.0, 2.6, 2.6, 4.6);
-    let total = height + SHEET_TITLE_BAND + legend.band;
-    let mut root = content[start..=root_end].to_string();
-    root = set_svg_attribute(&root, "height", &format!("{:.0}", total * SVG_PREVIEW_PX_PER_MM));
-    root = set_svg_attribute(&root, "viewBox", &format!("0 -{SHEET_TITLE_BAND} {width} {total}"));
-    let background = PREVIEW_BACKGROUND.to_css();
-    let silk = layer_color(board, "F.SilkS");
-    let ink = layer_color(board, "Edge.Cuts");
-    let mut block = String::from("    <g class=\"title-block\">\n");
-    let _ = writeln!(
-        block,
-        "      <rect x=\"0\" y=\"-{SHEET_TITLE_BAND}\" width=\"{width:.3}\" height=\"{SHEET_TITLE_BAND}\" fill=\"{background}\"/>"
-    );
-    let _ = writeln!(
-        block,
-        "      <rect x=\"0\" y=\"{height:.3}\" width=\"{width:.3}\" height=\"{:.3}\" fill=\"{background}\"/>",
-        legend.band
-    );
-    let _ = writeln!(
-        block,
-        "      <rect x=\"{SHEET_FRAME_INSET}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"{silk}\" stroke-width=\"0.25\"/>",
-        -SHEET_TITLE_BAND + SHEET_FRAME_INSET,
-        width - SHEET_FRAME_INSET * 2.0,
-        total - SHEET_FRAME_INSET * 2.0
-    );
-    let _ = writeln!(
-        block,
-        "      <line x1=\"{SHEET_FRAME_INSET}\" y1=\"0\" x2=\"{:.3}\" y2=\"0\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
-        width - SHEET_FRAME_INSET
-    );
-    let name = board_title(board);
-    let name_size = fit_font(name, width * 0.55, 4.0);
-    let _ = writeln!(
-        block,
-        "      <text x=\"4\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"{name_size:.3}\" fill=\"{ink}\">{}</text>",
-        SHEET_TITLE_BAND - 8.0,
-        xml(name)
-    );
-    let _ = writeln!(
-        block,
-        "      <text x=\"{:.3}\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"2.4\" fill=\"{silk}\" text-anchor=\"end\">DWG {}</text>",
-        width - 4.0,
-        SHEET_TITLE_BAND - 8.0,
-        xml(board.id.as_str())
-    );
-    let subtitle = "SCALE 1:1 · UNITS mm · COMPOSITE · COPPER + SILKSCREEN";
-    let _ = writeln!(
-        block,
-        "      <text x=\"4\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"{silk}\">{subtitle}</text>",
-        2.8
-    );
-    let _ = writeln!(
-        block,
-        "      <line x1=\"{SHEET_FRAME_INSET}\" y1=\"{height:.3}\" x2=\"{:.3}\" y2=\"{height:.3}\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
-        width - SHEET_FRAME_INSET
-    );
-    for (x, row, color, mark, label) in &legend.items {
-        let y = height + legend.size * 2.2 + row;
-        let swatch = legend.swatch;
-        if let Some(color) = color {
-            match mark {
-                LegendMark::Area => {
-                    let _ = writeln!(
-                        block,
-                        "      <rect x=\"{x:.3}\" y=\"{:.3}\" width=\"{swatch}\" height=\"{swatch}\" fill=\"{color}\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
-                        y - swatch
-                    );
-                }
-                LegendMark::Line => {
-                    let _ = writeln!(
-                        block,
-                        "      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.8\"/>",
-                        y - swatch / 2.0,
-                        x + swatch,
-                        y - swatch / 2.0
-                    );
-                }
-                LegendMark::Hole => {
-                    let _ = writeln!(
-                        block,
-                        "      <circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"0.35\"/>",
-                        x + swatch / 2.0,
-                        y - swatch / 2.0,
-                        swatch * 0.32
-                    );
-                }
-                LegendMark::Edge => {
-                    let _ = writeln!(
-                        block,
-                        "      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.3\"/>\n      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.3\"/>",
-                        y - swatch * 0.8,
-                        x + swatch,
-                        y - swatch * 0.8,
-                        y - swatch * 0.2,
-                        x + swatch,
-                        y - swatch * 0.2
-                    );
-                }
-            }
-        }
-        let text_x = x + if color.is_some() { swatch + legend.size * 0.4 } else { 0.0 };
-        let _ = writeln!(
-            block,
-            "      <text x=\"{text_x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"{}\" fill=\"{silk}\">{}</text>",
-            legend.size,
-            xml(label)
-        );
-    }
-    block.push_str("    </g>\n");
-    let mut result = String::with_capacity(content.len() + block.len());
-    result.push_str(&content[..start]);
-    result.push_str(&root);
-    result.push_str(&content[root_end + 1..index]);
-    result.push_str(&block);
-    result.push_str(&content[index..]);
-    result
-}
-
-/// Replaces one quoted attribute value inside the root tag.
-fn set_svg_attribute(tag: &str, attribute: &str, value: &str) -> String {
-    let needle = format!("{attribute}=\"");
-    let Some(start) = tag.find(&needle)
-    else {
-        return tag.to_string();
-    };
-    let value_start = start + needle.len();
-    let Some(offset) = tag[value_start..].find('"')
-    else {
-        return tag.to_string();
-    };
-    format!("{}{value}{}", &tag[..value_start], &tag[value_start + offset..])
+    let (content, width, height) = svg_preview_with(board, Some(SHEET_PAPER), print_color)?;
+    Ok(compose_sheet(
+        &content,
+        width,
+        height,
+        board_title(board),
+        "SCALE 1:1 · UNITS mm · COMPOSITE · COPPER + SILKSCREEN",
+        &board.id,
+        &legend_items(board),
+    ))
 }
 
 /// Drawing title: the board title, or the board id when the document has none.
@@ -2770,23 +2869,22 @@ fn sheet_chrome(drawing: &mut Drawing, map: &SheetMap, width: f64, height: f64, 
         },
         Style::stroke(PRINT_INK, map.size(0.2)),
     ));
-    let name_size = fit_font(info.name, width * 0.55, 4.2);
+    let number = format!("DWG {}", info.number);
+    let number_width = text_width(&number, 2.4);
+    let name_size = fit_font(info.name, (width - 14.0 - number_width).max(12.0), 4.2);
     drawing.push(Element::new(
         Shape::Text { at: map.point(4.0, 8.4), text: info.name.to_string(), size: map.size(name_size) },
         fill_style(PRINT_INK),
     ));
-    let number = format!("DWG {}", info.number);
-    let number_x = (width - 4.0 - number.chars().count() as f64 * 2.4 * 0.6).max(width * 0.55);
+    let number_x = (width - 4.0 - number_width).max(4.0 + text_width(info.name, name_size) + 4.0);
     drawing.push(Element::new(
         Shape::Text { at: map.point(number_x, 8.4), text: number, size: map.size(2.4) },
         fill_style(PRINT_INK),
     ));
+    let subtitle = format!("SCALE {} · UNITS {} · {}", info.scale, info.units, info.view);
+    let subtitle_size = fit_font(&subtitle, width - 8.0, 2.3);
     drawing.push(Element::new(
-        Shape::Text {
-            at: map.point(4.0, 12.0),
-            text: format!("SCALE {} · UNITS {} · {}", info.scale, info.units, info.view),
-            size: map.size(2.3),
-        },
+        Shape::Text { at: map.point(4.0, 13.2), text: subtitle, size: map.size(subtitle_size) },
         fill_style(PRINT_INK),
     ));
 }
@@ -2850,6 +2948,10 @@ fn stackup_sheet(board: &Board, path: &Path) -> Result<Value, ServiceError> {
 }
 
 /// Draws the copper/dielectric cross-section with thickness callouts.
+///
+/// Every label is measured and fitted to its column, and the notes wrap to the
+/// sheet width, so a long declared stackup or a differential-pair summary never
+/// runs past the page edge.
 fn stackup_drawing(board: &Board, scale: f64, y_up: bool) -> Drawing {
     let copper_layers = board.copper_stack();
     let declared = board.stackup;
@@ -2859,15 +2961,44 @@ fn stackup_drawing(board: &Board, scale: f64, y_up: bool) -> Drawing {
     let dielectric_total = copper_layers.len().saturating_sub(1) as f64 * stackup.dielectric_height;
     let board_thickness = copper_total + dielectric_total;
 
+    let width = 190.0;
     let copper_h = 3.2;
     let dielectric_h = (3.2 * stackup.dielectric_height / stackup.copper_thickness.max(1e-6)).clamp(6.0, 14.0);
     let coin_count = copper_layers.len().max(1);
     let diagram_h = coin_count as f64 * copper_h + coin_count.saturating_sub(1) as f64 * dielectric_h;
-    let width = 150.0;
-    let content_top = SHEET_TITLE_BAND + 12.0;
-    let height = content_top + diagram_h + 27.0;
+    let content_top = SHEET_TITLE_BAND + 14.0;
+
+    let mut notes = vec![format!("Total board thickness {:.3} mm · {} copper layers", board_thickness, copper_layers.len())];
+    notes.extend(wrap_text(
+        &if declared.is_some() {
+            "Stackup values as declared in the board file.".to_string()
+        }
+        else {
+            format!(
+                "No stackup declared; showing 1 oz copper and {:.3} mm FR-4 with εr {:.1}.",
+                stackup.dielectric_height, stackup.dielectric_constant
+            )
+        },
+        width - 16.0,
+        2.5,
+    ));
+    let mut impedance_line = String::from("Impedance: 0.20 mm microstrip -> ");
+    match crate::impedance::values(crate::impedance::Structure::Microstrip, 0.2, None, stackup) {
+        Ok(values) => impedance_line.push_str(&format!("{:.1} Ω", values.impedance)),
+        Err(_) => impedance_line.push_str("n/a"),
+    }
+    if let Some(pair) = board.differential_pairs.first()
+        && let Ok(values) =
+            crate::impedance::values(crate::impedance::Structure::DiffMicrostrip, pair.width, Some(pair.gap), stackup)
+    {
+        impedance_line
+            .push_str(&format!(" · DP {} {:.2}/{:.2} mm -> {:.1} Ω", pair.id, pair.width, pair.gap, values.impedance));
+    }
+    notes.extend(wrap_text(&impedance_line, width - 16.0, 2.5));
+    let note_height = notes.len() as f64 * 4.8;
+    let height = content_top + diagram_h + 12.0 + note_height + 10.0;
     let map = SheetMap { scale, height, y_up };
-    let mut drawing = Drawing::new(Size::new(map.size(width), map.size(height))).with_background(Color::rgb(255, 255, 255));
+    let mut drawing = Drawing::new(Size::new(map.size(width), map.size(height))).with_background(SHEET_PAPER);
     sheet_chrome(
         &mut drawing,
         &map,
@@ -2884,8 +3015,8 @@ fn stackup_drawing(board: &Board, scale: f64, y_up: bool) -> Drawing {
 
     let copper_ink = Color::rgb(196, 106, 42);
     let dielectric_ink = Color::rgb(233, 238, 226);
-    let bar_left = 42.0;
-    let bar_right = 96.0;
+    let bar_left = 58.0;
+    let bar_right = 128.0;
     let mut y = content_top;
     for (index, layer) in copper_layers.iter().enumerate() {
         drawing.push(Element::new(
@@ -2899,21 +3030,20 @@ fn stackup_drawing(board: &Board, scale: f64, y_up: bool) -> Drawing {
             },
             Style::both(copper_ink, PRINT_INK, map.size(0.2)),
         ));
+        let name_size = fit_font(layer, bar_left - 12.0, 2.8);
         drawing.push(Element::new(
-            Shape::Text { at: map.point(6.0, y + copper_h - 0.8), text: layer.to_string(), size: map.size(2.8) },
+            Shape::Text { at: map.point(6.0, y + copper_h - 0.8), text: layer.to_string(), size: map.size(name_size) },
             fill_style(PRINT_INK),
         ));
+        let callout = format!("copper {:.3} mm", stackup.copper_thickness);
+        let callout_size = fit_font(&callout, bar_right - bar_left - 5.0, 2.2);
         drawing.push(Element::new(
-            Shape::Text {
-                at: map.point(bar_left + 2.0, y + copper_h - 0.8),
-                text: format!("copper {:.3} mm", stackup.copper_thickness),
-                size: map.size(2.2),
-            },
+            Shape::Text { at: map.point(bar_left + 2.0, y + copper_h - 0.8), text: callout, size: map.size(callout_size) },
             fill_style(Color::rgb(40, 20, 5)),
         ));
         drawing.push(Element::new(
             Shape::Text {
-                at: map.point(98.0, y + copper_h - 0.8),
+                at: map.point(bar_right + 4.0, y + copper_h - 0.8),
                 text: format!("{:.3} mm", stackup.copper_thickness),
                 size: map.size(2.2),
             },
@@ -2936,21 +3066,22 @@ fn stackup_drawing(board: &Board, scale: f64, y_up: bool) -> Drawing {
                 Shape::Text {
                     at: map.point(6.0, y + dielectric_h / 2.0 + 1.0),
                     text: "Dielectric".to_string(),
-                    size: map.size(2.8),
+                    size: map.size(fit_font("Dielectric", bar_left - 12.0, 2.8)),
                 },
                 fill_style(PRINT_INK),
             ));
+            let material = format!("FR-4 · εr {:.1}", stackup.dielectric_constant);
             drawing.push(Element::new(
                 Shape::Text {
                     at: map.point(bar_left + 2.0, y + dielectric_h / 2.0 + 1.0),
-                    text: format!("FR-4 · εr {:.1}", stackup.dielectric_constant),
-                    size: map.size(2.2),
+                    text: material.clone(),
+                    size: map.size(fit_font(&material, bar_right - bar_left - 5.0, 2.2)),
                 },
                 fill_style(PRINT_INK),
             ));
             drawing.push(Element::new(
                 Shape::Text {
-                    at: map.point(98.0, y + dielectric_h / 2.0 + 1.0),
+                    at: map.point(bar_right + 4.0, y + dielectric_h / 2.0 + 1.0),
                     text: format!("{:.3} mm", stackup.dielectric_height),
                     size: map.size(2.2),
                 },
@@ -2962,12 +3093,12 @@ fn stackup_drawing(board: &Board, scale: f64, y_up: bool) -> Drawing {
     // Dimension line down the right edge with a tick at every layer boundary.
     let mut tick = content_top;
     drawing.push(Element::new(
-        Shape::Line { from: map.point(96.8, content_top), to: map.point(96.8, content_top + diagram_h) },
+        Shape::Line { from: map.point(bar_right + 1.0, content_top), to: map.point(bar_right + 1.0, content_top + diagram_h) },
         Style::stroke(PRINT_INK, map.size(0.15)),
     ));
     for index in 0..coin_count {
         drawing.push(Element::new(
-            Shape::Line { from: map.point(96.2, tick), to: map.point(97.4, tick) },
+            Shape::Line { from: map.point(bar_right + 0.2, tick), to: map.point(bar_right + 1.8, tick) },
             Style::stroke(PRINT_INK, map.size(0.15)),
         ));
         tick += copper_h;
@@ -2976,47 +3107,22 @@ fn stackup_drawing(board: &Board, scale: f64, y_up: bool) -> Drawing {
         }
     }
     drawing.push(Element::new(
-        Shape::Line { from: map.point(96.2, content_top + diagram_h), to: map.point(97.4, content_top + diagram_h) },
+        Shape::Line {
+            from: map.point(bar_right + 0.2, content_top + diagram_h),
+            to: map.point(bar_right + 1.8, content_top + diagram_h),
+        },
         Style::stroke(PRINT_INK, map.size(0.15)),
     ));
 
     let notes_top = content_top + diagram_h + 9.0;
-    let note = |drawing: &mut Drawing, line: usize, text: String| {
+    for (line, text) in notes.iter().enumerate() {
         drawing.push(Element::new(
-            Shape::Text { at: map.point(6.0, notes_top + line as f64 * 5.0), text, size: map.size(2.6) },
+            Shape::Text { at: map.point(6.0, notes_top + line as f64 * 4.8), text: text.clone(), size: map.size(2.5) },
             fill_style(PRINT_INK),
         ));
-    };
-    note(&mut drawing, 0, format!("Total board thickness {:.3} mm · {} copper layers", board_thickness, copper_layers.len()));
-    note(
-        &mut drawing,
-        1,
-        if declared.is_some() {
-            "Stackup values as declared in the board file.".to_string()
-        }
-        else {
-            format!(
-                "No stackup declared; showing 1 oz copper and {:.3} mm FR-4 with εr {:.1}.",
-                stackup.dielectric_height, stackup.dielectric_constant
-            )
-        },
-    );
-    let mut impedance_line = String::from("Impedance: 0.20 mm microstrip -> ");
-    match crate::impedance::values(crate::impedance::Structure::Microstrip, 0.2, None, stackup) {
-        Ok(values) => impedance_line.push_str(&format!("{:.1} Ω", values.impedance)),
-        Err(_) => impedance_line.push_str("n/a"),
     }
-    if let Some(pair) = board.differential_pairs.first()
-        && let Ok(values) =
-            crate::impedance::values(crate::impedance::Structure::DiffMicrostrip, pair.width, Some(pair.gap), stackup)
-    {
-        impedance_line
-            .push_str(&format!(" · DP {} {:.2}/{:.2} mm -> {:.1} Ω", pair.id, pair.width, pair.gap, values.impedance));
-    }
-    note(&mut drawing, 2, impedance_line);
     drawing
 }
-
 /// Writes the panelization drawing as SVG and PDF and reports both artifacts.
 fn panel_sheet(board: &Board, path: &Path) -> Result<Value, ServiceError> {
     export_directory("panel", path)?;
@@ -3338,20 +3444,33 @@ fn scale_svg_attribute(tag: &str, attribute: &str, factor: f64) -> String {
 
 /// Renders the composite and reports the canvas size the same viewBox used.
 pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceError> {
+    svg_preview_with(board, Some(PREVIEW_BACKGROUND), preview_ink)
+}
+
+/// Renders the composite on a chosen paper and ink.
+///
+/// The interactive studio preview keeps the dark canvas; every exported sheet
+/// asks for white paper and print-safe ink so a drawing reads like a
+/// manufacturing print.
+fn svg_preview_with(
+    board: &Board,
+    background: Option<Color>,
+    ink: fn(Color) -> Color,
+) -> Result<(String, f64, f64), ServiceError> {
     let scale = board.millimetres();
     let (min, max) = preview_bounds(board);
     let margin = sheet_padding((max[0] - min[0]).max(max[1] - min[1]).max(1.0));
     let width = (max[0] - min[0]).max(1.0) + margin * 2.0;
     let height = (max[1] - min[1]).max(1.0) + margin * 2.0;
     let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: min[1] - margin, width, height, y_up: false };
-    let drawing = build_drawing(board, &layout, Some(PREVIEW_BACKGROUND), false, preview_ink, None);
+    let drawing = build_drawing(board, &layout, background, false, ink, None);
     let mut content = drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the SVG preview: {error}")))?;
     content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
     if !board.texts.is_empty()
         && let Some(index) = content.rfind("</svg>")
     {
         let mut group = String::from("    <g class=\"board-text\">\n");
-        let knockout = PREVIEW_BACKGROUND.to_css();
+        let knockout = background.unwrap_or(SHEET_PAPER).to_css();
         for text in &board.texts {
             let x = (text.at[0] * scale - layout.origin_x) * layout.scale;
             let y = (text.at[1] * scale - layout.origin_y) * layout.scale;
@@ -3419,18 +3538,18 @@ const PNG_WIDTH: u32 = 1024;
 const PNG_HEIGHT: u32 = 768;
 /// Margin between the board and the image edge, in pixels.
 const PNG_MARGIN: f64 = 16.0;
-/// Preview background.
-const PNG_BACKGROUND: [u8; 3] = [14, 26, 20];
-/// Preview outline colour.
-const PNG_OUTLINE: [u8; 3] = [217, 180, 74];
+/// White paper the raster preview is printed on, so the first pixel is white.
+const PNG_BACKGROUND: [u8; 3] = [255, 255, 255];
+/// Preview outline colour: the same dark gold the vector sheets draw.
+const PNG_OUTLINE: [u8; 3] = [138, 109, 31];
 /// Front copper colour.
-const PNG_FRONT: [u8; 3] = [200, 117, 51];
+const PNG_FRONT: [u8; 3] = [163, 82, 30];
 /// Back copper colour.
-const PNG_BACK: [u8; 3] = [47, 111, 176];
+const PNG_BACK: [u8; 3] = [31, 95, 139];
 /// Silkscreen colour.
-const PNG_SILK: [u8; 3] = [230, 230, 230];
-/// Drilled-hole colour.
-const PNG_DRILL: [u8; 3] = [12, 20, 16];
+const PNG_SILK: [u8; 3] = [24, 24, 24];
+/// Drilled-hole colour: paper shows through the hole.
+const PNG_DRILL: [u8; 3] = [255, 255, 255];
 
 /// Writes a top-down raster preview as a valid 8-bit RGBA PNG.
 ///
