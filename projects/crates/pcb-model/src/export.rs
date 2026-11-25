@@ -25,6 +25,8 @@ pub(crate) const SUPPORTED_EXPORTS: &[&str] = &[
     "testpoints",
     "ipc_d_356",
     "layers",
+    "stackup",
+    "panel",
     "svg",
     "pdf",
     "kicad_pcb",
@@ -41,11 +43,8 @@ const A4_LANDSCAPE_PT: [f64; 2] = [841.89, 595.28];
 /// Margin kept around the board inside a PDF page, in points (10 mm).
 pub(crate) const PDF_MARGIN_PT: f64 = 28.34646;
 
-/// Height of the title band above the board in an exported SVG, in board units.
-const SVG_TITLE_BAND: f64 = 8.0;
-
 /// Height reserved at the top of a PDF page for the drawing title, in points.
-pub(crate) const PDF_TITLE_BAND_PT: f64 = 24.0;
+pub(crate) const PDF_TITLE_BAND_PT: f64 = 38.0;
 
 /// Dark background shared by the SVG preview canvas and its title bands.
 const PREVIEW_BACKGROUND: Color = Color::rgb(14, 26, 20);
@@ -59,6 +58,59 @@ const SILK_MARGIN: f64 = 0.8;
 /// Cap height of a footprint reference designator, in millimetres.
 const REFERENCE_SIZE: f64 = 1.6;
 
+/// Height of the drawing title band at the top of a sheet, in millimetres.
+const SHEET_TITLE_BAND: f64 = 16.0;
+
+/// Inset of the sheet frame from the paper edge, in millimetres.
+const SHEET_FRAME_INSET: f64 = 2.0;
+
+/// Padding around drawn content, as a fraction of the content span.
+///
+/// A margin of 10% of the span leaves at least 8% of the final page width on
+/// each side, which keeps every sheet from hugging the paper edge.
+const SHEET_PADDING_FRACTION: f64 = 0.10;
+
+/// Smallest padding a sheet keeps, in millimetres.
+const SHEET_PADDING_MIN: f64 = 4.0;
+
+/// Line style of one legend entry, so a print in black and white stays readable.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LegendMark {
+    /// Filled area: copper, paste or mask.
+    Area,
+    /// Stroke: a track or a silkscreen outline.
+    Line,
+    /// Open circle: a drilled hole.
+    Hole,
+    /// Double line: the board outline.
+    Edge,
+}
+
+/// Fields the title block prints on every drawing sheet.
+struct SheetInfo<'a> {
+    /// Drawing name, for example `F.Cu - Front copper`.
+    name: &'a str,
+    /// Drawing number; the board id is the stable choice.
+    number: &'a str,
+    /// Drawing scale, for example `1:1`.
+    scale: &'a str,
+    /// Measurement unit printed in the title block.
+    units: &'a str,
+    /// Layer name or board side the sheet shows.
+    view: &'a str,
+}
+
+/// Pads the corners of a drawing by at least [`SHEET_PADDING_FRACTION`].
+fn sheet_padding(span: f64) -> f64 {
+    (span * SHEET_PADDING_FRACTION).max(SHEET_PADDING_MIN)
+}
+
+/// Shrinks a font until its estimated width fits `max_width`.
+fn fit_font(text: &str, max_width: f64, desired: f64) -> f64 {
+    let width = (text.chars().count() as f64 * desired * 0.6).max(1e-6);
+    if width <= max_width { desired } else { (desired * max_width / width).max(1.4) }
+}
+
 /// Writes one export target and returns its report.
 pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, ServiceError> {
     if format == "gbr" {
@@ -69,6 +121,12 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
     }
     if format == "layers" {
         return layer_views(board, path);
+    }
+    if format == "stackup" {
+        return stackup_sheet(board, path);
+    }
+    if format == "panel" {
+        return panel_sheet(board, path);
     }
     if format == "png" {
         return png(board, path);
@@ -640,27 +698,97 @@ fn drill_map(board: &Board) -> String {
     };
     let span_x = (max[0] - min[0]).max(1.0);
     let span_y = (max[1] - min[1]).max(1.0);
-    let margin = 6.0;
-    let width = span_x + margin * 2.0;
-    let height = span_y + margin * 2.0;
-    let map_x = |x: f64| x - min[0] + margin;
-    let map_y = |y: f64| max[1] - y + margin;
+    let margin = sheet_padding(span_x.max(span_y));
 
     let mut vias: Vec<&crate::board::Via> = board.vias.iter().collect();
     vias.sort_by(|left, right| left.drill.total_cmp(&right.drill).then_with(|| left.id.cmp(&right.id)));
 
     let mut tools: BTreeMap<String, (f64, usize)> = BTreeMap::new();
     let mut back_drilled = 0usize;
+    for via in &vias {
+        let diameter = via.drill * scale;
+        if via.back_drill.is_some() {
+            back_drilled += 1;
+        }
+        tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0)).1 += 1;
+    }
+    for pad in board.placed_pads() {
+        let Some(drill) = pad.drill
+        else {
+            continue;
+        };
+        let diameter = drill * scale;
+        tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0)).1 += 1;
+    }
+
+    let mut circles: Vec<(f64, usize)> = tools.values().copied().collect();
+    circles.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let mut legend: Vec<(String, String)> = circles
+        .iter()
+        .enumerate()
+        .map(|(index, (diameter, count))| {
+            ("#111111".to_string(), format!("T{} dia {:.3} mm plated x{}", index + 1, diameter, count))
+        })
+        .collect();
+    if !board.slots.is_empty() {
+        legend.push(("#111111".to_string(), format!("routed slots x{} (line)", board.slots.len())));
+    }
+    if back_drilled > 0 {
+        legend.push(("#b03a2e".to_string(), format!("back drill x{back_drilled} (dashed ring)")));
+    }
+
+    let row_height = 6.0;
+    let legend_band = 6.0 + legend.len() as f64 * row_height;
+    let width = span_x + margin * 2.0;
+    let content_height = span_y + margin * 2.0;
+    let height = SHEET_TITLE_BAND + content_height + legend_band;
+    let map_x = |x: f64| x - min[0] + margin;
+    let map_y = |y: f64| SHEET_TITLE_BAND + margin + (max[1] - y);
+
     let mut out = String::new();
     let _ = writeln!(out, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
     let _ = writeln!(
         out,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width:.3}mm\" height=\"{height:.3}mm\" viewBox=\"0 0 {width:.3} {height:.3}\">"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{:.0}\" height=\"{:.0}\" viewBox=\"0 0 {width:.3} {height:.3}\">",
+        width * SVG_PREVIEW_PX_PER_MM,
+        height * SVG_PREVIEW_PX_PER_MM
     );
     let _ = writeln!(out, "<rect x=\"0\" y=\"0\" width=\"{width:.3}\" height=\"{height:.3}\" fill=\"#ffffff\"/>");
     let _ = writeln!(
         out,
-        "<text x=\"4\" y=\"5\" font-family=\"monospace\" font-size=\"2.4\" fill=\"#111111\">OpenPCB drill map</text>"
+        "<rect x=\"{SHEET_FRAME_INSET}\" y=\"{SHEET_FRAME_INSET}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"#111111\" stroke-width=\"0.2\"/>",
+        width - SHEET_FRAME_INSET * 2.0,
+        height - SHEET_FRAME_INSET * 2.0
+    );
+    let _ = writeln!(
+        out,
+        "<line x1=\"{SHEET_FRAME_INSET}\" y1=\"{SHEET_TITLE_BAND}\" x2=\"{:.3}\" y2=\"{SHEET_TITLE_BAND}\" stroke=\"#111111\" stroke-width=\"0.2\"/>",
+        width - SHEET_FRAME_INSET
+    );
+    let name = "OpenPCB drill map";
+    let name_size = fit_font(name, width * 0.5, 4.0);
+    let _ = writeln!(
+        out,
+        "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{name_size:.3}\" fill=\"#111111\">{name}</text>",
+        SHEET_TITLE_BAND - 8.0
+    );
+    let number = format!("DWG {}", xml(board.id.as_str()));
+    let _ = writeln!(
+        out,
+        "<text x=\"{:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.4\" fill=\"#111111\" text-anchor=\"end\">{number}</text>",
+        width - 4.0,
+        SHEET_TITLE_BAND - 8.0
+    );
+    let subtitle = format!(
+        "{} · SCALE 1:1 · UNITS mm · {} holes",
+        xml(board_title(board)),
+        board.vias.len() + board.placed_pads().into_iter().filter(|pad| pad.drill.is_some()).count()
+    );
+    let subtitle_size = fit_font(&subtitle, width - 8.0, 2.4);
+    let _ = writeln!(
+        out,
+        "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{subtitle_size:.3}\" fill=\"#111111\">{subtitle}</text>",
+        SHEET_TITLE_BAND - 2.8
     );
     if let Some(outline) = board.outline {
         let _ = writeln!(
@@ -674,7 +802,7 @@ fn drill_map(board: &Board) -> String {
     }
     for via in &vias {
         let diameter = via.drill * scale;
-        let radius = (diameter / 2.0).max(0.05);
+        let radius = (diameter / 2.0).max(0.12);
         let _ = writeln!(
             out,
             "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{radius:.3}\" fill=\"#111111\" stroke=\"#000000\" stroke-width=\"0.05\"/>",
@@ -682,7 +810,6 @@ fn drill_map(board: &Board) -> String {
             map_y(via.at[1] * scale)
         );
         if via.back_drill.is_some() {
-            back_drilled += 1;
             let _ = writeln!(
                 out,
                 "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"#b03a2e\" stroke-width=\"0.08\" stroke-dasharray=\"0.4 0.3\"/>",
@@ -691,7 +818,6 @@ fn drill_map(board: &Board) -> String {
                 radius + 0.5
             );
         }
-        tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0)).1 += 1;
     }
     for pad in board.placed_pads() {
         let Some(drill) = pad.drill
@@ -699,55 +825,36 @@ fn drill_map(board: &Board) -> String {
             continue;
         };
         let diameter = drill * scale;
-        let radius = (diameter / 2.0).max(0.05);
+        let radius = (diameter / 2.0).max(0.12);
         let _ = writeln!(
             out,
             "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{radius:.3}\" fill=\"#111111\" stroke=\"#000000\" stroke-width=\"0.05\"/>",
             map_x(pad.at[0] * scale),
             map_y(pad.at[1] * scale)
         );
-        tools.entry(format!("{diameter:.3}")).or_insert((diameter, 0)).1 += 1;
     }
     for slot in &board.slots {
-        let width = slot.width * scale;
+        let slot_width = slot.width * scale;
         let _ = writeln!(
             out,
-            "<line x1=\"{:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"#111111\" stroke-width=\"{width:.3}\" stroke-linecap=\"round\"/>",
+            "<line x1=\"{:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"#111111\" stroke-width=\"{slot_width:.3}\" stroke-linecap=\"round\"/>",
             map_x(slot.from[0] * scale),
             map_y(slot.from[1] * scale),
             map_x(slot.to[0] * scale),
             map_y(slot.to[1] * scale)
         );
     }
-
-    let mut line = 0usize;
-    let mut circles: Vec<(f64, usize)> = tools.values().copied().collect();
-    circles.sort_by(|left, right| left.0.total_cmp(&right.0));
-    for (index, (diameter, count)) in circles.iter().enumerate() {
+    let legend_top = SHEET_TITLE_BAND + content_height + 2.0;
+    let _ = writeln!(
+        out,
+        "<line x1=\"{SHEET_FRAME_INSET}\" y1=\"{legend_top:.3}\" x2=\"{:.3}\" y2=\"{legend_top:.3}\" stroke=\"#111111\" stroke-width=\"0.15\"/>",
+        width - SHEET_FRAME_INSET
+    );
+    for (index, (color, label)) in legend.iter().enumerate() {
+        let y = legend_top + 5.0 + index as f64 * row_height;
         let _ = writeln!(
             out,
-            "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#111111\">T{} dia {:.3} mm plated x{}</text>",
-            8.0 + line as f64 * 3.0,
-            index + 1,
-            diameter,
-            count
-        );
-        line += 1;
-    }
-    if !board.slots.is_empty() {
-        let _ = writeln!(
-            out,
-            "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#111111\">routed slots x{} (line)</text>",
-            8.0 + line as f64 * 3.0,
-            board.slots.len()
-        );
-        line += 1;
-    }
-    if back_drilled > 0 {
-        let _ = writeln!(
-            out,
-            "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#b03a2e\">back drill x{back_drilled} (dashed ring)</text>",
-            8.0 + line as f64 * 3.0
+            "<text x=\"{margin:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"3\" fill=\"{color}\">{label}</text>"
         );
     }
     let _ = writeln!(out, "</svg>");
@@ -773,7 +880,7 @@ fn write_views(
     board: &Board,
     format: &str,
     path: &Path,
-    views: &[(&str, &str)],
+    views: &[(String, String)],
     render: fn(&Board, &str) -> Result<String, ServiceError>,
 ) -> Result<Value, ServiceError> {
     export_directory(format, path)?;
@@ -843,38 +950,231 @@ fn dxf_pair(code: u32, value: &str) -> String {
 
 /// Writes one assembly drawing per board side and reports each artifact.
 fn assembly(board: &Board, path: &Path) -> Result<Value, ServiceError> {
-    write_views(board, "asm", path, &[("F_Asm.svg", "Top"), ("B_Asm.svg", "Bottom")], assembly_view)
+    let views = vec![("F_Asm.svg".to_string(), "Top".to_string()), ("B_Asm.svg".to_string(), "Bottom".to_string())];
+    write_views(board, "asm", path, &views, assembly_view)
 }
 
-/// Writes one single-layer fabrication view per outer layer and reports each artifact.
-fn layer_views(board: &Board, path: &Path) -> Result<Value, ServiceError> {
-    write_views(
-        board,
-        "layers",
-        path,
-        &[("F_Cu.svg", "F.Cu"), ("B_Cu.svg", "B.Cu"), ("F_SilkS.svg", "F.SilkS"), ("B_SilkS.svg", "B.SilkS")],
-        layer_view,
-    )
+/// File name of one layer view: `F.Cu` becomes `F_Cu.svg`.
+fn view_file(layer: &str) -> String {
+    format!("{}.svg", layer.replace('.', "_"))
 }
 
-/// Renders one layer in isolation on the canvas the composite preview uses.
+/// Writes one fabrication view per layer the document actually declares.
 ///
-/// All four views share one canvas and one coordinate mapping, so a reader can
-/// stack them like Gerber layers: copper views carry tracks, pads, zones and the
-/// vias that reach the layer, silkscreen views carry the legend and the footprint
-/// outlines and references of the matching copper side, and every view keeps the
-/// board outline.
+/// Copper layers follow the stack order, then every declared silkscreen,
+/// soldermask, assembly and mechanical layer. Solder-paste stencils are
+/// synthesized for each side that carries pads, and a drill view closes the set.
+fn layer_views(board: &Board, path: &Path) -> Result<Value, ServiceError> {
+    let mut views: Vec<(String, String)> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut push = |layer: &str, views: &mut Vec<(String, String)>| {
+        let name = view_file(layer);
+        if seen.insert(name.clone()) {
+            views.push((name, layer.to_string()));
+        }
+    };
+    for layer in board.copper_stack() {
+        push(layer, &mut views);
+    }
+    for layer in &board.layers {
+        if layer.kind != crate::board::LayerKind::Copper {
+            push(&layer.id, &mut views);
+        }
+    }
+    for side in ["F", "B"] {
+        let prefix = format!("{side}.");
+        if board.footprints.iter().any(|footprint| footprint.layer.starts_with(&prefix) && !footprint.pads.is_empty()) {
+            push(&format!("{side}.Mask"), &mut views);
+            push(&format!("{side}.Paste"), &mut views);
+        }
+    }
+    push("Drill", &mut views);
+    write_views(board, "layers", path, &views, layer_view)
+}
+
+/// Renders one layer in isolation on the canvas the other views share.
+///
+/// Copper and silkscreen views use the composite renderer restricted to one
+/// layer; soldermask, paste, assembly and drill views render the objects their
+/// fabrication film carries. Every view keeps the board outline and shares the
+/// same canvas and coordinate mapping so a reader can stack them like Gerber
+/// layers.
 fn layer_view(board: &Board, view: &str) -> Result<String, ServiceError> {
     let (min, max) = preview_bounds(board);
-    let margin = 5.0;
+    let margin = sheet_padding((max[0] - min[0]).max(max[1] - min[1]).max(1.0));
     let width = (max[0] - min[0]).max(1.0) + margin * 2.0;
     let height = (max[1] - min[1]).max(1.0) + margin * 2.0;
     let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: min[1] - margin, width, height, y_up: false };
-    let drawing = build_drawing(board, &layout, Some(PREVIEW_BACKGROUND), true, preview_ink, Some(view));
+    let kind = board.layer(view).map(|layer| layer.kind);
+    let drawing = if view.ends_with(".Mask") {
+        mask_layer_drawing(board, &layout, view)
+    }
+    else if view.ends_with(".Paste") {
+        paste_layer_drawing(board, &layout, view)
+    }
+    else {
+        match kind {
+            Some(crate::board::LayerKind::Soldermask) => mask_layer_drawing(board, &layout, view),
+            Some(crate::board::LayerKind::Assembly) => assembly_layer_drawing(board, &layout, view),
+            _ if view == "Drill" => drill_layer_drawing(board, &layout),
+            _ => build_drawing(board, &layout, Some(PREVIEW_BACKGROUND), true, preview_ink, Some(view)),
+        }
+    };
     let mut content =
         drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the `{view}` layer view: {error}")))?;
     content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
     Ok(add_view_title(board, content, width, height, view))
+}
+
+/// Starts one single-layer drawing with the preview background and outline.
+fn layer_drawing(board: &Board, layout: &Layout) -> Drawing {
+    let scale = board.millimetres();
+    let mut drawing = Drawing::new(Size::new(layout.width, layout.height)).with_background(PREVIEW_BACKGROUND);
+    if let Some(outline) = board.outline {
+        let corners = [
+            [outline.from[0], outline.from[1]],
+            [outline.to[0], outline.from[1]],
+            [outline.to[0], outline.to[1]],
+            [outline.from[0], outline.to[1]],
+        ];
+        drawing.push(Element::new(
+            Shape::Polygon {
+                points: corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect(),
+            },
+            Style::stroke(preview_ink(layer_color_value(board, "Edge.Cuts")), 0.15 * layout.scale),
+        ));
+    }
+    drawing
+}
+
+/// Color of a synthesized soldermask opening.
+const MASK_INK_HEX: &str = "#7aa874";
+
+/// Ink of one solder-mask film, declared or synthesized.
+fn mask_ink(board: &Board, view: &str) -> Color {
+    if board.layer(view).is_some() { preview_ink(layer_color_value(board, view)) } else { color_from_hex(MASK_INK_HEX) }
+}
+
+/// Renders one solder-mask film: every pad opening on the matching side.
+fn mask_layer_drawing(board: &Board, layout: &Layout, view: &str) -> Drawing {
+    let scale = board.millimetres();
+    let side = if view.starts_with("B.") { "B." } else { "F." };
+    let expansion = board.rules.solder_mask_expansion;
+    let ink = mask_ink(board, view);
+    let mut drawing = layer_drawing(board, layout);
+    for footprint in board.footprints.iter().filter(|footprint| footprint.layer.starts_with(side)) {
+        for pad in &footprint.pads {
+            let corners = pad_corners_expanded(footprint, pad, expansion);
+            drawing.push(Element::new(
+                Shape::Polygon {
+                    points: corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect(),
+                },
+                fill_style(ink),
+            ));
+        }
+    }
+    drawing
+}
+
+/// Renders one solder-paste stencil: every pad window on the matching side.
+fn paste_layer_drawing(board: &Board, layout: &Layout, view: &str) -> Drawing {
+    let scale = board.millimetres();
+    let side = if view.starts_with("B.") { "B." } else { "F." };
+    let copper = format!("{side}Cu");
+    let ink = preview_ink(layer_color_value(board, &copper));
+    let mut drawing = layer_drawing(board, layout);
+    for footprint in board.footprints.iter().filter(|footprint| footprint.layer == copper) {
+        for pad in &footprint.pads {
+            let corners = pad_corners(footprint, pad);
+            drawing.push(Element::new(
+                Shape::Polygon {
+                    points: corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect(),
+                },
+                fill_style(ink),
+            ));
+        }
+    }
+    drawing
+}
+
+/// Renders one assembly layer: pads as outlines, silkscreen boxes and references.
+fn assembly_layer_drawing(board: &Board, layout: &Layout, view: &str) -> Drawing {
+    let scale = board.millimetres();
+    let side = if view.starts_with("B.") { "B." } else { "F." };
+    let ink = preview_ink(layer_color_value(board, view));
+    let mut drawing = layer_drawing(board, layout);
+    for footprint in board.footprints.iter().filter(|footprint| footprint.layer.starts_with(side)) {
+        for pad in &footprint.pads {
+            let corners = pad_corners(footprint, pad);
+            drawing.push(Element::new(
+                Shape::Polygon {
+                    points: corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect(),
+                },
+                Style::stroke(ink, 0.12 * layout.scale),
+            ));
+        }
+        let Some((min, max)) = footprint_silk(footprint)
+        else {
+            continue;
+        };
+        let corners = [[min[0], min[1]], [max[0], min[1]], [max[0], max[1]], [min[0], max[1]]];
+        drawing.push(Element::new(
+            Shape::Polygon {
+                points: corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect(),
+            },
+            Style::stroke(ink, 0.15 * layout.scale),
+        ));
+        if !footprint.ref_.is_empty() {
+            drawing.push(Element::new(
+                Shape::Text {
+                    at: layout.point((min[0] - 0.6) * scale, ((min[1] + max[1]) / 2.0 + 0.7) * scale),
+                    text: footprint.ref_.clone(),
+                    size: REFERENCE_SIZE * layout.scale,
+                },
+                fill_style(ink),
+            ));
+        }
+    }
+    drawing
+}
+
+/// Renders one drill film: vias, drilled pads, routed slots and back-drill rings.
+fn drill_layer_drawing(board: &Board, layout: &Layout) -> Drawing {
+    let scale = board.millimetres();
+    let mut drawing = layer_drawing(board, layout);
+    let hole_ink = Color::rgb(232, 232, 232);
+    let mut holes: Vec<[f64; 3]> = Vec::new();
+    for via in &board.vias {
+        holes.push([via.at[0], via.at[1], via.drill]);
+    }
+    for pad in board.placed_pads() {
+        if let Some(drill) = pad.drill.filter(|drill| *drill > 0.0) {
+            holes.push([pad.at[0], pad.at[1], drill]);
+        }
+    }
+    for [x, y, drill] in holes {
+        drawing.push(Element::new(
+            Shape::Circle { center: layout.point(x * scale, y * scale), radius: (drill * scale / 2.0).max(0.15) },
+            fill_style(hole_ink),
+        ));
+    }
+    for slot in &board.slots {
+        drawing.push(Element::new(
+            Shape::Line {
+                from: layout.point(slot.from[0] * scale, slot.from[1] * scale),
+                to: layout.point(slot.to[0] * scale, slot.to[1] * scale),
+            },
+            Style::stroke(hole_ink, slot.width * scale),
+        ));
+    }
+    for via in board.vias.iter().filter(|via| via.back_drill.is_some()) {
+        let radius = (via.drill * scale / 2.0).max(0.15) + 0.5;
+        drawing.push(Element::new(
+            Shape::Circle { center: layout.point(via.at[0] * scale, via.at[1] * scale), radius },
+            Style::stroke(Color::rgb(176, 58, 46), 0.15),
+        ));
+    }
+    drawing
 }
 
 /// Renders one assembly sheet: outline, component outlines, references,
@@ -909,31 +1209,66 @@ fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
     }
     let span_x = (max[0] - min[0]).max(1.0);
     let span_y = (max[1] - min[1]).max(1.0);
-    let margin = 6.0;
-    let title_band = 8.0;
-    let width = span_x + margin * 2.0;
-    let row_height = 2.6;
-    let table_top = title_band + span_y + 6.0;
-    let height = table_top + (groups.len() + 1) as f64 * row_height + 4.0;
-    let map_x = |x: f64| x - min[0] + margin;
-    let map_y = |y: f64| y - min[1] + title_band;
+    let margin = sheet_padding(span_x.max(span_y));
+    let title_band = SHEET_TITLE_BAND;
+    let row_height = 3.4;
+    let columns = [0.0, 10.0, 18.0, 40.0, 66.0];
+    let designator_width = groups
+        .values()
+        .map(|designators| {
+            let characters =
+                designators.iter().map(|name| name.chars().count()).sum::<usize>() + designators.len().saturating_sub(1);
+            characters as f64 * 2.5 * 0.6
+        })
+        .fold("Designators".chars().count() as f64 * 2.5 * 0.6, f64::max)
+        + 3.0;
+    let table_width = columns[4] + designator_width;
+    let width = (span_x + margin * 2.0).max(table_width + margin * 2.0);
+    let table_top = title_band + margin + span_y + margin + 6.0;
+    let height = table_top + (groups.len() + 1) as f64 * row_height + margin;
+    let map_x = |x: f64| margin + (x - min[0]);
+    let map_y = |y: f64| title_band + margin + (y - min[1]);
 
     let mut out = String::new();
     let _ = writeln!(out, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
     let _ = writeln!(
         out,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width:.3}mm\" height=\"{height:.3}mm\" viewBox=\"0 0 {width:.3} {height:.3}\">"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{:.0}\" height=\"{:.0}\" viewBox=\"0 0 {width:.3} {height:.3}\">",
+        width * SVG_PREVIEW_PX_PER_MM,
+        height * SVG_PREVIEW_PX_PER_MM
     );
     let _ = writeln!(out, "<rect x=\"0\" y=\"0\" width=\"{width:.3}\" height=\"{height:.3}\" fill=\"#ffffff\"/>");
     let _ = writeln!(
         out,
-        "<text x=\"{margin:.3}\" y=\"5.0\" font-family=\"monospace\" font-size=\"3\" fill=\"#111111\">Assembly drawing - {side} side</text>"
+        "<rect x=\"{SHEET_FRAME_INSET}\" y=\"{SHEET_FRAME_INSET}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"#111111\" stroke-width=\"0.2\"/>",
+        width - SHEET_FRAME_INSET * 2.0,
+        height - SHEET_FRAME_INSET * 2.0
     );
     let _ = writeln!(
         out,
-        "<text x=\"{:.3}\" y=\"5.0\" font-family=\"monospace\" font-size=\"3\" fill=\"#111111\" text-anchor=\"middle\">{}</text>",
-        width / 2.0,
-        xml(board_title(board))
+        "<line x1=\"{SHEET_FRAME_INSET}\" y1=\"{title_band}\" x2=\"{:.3}\" y2=\"{title_band}\" stroke=\"#111111\" stroke-width=\"0.2\"/>",
+        width - SHEET_FRAME_INSET
+    );
+    let name = format!("Assembly drawing - {side} side");
+    let name_size = fit_font(&name, width * 0.55, 4.0);
+    let _ = writeln!(
+        out,
+        "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{name_size:.3}\" fill=\"#111111\">{name}</text>",
+        title_band - 8.0
+    );
+    let number = format!("DWG {}", xml(board.id.as_str()));
+    let _ = writeln!(
+        out,
+        "<text x=\"{:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.4\" fill=\"#111111\" text-anchor=\"end\">{number}</text>",
+        width - 4.0,
+        title_band - 8.0
+    );
+    let subtitle = format!("{} · SCALE 1:1 · UNITS mm · {side} side", xml(board_title(board)));
+    let subtitle_size = fit_font(&subtitle, width - 8.0, 2.4);
+    let _ = writeln!(
+        out,
+        "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"{subtitle_size:.3}\" fill=\"#111111\">{subtitle}</text>",
+        title_band - 2.8
     );
     if let Some(outline) = board.outline {
         let _ = writeln!(
@@ -985,13 +1320,12 @@ fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
                 xml(&footprint.ref_)
             );
         }
-        if let Some(pad) = footprint.pads.iter().find(|pad| pad.number == "1") {
-            let center = pad_center(footprint, pad);
+        if footprint.pads.iter().any(|pad| pad.number == "1") {
             let _ = writeln!(
                 out,
                 "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"0.45\" fill=\"#111111\"/>",
-                map_x(center[0] * scale),
-                map_y(center[1] * scale)
+                map_x((silk_min[0] - 0.6) * scale),
+                map_y((silk_max[1] + 0.6) * scale)
             );
         }
         if let Some(item) = item_of.get(&(footprint.value.clone(), footprint.footprint.clone())) {
@@ -1016,11 +1350,10 @@ fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
         width - margin,
         table_top - 2.0
     );
-    let columns = [0.0, 8.0, 14.0, 24.0, 42.0];
     for (x, header) in columns.iter().zip(["Item", "Qty", "Value", "Footprint", "Designators"]) {
         let _ = writeln!(
             out,
-            "<text x=\"{:.3}\" y=\"{table_top:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#111111\">{header}</text>",
+            "<text x=\"{:.3}\" y=\"{table_top:.3}\" font-family=\"monospace\" font-size=\"2.5\" fill=\"#111111\">{header}</text>",
             margin + x
         );
     }
@@ -1033,7 +1366,7 @@ fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
         for (x, cell) in columns.iter().zip(cells) {
             let _ = writeln!(
                 out,
-                "<text x=\"{:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#111111\">{}</text>",
+                "<text x=\"{:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"2.5\" fill=\"#111111\">{}</text>",
                 margin + x,
                 xml(&cell)
             );
@@ -1043,7 +1376,71 @@ fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
     Ok(out)
 }
 
-/// Adds a title band naming one drawing view above an otherwise bare preview SVG.
+/// Human name of one layer view: a layer id, a paste film or the drill map.
+fn view_title(board: &Board, view: &str) -> String {
+    if view == "Drill" {
+        return "Drill map".to_string();
+    }
+    if view.ends_with(".Paste") {
+        return format!("Solder paste stencil - {} side", side_word(view));
+    }
+    if view.ends_with(".Mask") && board.layer(view).is_none() {
+        return format!("{view} - {} solder mask", side_word(view));
+    }
+    let kind = board.layer(view).map(|layer| layer.kind);
+    match kind {
+        Some(crate::board::LayerKind::Copper) => format!("{view} - {} copper", side_word(view)),
+        Some(crate::board::LayerKind::Silkscreen) => format!("{view} - {} silkscreen", side_word(view)),
+        Some(crate::board::LayerKind::Soldermask) => format!("{view} - {} solder mask", side_word(view)),
+        Some(crate::board::LayerKind::Assembly) => format!("{view} - {} assembly", side_word(view)),
+        Some(crate::board::LayerKind::Mechanical) if view == "Edge.Cuts" => "Edge.Cuts - board outline".to_string(),
+        Some(crate::board::LayerKind::Mechanical) => format!("{view} - mechanical"),
+        None => format!("{view} - layer"),
+    }
+}
+
+/// `Front` for an `F.` layer, `Back` for a `B.` layer, `Inner` otherwise.
+fn side_word(layer: &str) -> &'static str {
+    if layer.starts_with("B.") {
+        "Back"
+    }
+    else if layer.starts_with("F.") {
+        "Front"
+    }
+    else {
+        "Inner"
+    }
+}
+
+/// Legend entries a single-layer view actually uses.
+fn view_legend(board: &Board, view: &str) -> Vec<(Option<String>, LegendMark, String)> {
+    if view == "Drill" {
+        let mut items = vec![(Some("#e8e8e8".to_string()), LegendMark::Hole, "Drill hole".to_string())];
+        if board.vias.iter().any(|via| via.back_drill.is_some()) {
+            items.push((Some("#b03a2e".to_string()), LegendMark::Hole, "Back drill (dashed)".to_string()));
+        }
+        return items;
+    }
+    if view.ends_with(".Paste") {
+        return vec![(
+            Some(layer_color(board, &format!("{}Cu", if view.starts_with("B.") { "B." } else { "F." }))),
+            LegendMark::Area,
+            format!("{view} window"),
+        )];
+    }
+    if view.ends_with(".Mask") && board.layer(view).is_none() {
+        return vec![(Some(MASK_INK_HEX.to_string()), LegendMark::Area, format!("{view} opening"))];
+    }
+    let color = layer_color(board, view);
+    match board.layer(view).map(|layer| layer.kind) {
+        Some(crate::board::LayerKind::Soldermask) => vec![(Some(color), LegendMark::Area, format!("{view} opening"))],
+        Some(crate::board::LayerKind::Assembly) => vec![(Some(color), LegendMark::Line, format!("{view} outline"))],
+        Some(crate::board::LayerKind::Mechanical) => vec![(Some(color), LegendMark::Edge, "Board outline".to_string())],
+        _ => vec![(Some(color), LegendMark::Line, format!("{view} geometry"))],
+    }
+}
+
+/// Adds the sheet frame, title block and legend band to one layer view.
 fn add_view_title(board: &Board, content: String, width: f64, height: f64, label: &str) -> String {
     let Some(start) = content.find("<svg")
     else {
@@ -1058,32 +1455,112 @@ fn add_view_title(board: &Board, content: String, width: f64, height: f64, label
     else {
         return content;
     };
-    let total = height + SVG_TITLE_BAND;
+    let band = SHEET_TITLE_BAND;
+    let legend_band = 9.0;
+    let total = band + height + legend_band;
     let mut root = content[start..=root_end].to_string();
     root = set_svg_attribute(&root, "height", &format!("{:.0}", total * SVG_PREVIEW_PX_PER_MM));
-    root = set_svg_attribute(&root, "viewBox", &format!("0 -{SVG_TITLE_BAND} {width} {total}"));
+    root = set_svg_attribute(&root, "viewBox", &format!("0 -{band} {width} {total}"));
     let background = PREVIEW_BACKGROUND.to_css();
-    let title_size = 4.0;
+    let silk = layer_color(board, "F.SilkS");
+    let name = view_title(board, label);
+    let name_size = fit_font(&name, width * 0.58, 4.0);
     let mut block = String::from("    <g class=\"title-block\">\n");
+    let _ = writeln!(block, "      <rect x=\"0\" y=\"-{band}\" width=\"{width:.3}\" height=\"{band}\" fill=\"{background}\"/>");
     let _ = writeln!(
         block,
-        "      <rect x=\"0\" y=\"-{SVG_TITLE_BAND}\" width=\"{width}\" height=\"{SVG_TITLE_BAND}\" fill=\"{background}\"/>"
+        "      <rect x=\"0\" y=\"{height:.3}\" width=\"{width:.3}\" height=\"{legend_band}\" fill=\"{background}\"/>"
     );
     let _ = writeln!(
         block,
-        "      <text x=\"2.5\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"{title_size}\" fill=\"{}\">{}</text>",
-        title_size - 1.0,
+        "      <rect x=\"{SHEET_FRAME_INSET}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"{silk}\" stroke-width=\"0.25\"/>",
+        -band + SHEET_FRAME_INSET,
+        width - SHEET_FRAME_INSET * 2.0,
+        total - SHEET_FRAME_INSET * 2.0
+    );
+    let _ = writeln!(
+        block,
+        "      <line x1=\"{SHEET_FRAME_INSET}\" y1=\"0\" x2=\"{:.3}\" y2=\"0\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
+        width - SHEET_FRAME_INSET
+    );
+    let _ = writeln!(
+        block,
+        "      <text x=\"4\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"{name_size:.3}\" fill=\"{}\">{}</text>",
+        band - 8.0,
         layer_color(board, "Edge.Cuts"),
+        xml(&name)
+    );
+    let _ = writeln!(
+        block,
+        "      <text x=\"{:.3}\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"2.4\" fill=\"{silk}\" text-anchor=\"end\">DWG {}</text>",
+        width - 4.0,
+        band - 8.0,
+        xml(board.id.as_str())
+    );
+    let _ = writeln!(
+        block,
+        "      <text x=\"4\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"{silk}\">{} · SCALE 1:1 · UNITS mm · LAYER {}</text>",
+        2.8,
+        xml(board_title(board)),
         xml(label)
     );
     let _ = writeln!(
         block,
-        "      <text x=\"{:.3}\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"{title_size}\" fill=\"{}\" text-anchor=\"middle\">{}</text>",
-        width / 2.0,
-        title_size - 1.0,
-        layer_color(board, "F.SilkS"),
-        xml(board_title(board))
+        "      <line x1=\"{SHEET_FRAME_INSET}\" y1=\"{height:.3}\" x2=\"{:.3}\" y2=\"{height:.3}\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
+        width - SHEET_FRAME_INSET
     );
+    let mut x = 3.0;
+    for (color, mark, text) in view_legend(board, label) {
+        let swatch = 2.6;
+        let y = height + 5.0;
+        if let Some(color) = &color {
+            match mark {
+                LegendMark::Area => {
+                    let _ = writeln!(
+                        block,
+                        "      <rect x=\"{x:.3}\" y=\"{:.3}\" width=\"{swatch}\" height=\"{swatch}\" fill=\"{color}\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
+                        y - swatch
+                    );
+                }
+                LegendMark::Line => {
+                    let _ = writeln!(
+                        block,
+                        "      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.8\"/>",
+                        y - swatch / 2.0,
+                        x + swatch,
+                        y - swatch / 2.0
+                    );
+                }
+                LegendMark::Hole => {
+                    let _ = writeln!(
+                        block,
+                        "      <circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"0.35\"/>",
+                        x + swatch / 2.0,
+                        y - swatch / 2.0,
+                        swatch * 0.32
+                    );
+                }
+                LegendMark::Edge => {
+                    let _ = writeln!(
+                        block,
+                        "      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.3\"/>\n      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.3\"/>",
+                        y - swatch * 0.8,
+                        x + swatch,
+                        y - swatch * 0.8,
+                        y - swatch * 0.2,
+                        x + swatch,
+                        y - swatch * 0.2
+                    );
+                }
+            }
+        }
+        let text_x = x + if color.is_some() { swatch + 1.0 } else { 0.0 };
+        let _ = writeln!(
+            block,
+            "      <text x=\"{text_x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"2.6\" fill=\"{silk}\">{text}</text>"
+        );
+        x = text_x + text.chars().count() as f64 * 2.6 * 0.6 + 6.0;
+    }
     block.push_str("    </g>\n");
     let mut result = String::with_capacity(content.len() + block.len());
     result.push_str(&content[..start]);
@@ -1380,44 +1857,107 @@ fn add_title_block(board: &Board, content: String, width: f64, height: f64) -> S
     else {
         return content;
     };
-    let legend = layout_legend(board, width, 2.5, 2.5, 2.5, 4.5);
-    let total = height + SVG_TITLE_BAND + legend.band;
+    let legend = layout_legend(board, width, 3.0, 2.6, 2.6, 4.6);
+    let total = height + SHEET_TITLE_BAND + legend.band;
     let mut root = content[start..=root_end].to_string();
     root = set_svg_attribute(&root, "height", &format!("{:.0}", total * SVG_PREVIEW_PX_PER_MM));
-    root = set_svg_attribute(&root, "viewBox", &format!("0 -{SVG_TITLE_BAND} {width} {total}"));
+    root = set_svg_attribute(&root, "viewBox", &format!("0 -{SHEET_TITLE_BAND} {width} {total}"));
     let background = PREVIEW_BACKGROUND.to_css();
     let silk = layer_color(board, "F.SilkS");
+    let ink = layer_color(board, "Edge.Cuts");
     let mut block = String::from("    <g class=\"title-block\">\n");
     let _ = writeln!(
         block,
-        "      <rect x=\"0\" y=\"-{SVG_TITLE_BAND}\" width=\"{width}\" height=\"{SVG_TITLE_BAND}\" fill=\"{background}\"/>"
+        "      <rect x=\"0\" y=\"-{SHEET_TITLE_BAND}\" width=\"{width:.3}\" height=\"{SHEET_TITLE_BAND}\" fill=\"{background}\"/>"
     );
     let _ = writeln!(
         block,
-        "      <rect x=\"0\" y=\"{height}\" width=\"{width}\" height=\"{:.3}\" fill=\"{background}\"/>",
+        "      <rect x=\"0\" y=\"{height:.3}\" width=\"{width:.3}\" height=\"{:.3}\" fill=\"{background}\"/>",
         legend.band
     );
-    let title_size = 4.0;
     let _ = writeln!(
         block,
-        "      <text x=\"{:.3}\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"{title_size}\" fill=\"{}\" text-anchor=\"middle\">{}</text>",
-        width / 2.0,
-        title_size - 1.0,
-        layer_color(board, "Edge.Cuts"),
-        xml(board_title(board))
+        "      <rect x=\"{SHEET_FRAME_INSET}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"{silk}\" stroke-width=\"0.25\"/>",
+        -SHEET_TITLE_BAND + SHEET_FRAME_INSET,
+        width - SHEET_FRAME_INSET * 2.0,
+        total - SHEET_FRAME_INSET * 2.0
     );
-    for (x, row, color, label) in &legend.items {
-        let y = height + legend.size * 2.0 + row;
+    let _ = writeln!(
+        block,
+        "      <line x1=\"{SHEET_FRAME_INSET}\" y1=\"0\" x2=\"{:.3}\" y2=\"0\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
+        width - SHEET_FRAME_INSET
+    );
+    let name = board_title(board);
+    let name_size = fit_font(name, width * 0.55, 4.0);
+    let _ = writeln!(
+        block,
+        "      <text x=\"4\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"{name_size:.3}\" fill=\"{ink}\">{}</text>",
+        SHEET_TITLE_BAND - 8.0,
+        xml(name)
+    );
+    let _ = writeln!(
+        block,
+        "      <text x=\"{:.3}\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"2.4\" fill=\"{silk}\" text-anchor=\"end\">DWG {}</text>",
+        width - 4.0,
+        SHEET_TITLE_BAND - 8.0,
+        xml(board.id.as_str())
+    );
+    let subtitle = "SCALE 1:1 · UNITS mm · COMPOSITE · COPPER + SILKSCREEN";
+    let _ = writeln!(
+        block,
+        "      <text x=\"4\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"{silk}\">{subtitle}</text>",
+        2.8
+    );
+    let _ = writeln!(
+        block,
+        "      <line x1=\"{SHEET_FRAME_INSET}\" y1=\"{height:.3}\" x2=\"{:.3}\" y2=\"{height:.3}\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
+        width - SHEET_FRAME_INSET
+    );
+    for (x, row, color, mark, label) in &legend.items {
+        let y = height + legend.size * 2.2 + row;
+        let swatch = legend.swatch;
         if let Some(color) = color {
-            let _ = writeln!(
-                block,
-                "      <rect x=\"{x:.3}\" y=\"{:.3}\" width=\"{}\" height=\"{}\" fill=\"{color}\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
-                y - legend.swatch,
-                legend.swatch,
-                legend.swatch
-            );
+            match mark {
+                LegendMark::Area => {
+                    let _ = writeln!(
+                        block,
+                        "      <rect x=\"{x:.3}\" y=\"{:.3}\" width=\"{swatch}\" height=\"{swatch}\" fill=\"{color}\" stroke=\"{silk}\" stroke-width=\"0.2\"/>",
+                        y - swatch
+                    );
+                }
+                LegendMark::Line => {
+                    let _ = writeln!(
+                        block,
+                        "      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.8\"/>",
+                        y - swatch / 2.0,
+                        x + swatch,
+                        y - swatch / 2.0
+                    );
+                }
+                LegendMark::Hole => {
+                    let _ = writeln!(
+                        block,
+                        "      <circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"0.35\"/>",
+                        x + swatch / 2.0,
+                        y - swatch / 2.0,
+                        swatch * 0.32
+                    );
+                }
+                LegendMark::Edge => {
+                    let _ = writeln!(
+                        block,
+                        "      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.3\"/>\n      <line x1=\"{x:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"{color}\" stroke-width=\"0.3\"/>",
+                        y - swatch * 0.8,
+                        x + swatch,
+                        y - swatch * 0.8,
+                        y - swatch * 0.2,
+                        x + swatch,
+                        y - swatch * 0.2
+                    );
+                }
+            }
         }
-        let text_x = x + if color.is_some() { legend.swatch + legend.size * 0.4 } else { 0.0 };
+        let text_x = x + if color.is_some() { swatch + legend.size * 0.4 } else { 0.0 };
         let _ = writeln!(
             block,
             "      <text x=\"{text_x:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"{}\" fill=\"{silk}\">{}</text>",
@@ -1455,29 +1995,51 @@ fn board_title(board: &Board) -> &str {
     board.title.as_deref().filter(|title| !title.is_empty()).unwrap_or(board.id.as_str())
 }
 
-/// Legend entries for the title block: colour swatch and label.
+/// Whether one layer carries any object the composite preview draws.
+fn layer_has_content(board: &Board, layer: &str) -> bool {
+    board.tracks.iter().any(|track| track.layer == layer)
+        || board.zones.iter().any(|zone| zone.layer == layer)
+        || board.texts.iter().any(|text| text.layer == layer)
+        || board.footprints.iter().any(|footprint| footprint.layer == layer || silk_layer(&footprint.layer) == layer)
+}
+
+/// Whether the board has any hole or slot to map.
+fn has_drills(board: &Board) -> bool {
+    !board.vias.is_empty() || !board.slots.is_empty() || board.placed_pads().into_iter().any(|pad| pad.drill.is_some())
+}
+
+/// Legend entries for the title block: swatch colour, line style and label.
 ///
-/// Swatch colours reuse the layer palette and the drill ink of the previews.
-/// The board size line follows when the document declares an outline.
-fn legend_items(board: &Board) -> Vec<(Option<String>, String)> {
-    let mut items = vec![
-        (Some(layer_color(board, "F.Cu")), "Front copper".to_string()),
-        (Some(layer_color(board, "B.Cu")), "Back copper".to_string()),
-        (Some(layer_color(board, "F.SilkS")), "Silkscreen".to_string()),
-        (Some(DRILL_COLOR.to_css()), "Drill".to_string()),
-        (Some(layer_color(board, "Edge.Cuts")), "Edge cuts".to_string()),
-    ];
+/// Only styles the drawing actually uses are listed. The line mark keeps the
+/// entries apart when the sheet is printed in black and white. The board size
+/// line follows when the document declares an outline.
+fn legend_items(board: &Board) -> Vec<(Option<String>, LegendMark, String)> {
+    let mut items = Vec::new();
+    for layer in board.copper_stack() {
+        if layer_has_content(board, layer) {
+            items.push((Some(layer_color(board, layer)), LegendMark::Line, format!("{layer} copper")));
+        }
+    }
+    for layer in &board.layers {
+        if layer.kind == crate::board::LayerKind::Silkscreen && layer_has_content(board, &layer.id) {
+            items.push((Some(layer_color(board, &layer.id)), LegendMark::Line, format!("{} silkscreen", layer.id)));
+        }
+    }
+    if has_drills(board) {
+        items.push((Some("#e8e8e8".to_string()), LegendMark::Hole, "Drill hole".to_string()));
+    }
     if let Some(outline) = board.outline {
+        items.push((Some(layer_color(board, "Edge.Cuts")), LegendMark::Edge, "Edge cuts".to_string()));
         let scale = board.millimetres();
         let width = (outline.to[0] - outline.from[0]) * scale;
         let height = (outline.to[1] - outline.from[1]) * scale;
-        items.push((None, format!("Board: {} x {} mm", trim_mm(width), trim_mm(height))));
+        items.push((None, LegendMark::Area, format!("Board: {} x {} mm", trim_mm(width), trim_mm(height))));
     }
     items
 }
 
-/// One placed legend item: x, row offset, optional swatch colour, label.
-type LegendItem = (f64, f64, Option<String>, String);
+/// One placed legend item: x, row offset, optional colour, line style, label.
+type LegendItem = (f64, f64, Option<String>, LegendMark, String);
 
 /// A laid-out legend band: placed items, band height, swatch and font sizes.
 struct Legend {
@@ -1495,7 +2057,7 @@ fn layout_legend(board: &Board, width: f64, inset: f64, size: f64, swatch: f64, 
     let mut items = Vec::new();
     let mut x = inset;
     let mut row = 0.0;
-    for (color, label) in legend_items(board) {
+    for (color, mark, label) in legend_items(board) {
         let label_width = label.chars().count() as f64 * size * 0.6;
         let swatch_width = if color.is_some() { swatch + size * 0.4 } else { 0.0 };
         let item_width = swatch_width + label_width;
@@ -1503,7 +2065,7 @@ fn layout_legend(board: &Board, width: f64, inset: f64, size: f64, swatch: f64, 
             x = inset;
             row += row_gap;
         }
-        items.push((x, row, color, label));
+        items.push((x, row, color, mark, label));
         x += item_width + size * 1.6;
     }
     let pad = size * 2.0;
@@ -1624,36 +2186,87 @@ pub(crate) fn pdf_page(board: &Board) -> PdfPage {
     }
 }
 
-/// Places the title and the layer legend on a PDF page.
+/// Places the frame, title block and layer legend on a PDF page.
 ///
 /// Page coordinates are points with Y growing up, so the title sits inside
 /// the band reserved at the top and the legend rows descend from the band
-/// reserved at the bottom.
+/// reserved at the bottom. The legend lists only the styles the sheet uses.
 fn draw_pdf_title_block(board: &Board, drawing: &mut Drawing, page_width: f64, page_height: f64, legend: &Legend) {
-    let title_size = 11.0;
-    let title = board_title(board).to_string();
-    let title_width = title.chars().count() as f64 * title_size * 0.6;
+    let inset = 6.0;
+    let frame =
+        [[inset, inset], [page_width - inset, inset], [page_width - inset, page_height - inset], [inset, page_height - inset]];
     drawing.push(Element::new(
-        Shape::Text {
-            at: DrawPoint::new((page_width - title_width) / 2.0, page_height - PDF_TITLE_BAND_PT + title_size - 4.0),
-            text: title,
-            size: title_size,
-        },
+        Shape::Polygon { points: frame.iter().map(|corner| DrawPoint::new(corner[0], corner[1])).collect() },
+        Style::stroke(PRINT_INK, 0.8),
+    ));
+    let band_bottom = page_height - PDF_TITLE_BAND_PT;
+    drawing.push(Element::new(
+        Shape::Line { from: DrawPoint::new(inset, band_bottom), to: DrawPoint::new(page_width - inset, band_bottom) },
+        Style::stroke(PRINT_INK, 0.6),
+    ));
+    let title_size = 13.0;
+    let title = board_title(board);
+    let title_font = fit_font(title, (page_width - inset * 2.0) * 0.6, title_size);
+    drawing.push(Element::new(
+        Shape::Text { at: DrawPoint::new(inset + 2.0, page_height - 14.0), text: title.to_string(), size: title_font },
         fill_style(print_color(layer_color_value(board, "Edge.Cuts"))),
     ));
-    for (x, row, color, label) in &legend.items {
+    let number = format!("DWG {}", board.id);
+    let number_width = number.chars().count() as f64 * 8.0 * 0.6;
+    drawing.push(Element::new(
+        Shape::Text {
+            at: DrawPoint::new(page_width - inset - 2.0 - number_width, page_height - 14.0),
+            text: number,
+            size: 8.0,
+        },
+        fill_style(PRINT_INK),
+    ));
+    drawing.push(Element::new(
+        Shape::Text {
+            at: DrawPoint::new(inset + 2.0, page_height - 26.0),
+            text: "SCALE 1:1 | UNITS mm | COMPOSITE | COPPER + SILKSCREEN".to_string(),
+            size: 7.0,
+        },
+        fill_style(PRINT_INK),
+    ));
+    for (x, row, color, mark, label) in &legend.items {
         let y = legend.band - legend.size * 2.0 - row;
+        let swatch = legend.swatch;
         if let Some(color) = color {
-            let corners = [
-                [*x, y + 1.0],
-                [x + legend.swatch, y + 1.0],
-                [x + legend.swatch, y - legend.swatch + 1.0],
-                [*x, y - legend.swatch + 1.0],
-            ];
-            drawing.push(Element::new(
-                Shape::Polygon { points: corners.iter().map(|corner| DrawPoint::new(corner[0], corner[1])).collect() },
-                fill_style(print_color(color_from_hex(color))),
-            ));
+            let ink = print_color(color_from_hex(color));
+            match mark {
+                LegendMark::Area => {
+                    let corners =
+                        [[*x, y + 1.0], [x + swatch, y + 1.0], [x + swatch, y - swatch + 1.0], [*x, y - swatch + 1.0]];
+                    drawing.push(Element::new(
+                        Shape::Polygon { points: corners.iter().map(|corner| DrawPoint::new(corner[0], corner[1])).collect() },
+                        fill_style(ink),
+                    ));
+                }
+                LegendMark::Line => {
+                    drawing.push(Element::new(
+                        Shape::Line {
+                            from: DrawPoint::new(*x, y - swatch / 2.0),
+                            to: DrawPoint::new(x + swatch, y - swatch / 2.0),
+                        },
+                        Style::stroke(ink, 2.0),
+                    ));
+                }
+                LegendMark::Hole => {
+                    drawing.push(Element::new(
+                        Shape::Circle { center: DrawPoint::new(x + swatch / 2.0, y - swatch / 2.0), radius: swatch * 0.32 },
+                        Style::stroke(ink, 1.2),
+                    ));
+                }
+                LegendMark::Edge => {
+                    for offset in [swatch * 0.8, swatch * 0.2] {
+                        drawing.push(Element::new(
+                            Shape::Line { from: DrawPoint::new(*x, y - offset), to: DrawPoint::new(x + swatch, y - offset) },
+                            Style::stroke(ink, 0.8),
+                        ));
+                    }
+                }
+            }
         }
         let text_x = x + if color.is_some() { legend.swatch + legend.size * 0.4 } else { 0.0 };
         drawing.push(Element::new(
@@ -1818,10 +2431,13 @@ fn build_drawing(
         if view.is_some_and(|view| !board.via_covers(via, view)) {
             continue;
         }
+        let via_layer = view
+            .filter(|layer| board.layer(layer).is_some_and(|layer| layer.kind == crate::board::LayerKind::Copper))
+            .unwrap_or("F.Cu");
         let center = layout.point(via.at[0] * scale, via.at[1] * scale);
         drawing.push(Element::new(
             Shape::Circle { center, radius: via.diameter * scale * layout.scale / 2.0 },
-            fill_style(layer_ink("F.Cu")),
+            fill_style(layer_ink(via_layer)),
         ));
         if via.drill > 0.0 {
             drawing.push(Element::new(
@@ -1969,6 +2585,21 @@ pub(crate) fn pad_corners(footprint: &crate::board::Footprint, pad: &crate::boar
     })
 }
 
+/// Returns the four rotated corners of one pad, grown by a mask expansion.
+fn pad_corners_expanded(footprint: &crate::board::Footprint, pad: &crate::board::Pad, expansion: f64) -> [[f64; 2]; 4] {
+    let angle = footprint.rotation.to_radians();
+    let (sin, cos) = (angle.sin(), angle.cos());
+    let center_x = footprint.x + pad.x * cos - pad.y * sin;
+    let center_y = footprint.y + pad.x * sin + pad.y * cos;
+    let half_w = pad.w / 2.0 + expansion;
+    let half_h = pad.h / 2.0 + expansion;
+    [[-half_w, -half_h], [half_w, -half_h], [half_w, half_h], [-half_w, half_h]].map(|[local_x, local_y]| {
+        let x = center_x + local_x * cos - local_y * sin;
+        let y = center_y + local_x * sin + local_y * cos;
+        [x, y]
+    })
+}
+
 /// Resolves a layer colour, falling back to the default copper tone.
 fn layer_color_value(board: &Board, layer: &str) -> Color {
     color_from_hex(&layer_color(board, layer))
@@ -2099,6 +2730,571 @@ pub(crate) fn preview_bounds(board: &Board) -> ([f64; 2], [f64; 2]) {
     (min, max)
 }
 
+/// Maps millimetres on a drawing sheet to drawing units.
+///
+/// SVG keeps millimetres and grows downwards; PDF uses points and grows
+/// upwards, so the same sheet description serves both outputs.
+struct SheetMap {
+    scale: f64,
+    height: f64,
+    y_up: bool,
+}
+
+impl SheetMap {
+    fn point(&self, x: f64, y: f64) -> DrawPoint {
+        let y = if self.y_up { (self.height - y) * self.scale } else { y * self.scale };
+        DrawPoint::new(x * self.scale, y)
+    }
+
+    fn size(&self, value: f64) -> f64 {
+        value * self.scale
+    }
+}
+
+/// Draws the sheet frame and title block shared by the new drawing sheets.
+fn sheet_chrome(drawing: &mut Drawing, map: &SheetMap, width: f64, height: f64, info: &SheetInfo) {
+    let frame = [
+        [SHEET_FRAME_INSET, SHEET_FRAME_INSET],
+        [width - SHEET_FRAME_INSET, SHEET_FRAME_INSET],
+        [width - SHEET_FRAME_INSET, height - SHEET_FRAME_INSET],
+        [SHEET_FRAME_INSET, height - SHEET_FRAME_INSET],
+    ];
+    drawing.push(Element::new(
+        Shape::Polygon { points: frame.iter().map(|corner| map.point(corner[0], corner[1])).collect() },
+        Style::stroke(PRINT_INK, map.size(0.25)),
+    ));
+    drawing.push(Element::new(
+        Shape::Line {
+            from: map.point(SHEET_FRAME_INSET, SHEET_TITLE_BAND),
+            to: map.point(width - SHEET_FRAME_INSET, SHEET_TITLE_BAND),
+        },
+        Style::stroke(PRINT_INK, map.size(0.2)),
+    ));
+    let name_size = fit_font(info.name, width * 0.55, 4.2);
+    drawing.push(Element::new(
+        Shape::Text { at: map.point(4.0, 8.4), text: info.name.to_string(), size: map.size(name_size) },
+        fill_style(PRINT_INK),
+    ));
+    let number = format!("DWG {}", info.number);
+    let number_x = (width - 4.0 - number.chars().count() as f64 * 2.4 * 0.6).max(width * 0.55);
+    drawing.push(Element::new(
+        Shape::Text { at: map.point(number_x, 8.4), text: number, size: map.size(2.4) },
+        fill_style(PRINT_INK),
+    ));
+    drawing.push(Element::new(
+        Shape::Text {
+            at: map.point(4.0, 12.0),
+            text: format!("SCALE {} · UNITS {} · {}", info.scale, info.units, info.view),
+            size: map.size(2.3),
+        },
+        fill_style(PRINT_INK),
+    ));
+}
+
+/// Legend line on a new drawing sheet.
+fn sheet_legend(drawing: &mut Drawing, map: &SheetMap, x: f64, y: f64, mark: LegendMark, color: Color, label: &str) {
+    match mark {
+        LegendMark::Area => {
+            let corners = [[x, y - 2.2], [x + 3.2, y - 2.2], [x + 3.2, y], [x, y]];
+            drawing.push(Element::new(
+                Shape::Polygon { points: corners.iter().map(|corner| map.point(corner[0], corner[1])).collect() },
+                Style::both(color, PRINT_INK, map.size(0.15)),
+            ));
+        }
+        LegendMark::Line => {
+            drawing.push(Element::new(
+                Shape::Line { from: map.point(x, y - 1.1), to: map.point(x + 3.2, y - 1.1) },
+                Style::stroke(color, map.size(0.6)),
+            ));
+        }
+        LegendMark::Hole => {
+            drawing.push(Element::new(
+                Shape::Circle { center: map.point(x + 1.6, y - 1.1), radius: map.size(1.0) },
+                Style::stroke(color, map.size(0.35)),
+            ));
+        }
+        LegendMark::Edge => {
+            for offset in [0.4, 1.8] {
+                drawing.push(Element::new(
+                    Shape::Line { from: map.point(x, y - offset), to: map.point(x + 3.2, y - offset) },
+                    Style::stroke(color, map.size(0.2)),
+                ));
+            }
+        }
+    }
+    drawing.push(Element::new(
+        Shape::Text { at: map.point(x + 4.2, y), text: label.to_string(), size: map.size(2.5) },
+        fill_style(PRINT_INK),
+    ));
+}
+
+/// Writes the layer cross-section as SVG and PDF and reports both artifacts.
+fn stackup_sheet(board: &Board, path: &Path) -> Result<Value, ServiceError> {
+    export_directory("stackup", path)?;
+    let mut artifacts = Vec::new();
+    let mut total = 0u64;
+    let svg = stackup_drawing(board, 1.0, false);
+    let content = svg.to_svg().map_err(|error| crate::invalid(format!("cannot render the stackup drawing: {error}")))?;
+    let content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
+    let bytes = crate::atomic_write(&path.join("Stackup.svg"), content.as_bytes())?;
+    total += bytes;
+    artifacts.push(json!({ "name": "Stackup.svg", "bytes": bytes }));
+    let pdf = stackup_drawing(board, PT_PER_MM, true);
+    let bytes = crate::atomic_write(
+        &path.join("Stackup.pdf"),
+        &pdf.to_pdf().map_err(|error| crate::invalid(format!("cannot render the stackup PDF: {error}")))?,
+    )?;
+    total += bytes;
+    artifacts.push(json!({ "name": "Stackup.pdf", "bytes": bytes }));
+    Ok(json!({ "path": path.to_string_lossy(), "format": "stackup", "bytes": total, "artifacts": artifacts }))
+}
+
+/// Draws the copper/dielectric cross-section with thickness callouts.
+fn stackup_drawing(board: &Board, scale: f64, y_up: bool) -> Drawing {
+    let copper_layers = board.copper_stack();
+    let declared = board.stackup;
+    let stackup =
+        declared.unwrap_or(crate::board::Stackup { copper_thickness: 0.035, dielectric_height: 0.2, dielectric_constant: 4.2 });
+    let copper_total = copper_layers.len() as f64 * stackup.copper_thickness;
+    let dielectric_total = copper_layers.len().saturating_sub(1) as f64 * stackup.dielectric_height;
+    let board_thickness = copper_total + dielectric_total;
+
+    let copper_h = 3.2;
+    let dielectric_h = (3.2 * stackup.dielectric_height / stackup.copper_thickness.max(1e-6)).clamp(6.0, 14.0);
+    let coin_count = copper_layers.len().max(1);
+    let diagram_h = coin_count as f64 * copper_h + coin_count.saturating_sub(1) as f64 * dielectric_h;
+    let width = 150.0;
+    let content_top = SHEET_TITLE_BAND + 12.0;
+    let height = content_top + diagram_h + 27.0;
+    let map = SheetMap { scale, height, y_up };
+    let mut drawing = Drawing::new(Size::new(map.size(width), map.size(height))).with_background(Color::rgb(255, 255, 255));
+    sheet_chrome(
+        &mut drawing,
+        &map,
+        width,
+        height,
+        &SheetInfo {
+            name: "Stackup - layer cross-section",
+            number: &board.id,
+            scale: "NTS",
+            units: "mm",
+            view: if declared.is_some() { "DECLARED STACKUP" } else { "ASSUMED STACKUP" },
+        },
+    );
+
+    let copper_ink = Color::rgb(196, 106, 42);
+    let dielectric_ink = Color::rgb(233, 238, 226);
+    let bar_left = 42.0;
+    let bar_right = 96.0;
+    let mut y = content_top;
+    for (index, layer) in copper_layers.iter().enumerate() {
+        drawing.push(Element::new(
+            Shape::Polygon {
+                points: vec![
+                    map.point(bar_left, y),
+                    map.point(bar_right, y),
+                    map.point(bar_right, y + copper_h),
+                    map.point(bar_left, y + copper_h),
+                ],
+            },
+            Style::both(copper_ink, PRINT_INK, map.size(0.2)),
+        ));
+        drawing.push(Element::new(
+            Shape::Text { at: map.point(6.0, y + copper_h - 0.8), text: layer.to_string(), size: map.size(2.8) },
+            fill_style(PRINT_INK),
+        ));
+        drawing.push(Element::new(
+            Shape::Text {
+                at: map.point(bar_left + 2.0, y + copper_h - 0.8),
+                text: format!("copper {:.3} mm", stackup.copper_thickness),
+                size: map.size(2.2),
+            },
+            fill_style(Color::rgb(40, 20, 5)),
+        ));
+        drawing.push(Element::new(
+            Shape::Text {
+                at: map.point(98.0, y + copper_h - 0.8),
+                text: format!("{:.3} mm", stackup.copper_thickness),
+                size: map.size(2.2),
+            },
+            fill_style(PRINT_INK),
+        ));
+        y += copper_h;
+        if index + 1 < copper_layers.len() {
+            drawing.push(Element::new(
+                Shape::Polygon {
+                    points: vec![
+                        map.point(bar_left, y),
+                        map.point(bar_right, y),
+                        map.point(bar_right, y + dielectric_h),
+                        map.point(bar_left, y + dielectric_h),
+                    ],
+                },
+                Style::both(dielectric_ink, PRINT_INK, map.size(0.2)),
+            ));
+            drawing.push(Element::new(
+                Shape::Text {
+                    at: map.point(6.0, y + dielectric_h / 2.0 + 1.0),
+                    text: "Dielectric".to_string(),
+                    size: map.size(2.8),
+                },
+                fill_style(PRINT_INK),
+            ));
+            drawing.push(Element::new(
+                Shape::Text {
+                    at: map.point(bar_left + 2.0, y + dielectric_h / 2.0 + 1.0),
+                    text: format!("FR-4 · εr {:.1}", stackup.dielectric_constant),
+                    size: map.size(2.2),
+                },
+                fill_style(PRINT_INK),
+            ));
+            drawing.push(Element::new(
+                Shape::Text {
+                    at: map.point(98.0, y + dielectric_h / 2.0 + 1.0),
+                    text: format!("{:.3} mm", stackup.dielectric_height),
+                    size: map.size(2.2),
+                },
+                fill_style(PRINT_INK),
+            ));
+            y += dielectric_h;
+        }
+    }
+    // Dimension line down the right edge with a tick at every layer boundary.
+    let mut tick = content_top;
+    drawing.push(Element::new(
+        Shape::Line { from: map.point(96.8, content_top), to: map.point(96.8, content_top + diagram_h) },
+        Style::stroke(PRINT_INK, map.size(0.15)),
+    ));
+    for index in 0..coin_count {
+        drawing.push(Element::new(
+            Shape::Line { from: map.point(96.2, tick), to: map.point(97.4, tick) },
+            Style::stroke(PRINT_INK, map.size(0.15)),
+        ));
+        tick += copper_h;
+        if index + 1 < coin_count {
+            tick += dielectric_h;
+        }
+    }
+    drawing.push(Element::new(
+        Shape::Line { from: map.point(96.2, content_top + diagram_h), to: map.point(97.4, content_top + diagram_h) },
+        Style::stroke(PRINT_INK, map.size(0.15)),
+    ));
+
+    let notes_top = content_top + diagram_h + 9.0;
+    let note = |drawing: &mut Drawing, line: usize, text: String| {
+        drawing.push(Element::new(
+            Shape::Text { at: map.point(6.0, notes_top + line as f64 * 5.0), text, size: map.size(2.6) },
+            fill_style(PRINT_INK),
+        ));
+    };
+    note(&mut drawing, 0, format!("Total board thickness {:.3} mm · {} copper layers", board_thickness, copper_layers.len()));
+    note(
+        &mut drawing,
+        1,
+        if declared.is_some() {
+            "Stackup values as declared in the board file.".to_string()
+        }
+        else {
+            format!(
+                "No stackup declared; showing 1 oz copper and {:.3} mm FR-4 with εr {:.1}.",
+                stackup.dielectric_height, stackup.dielectric_constant
+            )
+        },
+    );
+    let mut impedance_line = String::from("Impedance: 0.20 mm microstrip -> ");
+    match crate::impedance::values(crate::impedance::Structure::Microstrip, 0.2, None, stackup) {
+        Ok(values) => impedance_line.push_str(&format!("{:.1} Ω", values.impedance)),
+        Err(_) => impedance_line.push_str("n/a"),
+    }
+    if let Some(pair) = board.differential_pairs.first()
+        && let Ok(values) =
+            crate::impedance::values(crate::impedance::Structure::DiffMicrostrip, pair.width, Some(pair.gap), stackup)
+    {
+        impedance_line
+            .push_str(&format!(" · DP {} {:.2}/{:.2} mm -> {:.1} Ω", pair.id, pair.width, pair.gap, values.impedance));
+    }
+    note(&mut drawing, 2, impedance_line);
+    drawing
+}
+
+/// Writes the panelization drawing as SVG and PDF and reports both artifacts.
+fn panel_sheet(board: &Board, path: &Path) -> Result<Value, ServiceError> {
+    export_directory("panel", path)?;
+    let mut artifacts = Vec::new();
+    let mut total = 0u64;
+    let svg = panel_drawing(board, 1.0, false)?;
+    let content = svg.to_svg().map_err(|error| crate::invalid(format!("cannot render the panel drawing: {error}")))?;
+    let content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
+    let bytes = crate::atomic_write(&path.join("Panel.svg"), content.as_bytes())?;
+    total += bytes;
+    artifacts.push(json!({ "name": "Panel.svg", "bytes": bytes }));
+    let pdf = panel_drawing(board, PT_PER_MM, true)?;
+    let bytes = crate::atomic_write(
+        &path.join("Panel.pdf"),
+        &pdf.to_pdf().map_err(|error| crate::invalid(format!("cannot render the panel PDF: {error}")))?,
+    )?;
+    total += bytes;
+    artifacts.push(json!({ "name": "Panel.pdf", "bytes": bytes }));
+    Ok(json!({ "path": path.to_string_lossy(), "format": "panel", "bytes": total, "artifacts": artifacts }))
+}
+
+/// Draws a default 2 x 2 V-CUT panel with rails, tooling holes and dimensions.
+///
+/// The CLI has no per-export option channel, so the drawing uses the same
+/// defaults the panelization report documents: 2 columns by 2 rows, 2 mm gaps,
+/// a 5 mm rail, V-CUT seams and four Ø3 mm tooling holes.
+fn panel_drawing(board: &Board, scale: f64, y_up: bool) -> Result<Drawing, ServiceError> {
+    let report = crate::panel::report(
+        board,
+        crate::panel::PanelizeRequest {
+            columns: 2,
+            rows: 2,
+            gap_x: Some(2.0),
+            gap_y: Some(2.0),
+            rail: Some(5.0),
+            tab: Some("v-cut".to_string()),
+            tab_width: None,
+            tab_spacing: None,
+            tooling_hole: Some(3.0),
+            tooling_hole_inset: Some(2.5),
+        },
+    )?;
+    let panel_from = json_pair(&report["panelOutline"]["from"]);
+    let panel_to = json_pair(&report["panelOutline"]["to"]);
+    let panel_w = (panel_to[0] - panel_from[0]).max(1.0);
+    let panel_h = (panel_to[1] - panel_from[1]).max(1.0);
+    let width = 18.0 + panel_w + 44.0;
+    let content_top = SHEET_TITLE_BAND + 18.0;
+    let height = content_top + panel_h + 50.0;
+    let map = SheetMap { scale, height, y_up };
+    let mut drawing = Drawing::new(Size::new(map.size(width), map.size(height))).with_background(Color::rgb(255, 255, 255));
+    let columns = report["columns"].as_u64().unwrap_or(2);
+    let rows = report["rows"].as_u64().unwrap_or(2);
+    let view = format!("{columns} x {rows} ARRAY · V-CUT");
+    sheet_chrome(
+        &mut drawing,
+        &map,
+        width,
+        height,
+        &SheetInfo { name: "Panelization - board array", number: &board.id, scale: "1:1", units: "mm", view: &view },
+    );
+    let left = 12.0;
+    let px = |x: f64| left + (x - panel_from[0]);
+    let py = |y: f64| content_top + (y - panel_from[1]);
+
+    drawing.push(Element::new(
+        Shape::Polygon {
+            points: vec![
+                map.point(px(panel_from[0]), py(panel_from[1])),
+                map.point(px(panel_to[0]), py(panel_from[1])),
+                map.point(px(panel_to[0]), py(panel_to[1])),
+                map.point(px(panel_from[0]), py(panel_to[1])),
+            ],
+        },
+        Style::stroke(PRINT_INK, map.size(0.35)),
+    ));
+    if let Some(placements) = report["placements"].as_array() {
+        for (index, placement) in placements.iter().enumerate() {
+            let from = json_pair(&placement["from"]);
+            let to = json_pair(&placement["to"]);
+            let corners = [
+                map.point(px(from[0]), py(from[1])),
+                map.point(px(to[0]), py(from[1])),
+                map.point(px(to[0]), py(to[1])),
+                map.point(px(from[0]), py(to[1])),
+            ];
+            drawing.push(Element::new(
+                Shape::Polygon { points: corners.to_vec() },
+                Style::stroke(layer_color_value(board, "Edge.Cuts"), map.size(0.22)),
+            ));
+            drawing.push(Element::new(
+                Shape::Text {
+                    at: map.point(px((from[0] + to[0]) / 2.0) - 2.5, py((from[1] + to[1]) / 2.0) + 1.2),
+                    text: format!("{}", index + 1),
+                    size: map.size(4.0),
+                },
+                fill_style(Color::rgb(120, 120, 120)),
+            ));
+        }
+    }
+    if let Some(seams) = report["seams"].as_array() {
+        for seam in seams {
+            let from = json_pair(&seam["from"]);
+            let to = json_pair(&seam["to"]);
+            drawing.push(Element::new(
+                Shape::Line { from: map.point(px(from[0]), py(from[1])), to: map.point(px(to[0]), py(to[1])) },
+                Style {
+                    stroke: Some(Color::rgb(176, 58, 46)),
+                    width: map.size(0.25),
+                    dash: Some([map.size(2.0), map.size(1.0)]),
+                    ..Style::default()
+                },
+            ));
+        }
+    }
+    if let Some(tabs) = report["tabs"].as_array() {
+        for tab in tabs {
+            let x = tab["x"].as_f64().unwrap_or(0.0);
+            let y = tab["y"].as_f64().unwrap_or(0.0);
+            let w = tab["width"].as_f64().unwrap_or(0.0);
+            let h = tab["height"].as_f64().unwrap_or(0.0);
+            let corners = [
+                map.point(px(x), py(y)),
+                map.point(px(x + w), py(y)),
+                map.point(px(x + w), py(y + h)),
+                map.point(px(x), py(y + h)),
+            ];
+            drawing.push(Element::new(Shape::Polygon { points: corners.to_vec() }, Style::stroke(PRINT_INK, map.size(0.2))));
+        }
+    }
+    if let Some(holes) = report["toolingHoles"].as_array() {
+        for hole in holes {
+            let x = hole["x"].as_f64().unwrap_or(0.0);
+            let y = hole["y"].as_f64().unwrap_or(0.0);
+            let diameter = hole["diameter"].as_f64().unwrap_or(0.0);
+            let center = map.point(px(x), py(y));
+            let half = diameter.max(0.2) / 2.0;
+            drawing
+                .push(Element::new(Shape::Circle { center, radius: map.size(half) }, Style::stroke(PRINT_INK, map.size(0.25))));
+            drawing.push(Element::new(
+                Shape::Line { from: map.point(px(x) - half - 1.0, py(y)), to: map.point(px(x) + half + 1.0, py(y)) },
+                Style::stroke(PRINT_INK, map.size(0.12)),
+            ));
+            drawing.push(Element::new(
+                Shape::Line { from: map.point(px(x), py(y) - half - 1.0), to: map.point(px(x), py(y) + half + 1.0) },
+                Style::stroke(PRINT_INK, map.size(0.12)),
+            ));
+        }
+    }
+
+    // Overall dimensions and the array pitch.
+    let dim_y = py(panel_to[1]) + 10.0;
+    for (x, tick) in [(px(panel_from[0]), 0.0), (px(panel_to[0]), 0.0)] {
+        drawing.push(Element::new(
+            Shape::Line { from: map.point(x, dim_y - 2.0 + tick), to: map.point(x, dim_y + 2.0 + tick) },
+            Style::stroke(PRINT_INK, map.size(0.2)),
+        ));
+    }
+    drawing.push(Element::new(
+        Shape::Line { from: map.point(px(panel_from[0]), dim_y), to: map.point(px(panel_to[0]), dim_y) },
+        Style::stroke(PRINT_INK, map.size(0.2)),
+    ));
+    drawing.push(Element::new(
+        Shape::Text {
+            at: map.point(px(panel_from[0]), dim_y - 2.4),
+            text: format!("Panel width {:.1} mm", panel_w),
+            size: map.size(2.5),
+        },
+        fill_style(PRINT_INK),
+    ));
+    let dim_x = px(panel_to[0]) + 9.0;
+    drawing.push(Element::new(
+        Shape::Line { from: map.point(dim_x, py(panel_from[1])), to: map.point(dim_x, py(panel_to[1])) },
+        Style::stroke(PRINT_INK, map.size(0.2)),
+    ));
+    for y in [py(panel_from[1]), py(panel_to[1])] {
+        drawing.push(Element::new(
+            Shape::Line { from: map.point(dim_x - 2.0, y), to: map.point(dim_x + 2.0, y) },
+            Style::stroke(PRINT_INK, map.size(0.2)),
+        ));
+    }
+    drawing.push(Element::new(
+        Shape::Text {
+            at: map.point(dim_x + 1.5, py(panel_from[1]) + panel_h / 2.0),
+            text: format!("Panel height {:.1} mm", panel_h),
+            size: map.size(2.5),
+        },
+        fill_style(PRINT_INK),
+    ));
+    if let Some(placements) = report["placements"].as_array()
+        && placements.len() > 1
+    {
+        let first = json_pair(&placements[0]["from"]);
+        let second = json_pair(&placements[1]["from"]);
+        let pitch_x = second[0] - first[0];
+        if pitch_x.abs() > 0.01 {
+            let y = py(panel_from[1]) - 5.0;
+            drawing.push(Element::new(
+                Shape::Line { from: map.point(px(first[0]), y), to: map.point(px(second[0]), y) },
+                Style::stroke(PRINT_INK, map.size(0.2)),
+            ));
+            drawing.push(Element::new(
+                Shape::Text {
+                    at: map.point(px(first[0]), y - 1.6),
+                    text: format!("Array pitch {pitch_x:.1} mm"),
+                    size: map.size(2.4),
+                },
+                fill_style(PRINT_INK),
+            ));
+        }
+        let pitch_y = second[1] - first[1];
+        if pitch_y.abs() > 0.01 {
+            let x = px(panel_to[0]) + 3.0;
+            drawing.push(Element::new(
+                Shape::Line { from: map.point(x, py(first[1])), to: map.point(x, py(second[1])) },
+                Style::stroke(PRINT_INK, map.size(0.2)),
+            ));
+        }
+    }
+
+    let notes_top = height - 34.0;
+    let board_size =
+        [report["boardSize"]["width"].as_f64().unwrap_or(0.0), report["boardSize"]["height"].as_f64().unwrap_or(0.0)];
+    let notes = [
+        format!(
+            "{columns} x {rows} array · {} boards · gap {:.1} x {:.1} mm · rail {:.1} mm",
+            report["boardCount"].as_u64().unwrap_or(0),
+            report["gapX"].as_f64().unwrap_or(0.0),
+            report["gapY"].as_f64().unwrap_or(0.0),
+            report["rail"].as_f64().unwrap_or(0.0)
+        ),
+        format!(
+            "Board {:.1} x {:.1} mm · V-CUT seams · tooling Ø{:.1} mm x {}",
+            board_size[0],
+            board_size[1],
+            report["toolingHoles"]
+                .as_array()
+                .and_then(|holes| holes.first())
+                .and_then(|hole| hole["diameter"].as_f64())
+                .unwrap_or(0.0),
+            report["toolingHoleCount"].as_u64().unwrap_or(0)
+        ),
+        format!(
+            "Panel utilization {:.1} % · breakaway {:.1} %",
+            report["utilizationPercent"].as_f64().unwrap_or(0.0),
+            report["breakaway"]["percent"].as_f64().unwrap_or(0.0)
+        ),
+    ];
+    for (index, note) in notes.iter().enumerate() {
+        drawing.push(Element::new(
+            Shape::Text { at: map.point(6.0, notes_top + index as f64 * 4.6), text: note.clone(), size: map.size(2.6) },
+            fill_style(PRINT_INK),
+        ));
+    }
+    let legend_y = height - 14.0;
+    let entries = [
+        (
+            LegendMark::Edge,
+            layer_color_value(board, "Edge.Cuts"),
+            format!("Board {:.1} x {:.1} mm", board_size[0], board_size[1]),
+        ),
+        (LegendMark::Edge, PRINT_INK, "Panel edge".to_string()),
+        (LegendMark::Line, Color::rgb(176, 58, 46), "V-CUT seam".to_string()),
+        (LegendMark::Hole, PRINT_INK, "Tooling hole".to_string()),
+    ];
+    let mut x = 6.0;
+    for (mark, color, label) in entries {
+        sheet_legend(&mut drawing, &map, x, legend_y, mark, color, &label);
+        x += 6.0 + label.chars().count() as f64 * 2.5 * 0.6 + 6.0;
+    }
+    Ok(drawing)
+}
+
+/// Reads a two-element JSON array of millimetres.
+fn json_pair(value: &Value) -> [f64; 2] {
+    [value.get(0).and_then(Value::as_f64).unwrap_or(0.0), value.get(1).and_then(Value::as_f64).unwrap_or(0.0)]
+}
+
 /// Pixels per board millimetre used as the root size of the exported SVG.
 const SVG_PREVIEW_PX_PER_MM: f64 = 10.0;
 
@@ -2144,7 +3340,7 @@ fn scale_svg_attribute(tag: &str, attribute: &str, factor: f64) -> String {
 pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceError> {
     let scale = board.millimetres();
     let (min, max) = preview_bounds(board);
-    let margin = 5.0;
+    let margin = sheet_padding((max[0] - min[0]).max(max[1] - min[1]).max(1.0));
     let width = (max[0] - min[0]).max(1.0) + margin * 2.0;
     let height = (max[1] - min[1]).max(1.0) + margin * 2.0;
     let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: min[1] - margin, width, height, y_up: false };

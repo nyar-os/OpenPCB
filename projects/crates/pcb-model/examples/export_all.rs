@@ -163,6 +163,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "kicad_pcb",
         "ipc2581",
         "png",
+        "layers",
+        "asm",
+        "stackup",
+        "panel",
     ] {
         let target = out.join(format!("demo-board.{format}"));
         match export(handle, format, &target) {

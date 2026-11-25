@@ -864,6 +864,8 @@ export type ExportTarget =
     | 'drill_map'
     | 'dxf'
     | 'layers'
+    | 'stackup'
+    | 'panel'
     | 'pos'
     | 'placement'
     | 'asm'

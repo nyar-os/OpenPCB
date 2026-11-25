@@ -3566,25 +3566,33 @@ fn layers_writes_aligned_single_layer_views() {
     assert_eq!(report["format"], "layers");
     let artifacts = report["artifacts"].as_array().expect("artifacts is an array");
     let names: Vec<&str> = artifacts.iter().map(|item| item["name"].as_str().expect("a name")).collect();
-    assert_eq!(names, ["F_Cu.svg", "B_Cu.svg", "F_SilkS.svg", "B_SilkS.svg"]);
+    for required in ["F_Cu.svg", "B_Cu.svg", "F_SilkS.svg", "B_SilkS.svg", "Edge_Cuts.svg", "Drill.svg"] {
+        assert!(names.contains(&required), "the layer set covers {required}: {names:?}");
+    }
+    assert!(names.iter().any(|name| name.ends_with("_Paste.svg")), "the layer set carries a paste stencil: {names:?}");
     assert_eq!(
         report["bytes"].as_u64().expect("a byte count"),
         artifacts.iter().map(|i| i["bytes"].as_u64().unwrap()).sum::<u64>()
     );
 
     let read = |name: &str| fs::read_to_string(target.join(name)).expect("the view is readable");
-    let front = read("F_Cu.svg");
+    let body = |name: &str| {
+        let text = read(name);
+        let end = text.find("class=\"title-block\"").unwrap_or(text.len());
+        text[..end].to_string()
+    };
+    let front = body("F_Cu.svg");
     assert!(front.contains("<line"), "the front copper view keeps the front track");
     assert!(!front.contains(">U1<"), "the front copper view draws no silkscreen reference");
     assert!(!front.contains("REV A"), "the front copper view draws no silk text");
-    let back = read("B_Cu.svg");
+    let back = body("B_Cu.svg");
     assert!(!back.contains("<line"), "the back copper view holds no front track");
     assert!(back.contains("<ellipse"), "the back copper view keeps the via that reaches it");
-    let silk = read("F_SilkS.svg");
+    let silk = body("F_SilkS.svg");
     assert!(silk.contains(">U1<"), "the silkscreen view keeps the footprint reference");
     assert!(silk.contains("REV A"), "the silkscreen view keeps the silk text");
     assert!(!silk.contains("<line"), "the silkscreen view holds no copper track");
-    let back_silk = read("B_SilkS.svg");
+    let back_silk = body("B_SilkS.svg");
     assert!(!back_silk.contains(">U1<"), "a front footprint is not drawn on the back silkscreen");
     let view_box = |name: &str| {
         let text = read(name);
@@ -8578,9 +8586,11 @@ fn svg_export_carries_the_title_layer_legend_and_board_size() {
     export(handle, "svg", &path).expect("the SVG export writes");
     let svg = fs::read_to_string(&path).expect("the SVG is readable");
     assert!(svg.contains(">Blinker</text>"), "the title is drawn above the board");
-    for marker in ["Front copper", "Back copper", "Silkscreen", "Drill", "Edge cuts", "Board: 80 x 50 mm"] {
-        assert!(svg.contains(marker), "the legend carries {marker}");
+    for marker in ["Edge cuts", "Board: 80 x 50 mm", "SCALE 1:1", "DWG "] {
+        assert!(svg.contains(marker), "the title block carries {marker}");
     }
+    assert!(!svg.contains("Front copper"), "the legend omits a style the sheet does not use");
+    assert!(!svg.contains("Drill hole"), "the legend omits a style the sheet does not use");
     assert!(svg.contains("class=\"title-block\""), "the title block is grouped");
     close(handle).expect("the board closes");
 }
