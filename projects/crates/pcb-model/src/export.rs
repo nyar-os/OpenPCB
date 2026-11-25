@@ -1185,7 +1185,7 @@ fn pdf(board: &Board) -> Result<(Vec<u8>, usize), ServiceError> {
         height: page.height,
         y_up: true,
     };
-    let mut drawing = build_drawing(board, &layout, None, true);
+    let mut drawing = build_drawing(board, &layout, None, true, print_color);
     draw_pdf_title_block(board, &mut drawing, page.width, page.height, &page.legend);
     let dropped = drawing
         .elements
@@ -1287,7 +1287,7 @@ fn draw_pdf_title_block(board: &Board, drawing: &mut Drawing, page_width: f64, p
             text: title,
             size: title_size,
         },
-        fill_style(layer_color_value(board, "Edge.Cuts")),
+        fill_style(print_color(layer_color_value(board, "Edge.Cuts"))),
     ));
     for (x, row, color, label) in &legend.items {
         let y = legend.band - legend.size * 2.0 - row;
@@ -1300,7 +1300,7 @@ fn draw_pdf_title_block(board: &Board, drawing: &mut Drawing, page_width: f64, p
             ];
             drawing.push(Element::new(
                 Shape::Polygon { points: corners.iter().map(|corner| DrawPoint::new(corner[0], corner[1])).collect() },
-                fill_style(color_from_hex(color)),
+                fill_style(print_color(color_from_hex(color))),
             ));
         }
         let text_x = x + if color.is_some() { legend.swatch + legend.size * 0.4 } else { 0.0 };
@@ -1336,7 +1336,16 @@ impl Layout {
 ///
 /// `with_text_items` adds silkscreen text items; the SVG preview appends them
 /// itself so it can keep their rotation, while the PDF writer takes them here.
-fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>, with_text_items: bool) -> Drawing {
+/// `ink` adapts every layer colour it draws, which lets the PDF writer swap
+/// pale ink for print-safe dark ink without touching the stored palette.
+fn build_drawing(
+    board: &Board,
+    layout: &Layout,
+    background: Option<Color>,
+    with_text_items: bool,
+    ink: fn(Color) -> Color,
+) -> Drawing {
+    let layer_ink = |layer: &str| ink(layer_color_value(board, layer));
     let scale = board.millimetres();
     let mut drawing = Drawing::new(Size::new(layout.width, layout.height));
     if let Some(background) = background {
@@ -1353,12 +1362,12 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>, with
             Shape::Polygon {
                 points: corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect(),
             },
-            Style::stroke(layer_color_value(board, "Edge.Cuts"), 0.15 * layout.scale),
+            Style::stroke(layer_ink("Edge.Cuts"), 0.15 * layout.scale),
         ));
     }
     for zone in &board.zones {
         let points = zone.points.iter().map(|point| layout.point(point[0] * scale, point[1] * scale)).collect();
-        let mut style = fill_style(layer_color_value(board, &zone.layer));
+        let mut style = fill_style(layer_ink(&zone.layer));
         style.opacity = 0.35;
         drawing.push(Element::new(Shape::Polygon { points }, style));
     }
@@ -1368,11 +1377,11 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>, with
                 from: layout.point(track.from[0] * scale, track.from[1] * scale),
                 to: layout.point(track.to[0] * scale, track.to[1] * scale),
             },
-            Style::stroke(layer_color_value(board, &track.layer), track.width * scale * layout.scale),
+            Style::stroke(layer_ink(&track.layer), track.width * scale * layout.scale),
         ));
     }
     for footprint in &board.footprints {
-        let color = layer_color_value(board, &footprint.layer);
+        let color = layer_ink(&footprint.layer);
         for pad in &footprint.pads {
             let corners = pad_corners(footprint, pad);
             let points = corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect();
@@ -1392,7 +1401,7 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>, with
         else {
             continue;
         };
-        let silk = layer_color_value(board, silk_layer(&footprint.layer));
+        let silk = layer_ink(silk_layer(&footprint.layer));
         let corners = [[min[0], min[1]], [max[0], min[1]], [max[0], max[1]], [min[0], max[1]]];
         drawing.push(Element::new(
             Shape::Polygon {
@@ -1420,7 +1429,7 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>, with
         let center = layout.point(via.at[0] * scale, via.at[1] * scale);
         drawing.push(Element::new(
             Shape::Circle { center, radius: via.diameter * scale * layout.scale / 2.0 },
-            fill_style(layer_color_value(board, "F.Cu")),
+            fill_style(layer_ink("F.Cu")),
         ));
         if via.drill > 0.0 {
             drawing.push(Element::new(
@@ -1435,7 +1444,7 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>, with
                 from: layout.point(slot.from[0] * scale, slot.from[1] * scale),
                 to: layout.point(slot.to[0] * scale, slot.to[1] * scale),
             },
-            Style::stroke(layer_color_value(board, "F.Cu"), slot.width * scale * layout.scale),
+            Style::stroke(layer_ink("F.Cu"), slot.width * scale * layout.scale),
         ));
     }
     if with_text_items {
@@ -1446,7 +1455,7 @@ fn build_drawing(board: &Board, layout: &Layout, background: Option<Color>, with
                     text: text.text.clone(),
                     size: text.size * scale * layout.scale,
                 },
-                fill_style(layer_color_value(board, &text.layer)),
+                fill_style(layer_ink(&text.layer)),
             ));
         }
     }
@@ -1514,6 +1523,32 @@ pub(crate) fn pad_corners(footprint: &crate::board::Footprint, pad: &crate::boar
 /// Resolves a layer colour, falling back to the default copper tone.
 fn layer_color_value(board: &Board, layer: &str) -> Color {
     color_from_hex(&layer_color(board, layer))
+}
+
+/// Leaves a layer colour untouched, because the preview canvas is dark.
+fn preview_ink(color: Color) -> Color {
+    color
+}
+
+/// Dark ink that replaces a pale layer colour on white paper.
+const PRINT_INK: Color = Color::rgb(58, 58, 58);
+
+/// Perceived brightness at or above which a layer colour is too pale to print.
+///
+/// `#e6e6e6` (0.90) and `#c4c4c4` (0.77) are over the line, while the edge-cut
+/// gold `#d9b44a` (0.70) and both copper tones stay below it.
+const PRINT_INK_THRESHOLD: f64 = 0.72;
+
+/// Adapts a layer colour to the white paper of a PDF export.
+///
+/// The stored palette is chosen for the dark preview canvas, where silkscreen is
+/// pale on purpose. On white paper that ink all but disappears, so a pale colour
+/// becomes [`PRINT_INK`]; copper, edge cuts and every other colour that already
+/// contrasts are returned unchanged. The document palette itself never changes.
+pub(crate) fn print_color(color: Color) -> Color {
+    let brightness =
+        (0.299 * f64::from(color.red()) + 0.587 * f64::from(color.green()) + 0.114 * f64::from(color.blue())) / 255.0;
+    if brightness >= PRINT_INK_THRESHOLD { PRINT_INK } else { color }
 }
 
 /// Parses a `#rrggbb` colour, falling back to the default copper tone.
@@ -1641,7 +1676,7 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
     let width = (max[0] - min[0]).max(1.0) + margin * 2.0;
     let height = (max[1] - min[1]).max(1.0) + margin * 2.0;
     let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: min[1] - margin, width, height, y_up: false };
-    let drawing = build_drawing(board, &layout, Some(PREVIEW_BACKGROUND), false);
+    let drawing = build_drawing(board, &layout, Some(PREVIEW_BACKGROUND), false, preview_ink);
     let mut content = drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the SVG preview: {error}")))?;
     content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
     if !board.texts.is_empty()

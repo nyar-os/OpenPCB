@@ -3112,6 +3112,53 @@ fn pdf_grows_the_page_for_a_board_larger_than_a4() {
 }
 
 #[test]
+fn print_ink_replaces_only_the_pale_layer_colours() {
+    use document_drawing::Color;
+
+    let ink = Color::rgb(58, 58, 58);
+    assert_eq!(crate::export::print_color(Color::rgb(230, 230, 230)), ink, "the front silkscreen tone becomes dark ink");
+    assert_eq!(crate::export::print_color(Color::rgb(196, 196, 196)), ink, "the back silkscreen tone becomes dark ink");
+    assert_eq!(crate::export::print_color(Color::WHITE), ink, "pure white becomes dark ink on white paper");
+    assert_eq!(crate::export::print_color(Color::rgb(217, 180, 74)), Color::rgb(217, 180, 74), "edge cuts keep their gold");
+    assert_eq!(crate::export::print_color(Color::rgb(200, 117, 51)), Color::rgb(200, 117, 51), "front copper keeps its tone");
+    assert_eq!(crate::export::print_color(Color::rgb(47, 111, 176)), Color::rgb(47, 111, 176), "back copper keeps its tone");
+}
+
+#[test]
+fn pdf_export_darkens_the_silkscreen_while_svg_keeps_the_preview_colour() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: Some("VCC".to_string()),
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+
+    let svg = directory.join("board.svg");
+    export(handle, "svg", &svg).expect("SVG export writes");
+    let svg_text = fs::read_to_string(&svg).expect("the SVG is readable");
+    assert!(svg_text.contains("stroke=\"#e6e6e6\""), "the SVG keeps the pale preview silkscreen");
+
+    let pdf = directory.join("board.pdf");
+    export(handle, "pdf", &pdf).expect("PDF export writes");
+    let pdf_text = String::from_utf8_lossy(&fs::read(&pdf).expect("the PDF is readable")).to_string();
+    assert!(pdf_text.contains("0.227 0.227 0.227"), "the PDF draws the silkscreen in dark ink: {pdf_text}");
+    assert!(!pdf_text.contains("0.902 0.902 0.902"), "no pale silkscreen ink reaches the white page");
+
+    close(handle).expect("the board closes");
+}
+
+#[test]
 fn gerber_writes_x2_object_attributes_and_closes_each_block() {
     let directory = TempDir::new();
     let handle = created();
