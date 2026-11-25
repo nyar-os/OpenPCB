@@ -30,8 +30,10 @@ direction.
 | `drl` | `unsupported` | `supported` | Excellon drill file with via, pad and routed-slot holes. |
 | `drill_map` | `unsupported` | `supported` | SVG hole map covering vias, pad drills and routed slots. The tool legend numbers circular drills in ascending diameter and lists routed slots on their own row. |
 | `dxf` | `supported` | `supported` | AutoCAD R12 board outline: four `LINE` entities on `Edge.Cuts` in millimetres. Needs an outline. Import reads back `Edge.Cuts` lines that close exactly one axis-aligned rectangle; other entities are reported one by one in the loss ledger (`dxf/construct-not-imported`, `dxf/outline-not-rectangular`) and never approximated. |
-| `layers` | `unsupported` | `supported` | Directory of single-layer SVG views: `F_Cu.svg`, `B_Cu.svg`, `F_SilkS.svg` and `B_SilkS.svg` share one canvas and coordinate mapping so they stack like Gerber layers. |
+| `layers` | `unsupported` | `supported` | Directory of single-layer fabrication views: every declared copper, silkscreen, soldermask, assembly and mechanical layer, one synthesized solder-paste stencil per side that carries pads, and a `Drill.svg` hole film. Each view keeps the board outline and shares one canvas and coordinate mapping with a sheet frame, title block and a legend that lists only the styles it draws, so the files stack like Gerber layers. |
 | `asm` | `unsupported` | `supported` | Directory of assembly sheets: `F_Asm.svg` and `B_Asm.svg` carry the outline, component outlines, references, pad-1 polarity marks, BOM item bubbles and the grouped BOM table below each board. |
+| `stackup` | `unsupported` | `supported` | Directory with `Stackup.svg` and `Stackup.pdf`: copper/dielectric cross-section with thickness callouts and an impedance sample. An undeclared stackup falls back to 1 oz copper and 0.2 mm FR-4 (εr 4.2) and the sheet says `ASSUMED STACKUP`. |
+| `panel` | `unsupported` | `supported` | Directory with `Panel.svg` and `Panel.pdf`: a 2 × 2 V-CUT panel with 2 mm gaps, a 5 mm rail and four Ø3 mm tooling holes, because the CLI has no per-export option channel. Needs a rectangular outline and fails with the panel report's codes otherwise. |
 | `pos` | `unsupported` | `supported` | Pick-and-place CSV. |
 | `placement` | `unsupported` | `supported` | Millimetre JSON. |
 | `bom` | `unsupported` | `supported` | Bill of materials CSV. |
@@ -45,7 +47,7 @@ direction.
 Declared preview renderers: `svg` is `supported`; `png` and `pdf` are
 `unsupported` as preview renderers even though they are export targets.
 
-Declared export targets: all seventeen formats above. Every target is
+Declared export targets: all nineteen formats above. Every target is
 `supported` except `step`.
 
 ## Checks

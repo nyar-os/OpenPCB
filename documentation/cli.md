@@ -105,19 +105,26 @@ open-pcb inspect board.opcb --checks drc,connectivity,unrouted
 open-pcb export <file> --format <target> --out <file-or-directory>
 ```
 
-Targets: `kicad_pcb`, `gbr`, `drl`, `drill_map`, `dxf`, `layers`, `pos`,
-`placement`, `asm`, `testpoints`, `ipc_d_356`, `step`, `ipc2581`, `pdf`, `svg`,
-`png`. `step` rejects with `capability/not-implemented` before writing.
-`gbr`, `layers` and `asm` write a directory of files; `--out` names that
-directory. `layers` writes `F_Cu.svg`, `B_Cu.svg`, `F_SilkS.svg` and
-`B_SilkS.svg` on one shared canvas; `asm` writes the `F_Asm.svg` and `B_Asm.svg`
-assembly sheets with their BOM tables. `dxf` writes the board outline as four
-R12 `LINE` entities on `Edge.Cuts` and needs an outline.
+Targets: `kicad_pcb`, `gbr`, `drl`, `drill_map`, `dxf`, `layers`, `stackup`,
+`panel`, `pos`, `placement`, `asm`, `testpoints`, `ipc_d_356`, `step`,
+`ipc2581`, `pdf`, `svg`, `png`. `step` rejects with
+`capability/not-implemented` before writing. `gbr`, `layers`, `stackup`,
+`panel` and `asm` write a directory of files; `--out` names that directory.
+`layers` writes one SVG per declared copper, silkscreen, soldermask, assembly
+and mechanical layer, a solder-paste stencil per padded side and a `Drill.svg`
+film on one shared canvas; `asm` writes the `F_Asm.svg` and `B_Asm.svg`
+assembly sheets with their BOM tables; `stackup` writes `Stackup.svg` and
+`Stackup.pdf` and falls back to a stated assumed stackup when the board
+declares none; `panel` writes `Panel.svg` and `Panel.pdf` with the documented
+2 × 2 V-CUT defaults and needs a rectangular outline. `dxf` writes the board
+outline as four R12 `LINE` entities on `Edge.Cuts` and needs an outline.
 
 ```bash
 open-pcb export board.opcb --format gbr --out gerber
 open-pcb export board.opcb --format bom --out bom.csv
 open-pcb export board.opcb --format layers --out views
+open-pcb export board.opcb --format stackup --out stackup
+open-pcb export board.opcb --format panel --out panel
 open-pcb export board.opcb --format asm --out assembly
 ```
 
