@@ -37,8 +37,8 @@ just that document.
   default or `sidecar` for file-backed undo.
 - `create(options)` starts a board from the `blank` template.
 - `open({ path })` opens a native `.opcb` document.
-- `importBoard({ path, target? })` reads KiCad PCB or IPC-2581 and reports the
-  format, counts and loss ledger.
+- `importBoard({ path, target? })` reads KiCad PCB, IPC-2581 or a DXF outline
+  and reports the format, counts and loss ledger.
 - `inspect(input, options?)` checks a document without keeping a handle.
 - `capabilities()` returns the support matrix of the installed build.
 - `dispose()` releases the session and all handles.

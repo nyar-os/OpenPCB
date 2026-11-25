@@ -29,7 +29,7 @@ direction.
 | `gbr` | `unsupported` | `supported` | Writes a directory of Gerber files. |
 | `drl` | `unsupported` | `supported` | Excellon drill file with via, pad and routed-slot holes. |
 | `drill_map` | `unsupported` | `supported` | SVG hole map covering vias, pad drills and routed slots. The tool legend numbers circular drills in ascending diameter and lists routed slots on their own row. |
-| `dxf` | `unsupported` | `supported` | AutoCAD R12 board outline: four `LINE` entities on `Edge.Cuts` in millimetres. Needs an outline. |
+| `dxf` | `supported` | `supported` | AutoCAD R12 board outline: four `LINE` entities on `Edge.Cuts` in millimetres. Needs an outline. Import reads back `Edge.Cuts` lines that close exactly one axis-aligned rectangle; other entities are reported one by one in the loss ledger (`dxf/construct-not-imported`, `dxf/outline-not-rectangular`) and never approximated. |
 | `layers` | `unsupported` | `supported` | Directory of single-layer SVG views: `F_Cu.svg`, `B_Cu.svg`, `F_SilkS.svg` and `B_SilkS.svg` share one canvas and coordinate mapping so they stack like Gerber layers. |
 | `asm` | `unsupported` | `supported` | Directory of assembly sheets: `F_Asm.svg` and `B_Asm.svg` carry the outline, component outlines, references, pad-1 polarity marks, BOM item bubbles and the grouped BOM table below each board. |
 | `pos` | `unsupported` | `supported` | Pick-and-place CSV. |
@@ -185,6 +185,17 @@ ipc2581/track-layer-missing             ipc2581/track-without-width
 ipc2581/hole-invalid                    ipc2581/hole-not-plated
 ipc2581/back-drill-invalid              ipc2581/units-unknown
 ```
+
+DXF (`dxf`) loss codes:
+
+```text
+dxf/construct-not-imported        dxf/outline-not-rectangular
+```
+
+The DXF reader reconstructs only the rectangular profile from `Edge.Cuts`
+lines; entities on other layers, other entity types and outlines that do not
+close exactly one axis-aligned rectangle are reported per item and never
+approximated.
 
 Both readers keep copper layers, nets, footprints and pads, tracks, through,
 blind and buried vias and a rectangular profile. KiCad stores a pad's single

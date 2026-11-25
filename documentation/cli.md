@@ -72,12 +72,15 @@ history exits with `2` and the `board/history-empty` code.
 open-pcb import <file> --out <file> [--overwrite]
 ```
 
-Accepts KiCad PCB or IPC-2581, detected from content. Prints the format, counts
+Accepts KiCad PCB, IPC-2581 or a DXF outline, detected from content. A DXF
+file yields only the rectangular profile from its `Edge.Cuts` lines; every
+skipped entity is listed in the loss ledger. Prints the format, counts
 and the number of loss entries. The JSON result carries `losses` and
 `lossCodes`.
 
 ```bash
 open-pcb import board.kicad_pcb --out board.opcb
+open-pcb import outline.dxf --out board.opcb
 ```
 
 ### `inspect`

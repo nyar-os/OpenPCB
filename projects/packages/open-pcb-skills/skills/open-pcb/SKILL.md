@@ -99,8 +99,8 @@ Implemented:
   `F_SilkS`, `B_SilkS`, `F_Mask`, `B_Mask`, `F_Paste`, `B_Paste` and
   `Edge_Cuts`; every file carries Gerber X2 file and aperture attributes
   (`%TF.FileFunction`, `%TF.Part`, `%TF.FilePolarity`, `%TA.AperFunction`).
-- Import a KiCad PCB or IPC-2581 document with a loss ledger for unrepresentable
-  constructs; the CLI and SDK detect the format from the content.
+- Import a KiCad PCB, IPC-2581 or DXF outline document with a loss ledger for
+  unrepresentable constructs; the CLI and SDK detect the format from the content.
 
 Not implemented: STEP export, the interactive viewport renderer, silkscreen
 text/shapes, oval or slotted pad drills (a single circular pad drill is stored
@@ -151,7 +151,7 @@ a format, check or target.
 | `open-pcb capabilities` | Print the implemented format, check, renderer and export matrix. |
 | `open-pcb create --out <file.opcb> --title <title> --template <name>` | Create a board with F.Cu, B.Cu and silkscreen; the outline starts unset. `blank` is the only implemented template. |
 | `open-pcb open <file.opcb>` | Open a document and print its revision and layers. |
-| `open-pcb import <file.kicad_pcb\|file.ipc2581> --out <file.opcb>` | Import a KiCad PCB or IPC-2581 document into a native board and report the detected format plus the loss ledger. |
+| `open-pcb import <file.kicad_pcb\|file.ipc2581\|file.dxf> --out <file.opcb>` | Import a KiCad PCB, IPC-2581 or DXF outline document into a native board and report the detected format plus the loss ledger. |
 | `open-pcb list <file.opcb>` | Print the revision, stackup and object counts. |
 | `open-pcb undo <file.opcb>` / `open-pcb redo <file.opcb>` | Restore the previous or next saved document. The CLI keeps up to 32 snapshots in `<file>.history.json`. |
 | `open-pcb net add <file.opcb> --name <name>` | Declare a net in place. |
