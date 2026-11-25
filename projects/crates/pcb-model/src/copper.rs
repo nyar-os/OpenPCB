@@ -116,6 +116,89 @@ pub(crate) fn net_lengths(board: &Board) -> Value {
     })
 }
 
+/// Builds the routed length audit of one board.
+///
+/// Every declared net is measured in millimetres: `trackLength` sums the
+/// straight track segments, `viaLength` sums the via barrels spanning the
+/// dielectric between the copper layers each via touches, and `totalLength`
+/// adds the two. Barrels need a declared stackup; without one `viaLength` and
+/// `totalLength` come back null and the track length stands alone. Declared
+/// differential pairs compare their halves: `deviation` is the absolute
+/// difference of the measured lengths — the total when barrels are measurable,
+/// otherwise the track length — and `target` is the pair's `maxSkew`; `status`
+/// is `pass` while the deviation stays within the target.
+pub(crate) fn length_audit(board: &Board) -> Value {
+    let scale = board.millimetres();
+    let dielectric = board.stackup.as_ref().map(|stackup| stackup.dielectric_height);
+    let mut totals: Vec<(&str, f64, Option<f64>)> = Vec::with_capacity(board.nets.len());
+    let mut nets: Vec<Value> = Vec::with_capacity(board.nets.len());
+    let (mut total_tracks, mut total_vias) = (0.0, 0.0);
+    for net in &board.nets {
+        let track_length = board
+            .tracks
+            .iter()
+            .filter(|track| track.net.as_deref() == Some(net.name.as_str()))
+            .map(|track| (track.to[0] - track.from[0]).hypot(track.to[1] - track.from[1]))
+            .sum::<f64>()
+            * scale;
+        let via_length = dielectric.map(|height| {
+            board
+                .vias
+                .iter()
+                .filter(|via| via.net.as_deref() == Some(net.name.as_str()))
+                .filter_map(|via| board.via_span(via))
+                .map(|(low, high)| (high - low) as f64 * height)
+                .sum::<f64>()
+        });
+        total_tracks += track_length;
+        total_vias += via_length.unwrap_or_default();
+        let track_length = round6(track_length);
+        let via_length = via_length.map(round6);
+        let total_length = via_length.map(|vias| round6(track_length + vias));
+        nets.push(json!({
+            "name": net.name,
+            "trackLength": track_length,
+            "viaLength": via_length,
+            "totalLength": total_length,
+        }));
+        totals.push((net.name.as_str(), track_length, total_length));
+    }
+    let measured = |name: &str| totals.iter().find(|(net, ..)| *net == name).map(|(_, track, total)| total.unwrap_or(*track));
+    let pairs: Vec<Value> = board
+        .differential_pairs
+        .iter()
+        .map(|pair| {
+            let positive = measured(&pair.positive).unwrap_or_default();
+            let negative = measured(&pair.negative).unwrap_or_default();
+            let deviation = round6((positive - negative).abs());
+            let target = round6(pair.max_skew * scale);
+            json!({
+                "id": pair.id,
+                "positive": pair.positive,
+                "negative": pair.negative,
+                "positiveLength": round6(positive),
+                "negativeLength": round6(negative),
+                "deviation": deviation,
+                "target": target,
+                "status": if deviation <= target + 1e-9 { "pass" } else { "fail" },
+            })
+        })
+        .collect();
+    json!({
+        "report": "open-pcb-length-audit",
+        "revision": board.revision,
+        "units": "mm",
+        "barrelsMeasured": dielectric.is_some(),
+        "nets": nets,
+        "pairs": pairs,
+        "totals": {
+            "trackLength": round6(total_tracks),
+            "viaLength": dielectric.map(|_| round6(total_vias)),
+            "totalLength": dielectric.map(|_| round6(total_tracks + total_vias)),
+        },
+    })
+}
+
 /// Builds the copper area and balance report of one board.
 pub(crate) fn report(board: &Board) -> Value {
     let scale = board.millimetres();

@@ -362,6 +362,47 @@ export interface NetLengthsReport {
     readonly totals: NetLengthTotals;
 }
 
+/** One audited net in the length audit report, in millimetres. */
+export interface LengthAuditEntry {
+    readonly name: string;
+    /** Summed straight track segments. */
+    readonly trackLength: number;
+    /** Summed via barrel lengths; null when the board has no stackup. */
+    readonly viaLength: number | null;
+    /** `trackLength + viaLength`; null when barrels are not measurable. */
+    readonly totalLength: number | null;
+}
+
+/** One audited differential pair, in millimetres. */
+export interface LengthAuditPair {
+    readonly id: ObjectId;
+    readonly positive: string;
+    readonly negative: string;
+    readonly positiveLength: number;
+    readonly negativeLength: number;
+    /** Absolute length difference of the two halves. */
+    readonly deviation: number;
+    /** The pair's `maxSkew` target. */
+    readonly target: number;
+    readonly status: 'pass' | 'fail';
+}
+
+/** Result of `board.lengthAudit()`. All lengths are in millimetres. */
+export interface LengthAuditReport {
+    readonly report: 'open-pcb-length-audit';
+    readonly revision: number;
+    readonly units: 'mm';
+    /** Whether via barrels could be measured from a declared stackup. */
+    readonly barrelsMeasured: boolean;
+    readonly nets: readonly LengthAuditEntry[];
+    readonly pairs: readonly LengthAuditPair[];
+    readonly totals: {
+        readonly trackLength: number;
+        readonly viaLength: number | null;
+        readonly totalLength: number | null;
+    };
+}
+
 /** Class targets that apply to one net, in millimetres; null when the net has no class value. */
 export interface NetAuditTargets {
     readonly width: number | null;
@@ -897,6 +938,8 @@ export interface BoardCapabilities {
     readonly copperBalance: SupportLevel;
     /** Whether a routed copper length report per declared net can be produced. */
     readonly netLengths: SupportLevel;
+    /** Whether routed lengths with via barrels and differential-pair deviation can be audited. */
+    readonly lengthAudit: SupportLevel;
     /** Whether a net class, width and clearance conformance report can be produced. */
     readonly netAudit: SupportLevel;
     /** Whether a rectangular board can be arrayed into a panel with seams or tabs. */
@@ -1902,6 +1945,7 @@ export interface Board {
     impedanceReport(options?: ImpedanceReportOptions): Promise<ImpedanceSummaryReport>;
     copperBalance(): Promise<CopperBalanceReport>;
     netLengths(): Promise<NetLengthsReport>;
+    lengthAudit(): Promise<LengthAuditReport>;
     netAudit(): Promise<NetAuditReport>;
     testpointCoverage(): Promise<TestPointCoverageReport>;
     panelize(options: PanelizeOptions): Promise<PanelizeReport>;

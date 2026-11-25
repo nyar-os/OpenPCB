@@ -788,6 +788,14 @@ fn board_net_lengths(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
+/// Reports routed lengths per net with via barrels and differential-pair deviation.
+#[function]
+fn board_length_audit(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let value = open_pcb_model::length_audit(handle).map_err(fail)?;
+    respond(&ctx, &value)
+}
+
 /// Reports net class membership, width and clearance conformance.
 #[function]
 fn board_net_audit(ctx: CallContext) -> Result<JsValue> {
@@ -1658,6 +1666,7 @@ register_module![
     stackup_impedance_report,
     board_copper_balance,
     board_net_lengths,
+    board_length_audit,
     board_net_audit,
     board_testpoint_coverage,
     board_panelize,

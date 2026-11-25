@@ -60,6 +60,7 @@ import type {
     KeepoutAreaReport,
     KicadImportOptions,
     KicadImportResult,
+    LengthAuditReport,
     MoveFootprintOptions,
     NetAuditReport,
     NetLengthsReport,
@@ -710,6 +711,10 @@ function attach(
         async netLengths(): Promise<NetLengthsReport> {
             ensure();
             return service.netLengths(handle);
+        },
+        async lengthAudit(): Promise<LengthAuditReport> {
+            ensure();
+            return service.lengthAudit(handle);
         },
         async netAudit(): Promise<NetAuditReport> {
             ensure();

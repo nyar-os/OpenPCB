@@ -103,6 +103,8 @@
             "copper": "Report copper area and layer balance",
             "copper-balance": "Print copper area per layer and the coverage imbalance",
             "lengths": "Report routed copper length per declared net",
+            "length": "Audit routed lengths with via barrels and differential-pair deviation",
+            "length-audit": "Print per-net track, via-barrel and total lengths plus pair deviation",
             "panel": "Report a panelization layout of the rectangular board outline",
             "gui": "Open the OpenPCB Studio window on the native board"
         },

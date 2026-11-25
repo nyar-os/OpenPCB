@@ -231,6 +231,7 @@ pub fn capabilities() -> Value {
         "padDrills": "supported",
         "copperBalance": "supported",
         "netLengths": "supported",
+        "lengthAudit": "supported",
         "netAudit": "supported",
         "zoneReport": "supported",
         "zoneAudit": "supported",
@@ -1167,6 +1168,17 @@ pub fn fab_manifest(handle: u64) -> Result<Value, ServiceError> {
 /// length is exact, and copper without a declared net is not listed.
 pub fn net_lengths(handle: u64) -> Result<Value, ServiceError> {
     store::read(handle, copper::net_lengths)
+}
+
+/// Reports routed lengths per net with via barrels and differential-pair deviation.
+///
+/// Every declared net carries its track, via-barrel and total length in
+/// millimetres. Barrels need a declared stackup; without one the via and total
+/// fields come back null. Each declared differential pair compares the two
+/// halves against its `maxSkew` target and reports `pass` or `fail`. The query
+/// is read-only and never bumps the revision.
+pub fn length_audit(handle: u64) -> Result<Value, ServiceError> {
+    store::read(handle, copper::length_audit)
 }
 
 /// Reports net class membership, width and clearance conformance.

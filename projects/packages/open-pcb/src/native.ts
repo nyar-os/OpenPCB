@@ -87,6 +87,7 @@ export interface NativeBinding {
     stackup_impedance_report(handle: number, requestJson: string): string;
     board_copper_balance(handle: number): string;
     board_net_lengths(handle: number): string;
+    board_length_audit(handle: number): string;
     board_net_audit(handle: number): string;
     board_testpoint_coverage(handle: number): string;
     board_panelize(handle: number, requestJson: string): string;

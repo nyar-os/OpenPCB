@@ -26,10 +26,11 @@ use crate::{
     capabilities, close, copper_balance, create, delete_differential_pair, delete_fiducial, delete_footprint, delete_keepout,
     delete_net_class, delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver,
     delete_zone, drill_report, export, fab_manifest, fiducial_report, impedance_report, impedance_table, import, inspect,
-    keepout_report, list_fiducials, list_texts, move_footprint, net_audit, net_lengths, open, outline_geometry, panelize, redo,
-    route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, split_track, stackup_impedance,
-    stackup_width, stitch_vias, store, summary, testpoint_coverage, undo, update_footprint, update_keepout, update_layer,
-    update_net_class, update_pad, update_slot, update_text, update_track, update_via, update_zone, zone_audit, zone_report,
+    keepout_report, length_audit, list_fiducials, list_texts, move_footprint, net_audit, net_lengths, open, outline_geometry,
+    panelize, redo, route, save, set_outline, set_rules, set_severity, set_stackup, set_via_back_drill, split_track,
+    stackup_impedance, stackup_width, stitch_vias, store, summary, testpoint_coverage, undo, update_footprint, update_keepout,
+    update_layer, update_net_class, update_pad, update_slot, update_text, update_track, update_via, update_zone, zone_audit,
+    zone_report,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -284,6 +285,7 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["teardrops"]["linear"], "supported");
     assert_eq!(matrix["teardrops"]["arc"], "supported");
     assert_eq!(matrix["zoneGridFill"], "supported");
+    assert_eq!(matrix["lengthAudit"], "supported");
     assert_eq!(matrix["designRules"], "supported");
     assert_eq!(matrix["solderMask"], "supported");
     assert_eq!(matrix["solderPaste"], "supported");
@@ -7564,6 +7566,141 @@ fn net_lengths_sum_track_segments_and_count_vias() {
     assert_eq!(report["totals"]["tracks"], 2);
     assert_eq!(report["totals"]["length"], 7.0);
     assert_eq!(report["totals"]["vias"], 1);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn length_audit_adds_via_barrels_and_measures_pair_deviation() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "P".to_string() }).expect("P is declared");
+    add_net(handle, AddNetRequest { name: "N".to_string() }).expect("N is declared");
+    set_stackup(handle, SetStackupRequest { copper_thickness: 0.035, dielectric_height: 1.6, dielectric_constant: 4.5 })
+        .expect("the stackup is declared");
+    add_track(
+        handle,
+        AddTrackRequest { net: Some("P".to_string()), layer: "F.Cu".to_string(), width: 0.2, from: [0.0, 0.0], to: [3.0, 4.0] },
+    )
+    .expect("the first half is routed");
+    add_track(
+        handle,
+        AddTrackRequest { net: Some("P".to_string()), layer: "F.Cu".to_string(), width: 0.2, from: [3.0, 4.0], to: [5.0, 4.0] },
+    )
+    .expect("the first half continues");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("N".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [0.0, 10.0],
+            to: [8.1, 10.0],
+        },
+    )
+    .expect("the second half is routed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("P".to_string()), at: [5.0, 4.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+    add_differential_pair(
+        handle,
+        AddDifferentialPairRequest {
+            positive: "P".to_string(),
+            negative: "N".to_string(),
+            width: 0.2,
+            gap: 0.2,
+            max_skew: 0.5,
+        },
+    )
+    .expect("the pair is declared");
+
+    let revision = summary(handle).expect("the board is listed")["revision"].as_u64().expect("revision is a number");
+    let report = length_audit(handle).expect("the audit is produced");
+    assert_eq!(report["report"], "open-pcb-length-audit");
+    assert_eq!(report["units"], "mm");
+    assert_eq!(report["barrelsMeasured"], true);
+    let nets = report["nets"].as_array().expect("nets is an array");
+    assert_eq!(nets[0]["name"], "P");
+    assert_eq!(nets[0]["trackLength"], 7.0, "the 3-4-5 triangle plus the 2 mm continuation");
+    assert_eq!(nets[0]["viaLength"], 1.6, "the through via spans one dielectric");
+    assert_eq!(nets[0]["totalLength"], 8.6);
+    assert_eq!(nets[1]["name"], "N");
+    assert_eq!(nets[1]["trackLength"], 8.1);
+    assert_eq!(nets[1]["viaLength"], 0.0);
+    assert_eq!(nets[1]["totalLength"], 8.1);
+    let pair = &report["pairs"][0];
+    assert_eq!(pair["positiveLength"], 8.6);
+    assert_eq!(pair["negativeLength"], 8.1);
+    assert_eq!(pair["deviation"], 0.5);
+    assert_eq!(pair["target"], 0.5);
+    assert_eq!(pair["status"], "pass", "the deviation sits exactly on the target");
+    assert_eq!(report["totals"]["trackLength"], 15.1);
+    assert_eq!(report["totals"]["viaLength"], 1.6);
+    assert_eq!(report["totals"]["totalLength"], 16.7);
+    assert_eq!(
+        summary(handle).expect("the board is listed")["revision"].as_u64(),
+        Some(revision),
+        "the audit never bumps the revision"
+    );
+
+    add_via(
+        handle,
+        AddViaRequest { net: Some("N".to_string()), at: [8.1, 10.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the second via is placed");
+    let report = length_audit(handle).expect("the audit follows the edit");
+    assert_eq!(report["nets"][1]["totalLength"], 9.7);
+    assert_eq!(report["pairs"][0]["deviation"], 1.1);
+    assert_eq!(report["pairs"][0]["status"], "fail", "the skew broke the pair target");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn length_audit_without_stackup_measures_tracks_only() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "P".to_string() }).expect("P is declared");
+    add_net(handle, AddNetRequest { name: "N".to_string() }).expect("N is declared");
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("P".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.2,
+            from: [0.0, 0.0],
+            to: [10.0, 0.0],
+        },
+    )
+    .expect("the first half is routed");
+    add_track(
+        handle,
+        AddTrackRequest { net: Some("N".to_string()), layer: "F.Cu".to_string(), width: 0.2, from: [0.0, 5.0], to: [9.0, 5.0] },
+    )
+    .expect("the second half is routed");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("P".to_string()), at: [10.0, 0.0], diameter: 0.6, drill: 0.3, ..Default::default() },
+    )
+    .expect("the via is placed");
+    add_differential_pair(
+        handle,
+        AddDifferentialPairRequest {
+            positive: "P".to_string(),
+            negative: "N".to_string(),
+            width: 0.2,
+            gap: 0.2,
+            max_skew: 2.0,
+        },
+    )
+    .expect("the pair is declared");
+
+    let report = length_audit(handle).expect("the audit is produced");
+    assert_eq!(report["barrelsMeasured"], false, "no stackup means no barrel measurement");
+    assert!(report["nets"][0]["viaLength"].is_null());
+    assert!(report["nets"][0]["totalLength"].is_null());
+    assert!(report["totals"]["viaLength"].is_null());
+    assert_eq!(report["pairs"][0]["positiveLength"], 10.0, "the pair comparison falls back to track lengths");
+    assert_eq!(report["pairs"][0]["deviation"], 1.0);
+    assert_eq!(report["pairs"][0]["status"], "pass");
     close(handle).expect("the board closes");
 }
 

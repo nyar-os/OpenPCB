@@ -2306,6 +2306,28 @@ cli.command('lengths', 'cli.cmd.lengths').actionCtx(async (options, _args, ctx) 
     return 0;
 });
 
+const length = cli.command('length', 'cli.cmd.length');
+length
+    .command('audit', 'cli.cmd.length-audit')
+    .actionCtx(async (options, _args, ctx) => {
+        const file = input(options);
+        if (file === undefined) {
+            ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
+            return 2;
+        }
+        await withBoard(file, async (board) => {
+            const report = await board.lengthAudit();
+            const nets = report.nets.map((net) => `${net.name}=${net.totalLength ?? net.trackLength}`).join(' ') || 'none';
+            const failing = report.pairs.filter((pair) => pair.status === 'fail').length;
+            ctx.emitResult(
+                report,
+                `nets=${report.nets.length} total=${report.totals.totalLength ?? report.totals.trackLength} ${nets} pairs=${report.pairs.length} failing=${failing}`,
+            );
+            return 0;
+        });
+        return 0;
+    });
+
 function panelTabStyle(raw: string | undefined): PanelTabStyle | undefined {
     if (raw === undefined) {
         return undefined;

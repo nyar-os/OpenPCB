@@ -50,6 +50,7 @@ import type {
     InspectCheck,
     InspectReport,
     KeepoutAreaReport,
+    LengthAuditReport,
     MoveFootprintOptions,
     NetAuditReport,
     NetLengthsReport,
@@ -509,6 +510,11 @@ export function copperBalance(handle: number): CopperBalanceReport {
 /** Reports routed copper length per declared net. */
 export function netLengths(handle: number): NetLengthsReport {
     return decode<NetLengthsReport>(() => binding('board.netLengths').board_net_lengths(handle));
+}
+
+/** Reports routed lengths per net with via barrels and differential-pair deviation. */
+export function lengthAudit(handle: number): LengthAuditReport {
+    return decode<LengthAuditReport>(() => binding('board.lengthAudit').board_length_audit(handle));
 }
 
 /** Reports net class membership, width and clearance conformance. */
