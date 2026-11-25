@@ -342,6 +342,7 @@ open-pcb stitch <file> --net <name> --spacing <mm> [--inset <mm>]
 open-pcb copper balance <file>
 open-pcb drill report <file>
 open-pcb lengths <file>
+open-pcb length audit <file>
 ```
 
 `route` defaults to width 0.25, clearance 0.2 and via diameter 0.6. `--netclass`
@@ -363,6 +364,13 @@ centreline length in document units and via count, plus the totals and the
 longest-net ranking. The JSON `ranking` array orders the declared nets by length,
 longest first, with equal lengths ordered by net name; the summary prints the
 top entry as `longest=<net>(<length>)`.
+`length audit` adds the via barrels to the picture: every declared net is
+printed in millimetres as `trackLength`, `viaLength` and `totalLength`, and
+every declared differential pair as `deviation` against its `maxSkew` `target`
+with a `pass` or `fail` `status`. Barrels span the dielectric between the layers
+each via touches, so `viaLength` and `totalLength` are null without a declared
+stackup and the pair comparison falls back to track lengths; the summary prints
+the failing-pair count as `failing=<n>`.
 
 ```bash
 open-pcb route board.opcb --net VCC --width 0.25

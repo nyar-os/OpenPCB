@@ -124,6 +124,7 @@ rectangle; there is no round or polygon aperture geometry to approximate.
 | Plated routed slots and the drill report | `supported` |
 | Copper area and balance report | `supported` |
 | Routed net-length report with longest-net ranking (`lengths`, `Board.netLengths`) | `supported` |
+| Routed length audit with via barrels and pair deviation (`length audit`, `Board.lengthAudit`) | `supported` |
 | Net class, width and clearance audit (`net audit`, `Board.netAudit`) | `supported` |
 | Test point coverage report (`testpoint coverage`, `Board.testpointCoverage`) | `supported` |
 | Copper pour connectivity audit (`zone audit`, `Board.zoneAudit`) | `supported` |
@@ -362,6 +363,14 @@ being approximated.
   zeros for a declared net with no copper. Alongside the declaration-ordered
   `nets` array it ranks the same nets by length in `ranking`, longest first;
   equal rounded lengths fall back to the net name, so the order is deterministic.
+- The length audit adds the copper the plain report omits. Every declared net is
+  measured in millimetres as `trackLength`, `viaLength` and `totalLength`: a via
+  barrel spans the dielectric between the copper layers it touches, so barrels
+  need a declared stackup and come back null without one. Each declared
+  differential pair compares the two halves and reports `deviation` against the
+  pair's `maxSkew` `target` with a `pass` or `fail` `status`; without a stackup
+  the comparison falls back to track lengths. The query is read-only and never
+  bumps the revision.
 - The copper balance report sums feature areas, so overlapping copper counts once
   per feature rather than once as a union. Coverage and imbalance need a
   rectangular outline; without one the report still lists per-layer areas.
