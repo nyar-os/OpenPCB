@@ -1,6 +1,6 @@
 {
     "name": "@wae/open-pcb-linux-arm64",
-    "version": "0.0.7",
+    "version": "0.0.8",
     "description": "Linux arm64 native addon for @wae/open-pcb",
     "license": "MPL-2.0",
     "os": [

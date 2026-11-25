@@ -1,6 +1,6 @@
 {
     "name": "@wae/open-pcb-darwin-x64",
-    "version": "0.0.7",
+    "version": "0.0.8",
     "description": "macOS x64 native addon for @wae/open-pcb",
     "license": "MPL-2.0",
     "os": [
