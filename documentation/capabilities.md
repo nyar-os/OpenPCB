@@ -29,6 +29,9 @@ direction.
 | `gbr` | `unsupported` | `supported` | Writes a directory of Gerber files. |
 | `drl` | `unsupported` | `supported` | Excellon drill file with via, pad and routed-slot holes. |
 | `drill_map` | `unsupported` | `supported` | SVG hole map covering vias, pad drills and routed slots. The tool legend numbers circular drills in ascending diameter and lists routed slots on their own row. |
+| `dxf` | `unsupported` | `supported` | AutoCAD R12 board outline: four `LINE` entities on `Edge.Cuts` in millimetres. Needs an outline. |
+| `layers` | `unsupported` | `supported` | Directory of single-layer SVG views: `F_Cu.svg`, `B_Cu.svg`, `F_SilkS.svg` and `B_SilkS.svg` share one canvas and coordinate mapping so they stack like Gerber layers. |
+| `asm` | `unsupported` | `supported` | Directory of assembly sheets: `F_Asm.svg` and `B_Asm.svg` carry the outline, component outlines, references, pad-1 polarity marks, BOM item bubbles and the grouped BOM table below each board. |
 | `pos` | `unsupported` | `supported` | Pick-and-place CSV. |
 | `placement` | `unsupported` | `supported` | Millimetre JSON. |
 | `bom` | `unsupported` | `supported` | Bill of materials CSV. |
@@ -42,7 +45,7 @@ direction.
 Declared preview renderers: `svg` is `supported`; `png` and `pdf` are
 `unsupported` as preview renderers even though they are export targets.
 
-Declared export targets: all fourteen formats above. Every target is
+Declared export targets: all seventeen formats above. Every target is
 `supported` except `step`.
 
 ## Checks

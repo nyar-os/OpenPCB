@@ -102,13 +102,20 @@ open-pcb inspect board.opcb --checks drc,connectivity,unrouted
 open-pcb export <file> --format <target> --out <file-or-directory>
 ```
 
-Targets: `kicad_pcb`, `gbr`, `drl`, `drill_map`, `pos`, `placement`, `bom`,
-`testpoints`, `ipc_d_356`, `step`, `ipc2581`, `pdf`, `svg`, `png`. `step` rejects
-with `capability/not-implemented` before writing.
+Targets: `kicad_pcb`, `gbr`, `drl`, `drill_map`, `dxf`, `layers`, `pos`,
+`placement`, `asm`, `testpoints`, `ipc_d_356`, `step`, `ipc2581`, `pdf`, `svg`,
+`png`. `step` rejects with `capability/not-implemented` before writing.
+`gbr`, `layers` and `asm` write a directory of files; `--out` names that
+directory. `layers` writes `F_Cu.svg`, `B_Cu.svg`, `F_SilkS.svg` and
+`B_SilkS.svg` on one shared canvas; `asm` writes the `F_Asm.svg` and `B_Asm.svg`
+assembly sheets with their BOM tables. `dxf` writes the board outline as four
+R12 `LINE` entities on `Edge.Cuts` and needs an outline.
 
 ```bash
 open-pcb export board.opcb --format gbr --out gerber
 open-pcb export board.opcb --format bom --out bom.csv
+open-pcb export board.opcb --format layers --out views
+open-pcb export board.opcb --format asm --out assembly
 ```
 
 ### `gui`

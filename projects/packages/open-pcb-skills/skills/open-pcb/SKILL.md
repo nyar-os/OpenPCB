@@ -89,7 +89,10 @@ Implemented:
   warns about connectable nets with no declared test point and errors on nets
   with no pad or via.
 - Exports: `gbr` (Gerber RS-274X directory), `drl` (Excellon), `drill_map`
-  (hole map SVG with tool legend and back-drill marks), `bom`, `pos`,
+  (hole map SVG with tool legend and back-drill marks), `dxf` (R12 board
+  outline as `Edge.Cuts` lines), `layers` (directory of aligned single-layer
+  SVG views), `asm` (directory of assembly sheets with BOM tables), `bom`,
+  `pos`,
   `placement` (millimetre JSON), `testpoints` (CSV probe report), `ipc_d_356`
   (IPC-D-356A netlist), `svg`, `pdf`, `png` (1024x768 RGB raster), `kicad_pcb`
   and `ipc2581`. The Gerber directory holds one file per copper layer plus
@@ -203,7 +206,7 @@ a format, check or target.
 | `open-pcb severity set <file.opcb> --code <code> --severity <info\|warning\|error>` | Override the severity of one finding code. |
 | `open-pcb severity delete <file.opcb> --code <code>` | Remove the severity override of one finding code. |
 | `open-pcb inspect <file.opcb> --checks <list>` | Run the implemented checks. |
-| `open-pcb export <file.opcb> --format <format> --out <file-or-directory>` | Write one implemented projection: `gbr` (directory), `drl`, `drill_map`, `bom`, `pos`, `placement`, `testpoints`, `ipc_d_356`, `svg`, `pdf`, `png`, `kicad_pcb` or `ipc2581`. |
+| `open-pcb export <file.opcb> --format <format> --out <file-or-directory>` | Write one implemented projection: `gbr` (directory), `drl`, `drill_map`, `dxf`, `layers` (directory), `asm` (directory), `bom`, `pos`, `placement`, `testpoints`, `ipc_d_356`, `svg`, `pdf`, `png`, `kicad_pcb` or `ipc2581`. |
 | `open-pcb gui` | Open the OpenPCB Studio window. |
 
 The editing commands open the document, validate one mutation, increment the
@@ -273,7 +276,9 @@ mutating command also records the previous document for CLI undo/redo.
    `B_Cu.gbr`, `F_SilkS.gbr`, `B_SilkS.gbr`, `F_Mask.gbr`, `B_Mask.gbr`,
    `F_Paste.gbr`, `B_Paste.gbr` and `Edge_Cuts.gbr`. Export `drl`, `drill_map`,
    `pos`, `placement`, `testpoints`, `ipc_d_356`, `bom`, `svg`, `pdf`, `png`,
-   `kicad_pcb` and `ipc2581` to explicit paths.
+   `kicad_pcb` and `ipc2581` to explicit paths; `dxf` to a file and `layers`
+   (`F_Cu.svg`, `B_Cu.svg`, `F_SilkS.svg`, `B_SilkS.svg`) and `asm`
+   (`F_Asm.svg`, `B_Asm.svg`) to explicit directories.
    `testpoints` writes a probe CSV with a `Target,Designator,Pad,Kind,Net,Layer,X,Y`
    header; only explicitly declared test points appear. `ipc_d_356` writes
    80-column IPC-D-356A records and ends with `999`.
