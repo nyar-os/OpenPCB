@@ -294,8 +294,15 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         const layerViews = path.join(directory, 'layers');
         const views = await board.export({ format: 'layers', target: layerViews });
         assert.equal(views.format, 'layers');
-        assert.deepEqual(views.artifacts?.map((item) => item.name), ['F_Cu.svg', 'B_Cu.svg', 'F_SilkS.svg', 'B_SilkS.svg']);
-        for (const name of ['F_Cu.svg', 'B_Cu.svg', 'F_SilkS.svg', 'B_SilkS.svg']) {
+        assert.deepEqual(views.artifacts?.map((item) => item.name), [
+            'F_Cu.svg',
+            'B_Cu.svg',
+            'F_SilkS.svg',
+            'B_SilkS.svg',
+            'Edge_Cuts.svg',
+            'Drill.svg',
+        ]);
+        for (const name of ['F_Cu.svg', 'B_Cu.svg', 'F_SilkS.svg', 'B_SilkS.svg', 'Drill.svg']) {
             assert.match(fs.readFileSync(path.join(layerViews, name), 'utf8'), /<svg/, `${name} is an SVG view`);
         }
 
