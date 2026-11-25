@@ -28,7 +28,7 @@ direction.
 | `ipc2581` | `supported` | `supported` | Import reports a loss ledger. |
 | `gbr` | `unsupported` | `supported` | Writes a directory of Gerber files. |
 | `drl` | `unsupported` | `supported` | Excellon drill file with via, pad and routed-slot holes. |
-| `drill_map` | `unsupported` | `supported` | SVG hole map covering vias, pad drills and routed slots. |
+| `drill_map` | `unsupported` | `supported` | SVG hole map covering vias, pad drills and routed slots. The tool legend numbers circular drills in ascending diameter and lists routed slots on their own row. |
 | `pos` | `unsupported` | `supported` | Pick-and-place CSV. |
 | `placement` | `unsupported` | `supported` | Millimetre JSON. |
 | `bom` | `unsupported` | `supported` | Bill of materials CSV. |
@@ -36,7 +36,7 @@ direction.
 | `ipc_d_356` | `unsupported` | `supported` | IPC-D-356A netlist. |
 | `step` | `unsupported` | `unsupported` | Rejects with `capability/not-implemented`. |
 | `svg` | `unsupported` | `supported` | Vector preview writer. |
-| `pdf` | `unsupported` | `supported` | Vector PDF writer; A4 landscape with the board scaled to fill the printable area and centred between the title and legend bands. Pale layer colours are swapped for dark ink so the silkscreen stays legible on white paper. |
+| `pdf` | `unsupported` | `supported` | Vector PDF writer; A4 landscape with the board, its silkscreen text and its reference designators scaled to fill the printable area and centred between the title and legend bands. Rotated silkscreen text is drawn with the built-in 5×7 stroke font (ASCII subset); unrotated text stays searchable. Pale layer colours are swapped for dark ink so the silkscreen stays legible on white paper. |
 | `png` | `unsupported` | `supported` | Fixed 1024 × 768 RGB raster. |
 
 Declared preview renderers: `svg` is `supported`; `png` and `pdf` are
