@@ -9412,3 +9412,287 @@ fn mil_board_writes_millimetre_gerber_geometry() {
     assert!(mask.contains("%ADD10R,10.260000X5.180000*%"), "the millimetre rule expands after the unit scale; got {mask}");
     close(handle).expect("the board closes");
 }
+
+/// Reads one quoted attribute from an SVG tag.
+fn svg_attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let needle = format!("{name}=\"");
+    let start = tag.find(&needle)? + needle.len();
+    let rest = &tag[start..];
+    let end = rest.find('"')?;
+    Some(&rest[..end])
+}
+
+/// Page width and height declared by one sheet's `viewBox`.
+fn svg_page(svg: &str) -> (f64, f64) {
+    let header = svg[svg.find("<svg").expect("a root tag")..].split('>').next().expect("a root tag");
+    let view_box = svg_attribute(header, "viewBox").expect("a viewBox");
+    let values: Vec<f64> = view_box.split_whitespace().map(|value| value.parse().expect("a number")).collect();
+    (values[2], values[3])
+}
+
+/// Every text run of one sheet: text, x, baseline, size and anchor.
+fn svg_texts(svg: &str) -> Vec<(String, f64, f64, f64, String)> {
+    let mut texts = Vec::new();
+    let mut rest = svg;
+    while let Some(start) = rest.find("<text") {
+        let tag_end = rest[start..].find('>').expect("a text tag") + start;
+        let tag = &rest[start..tag_end];
+        let close = rest[tag_end..].find("</text>").expect("a closing tag") + tag_end;
+        let text = rest[tag_end + 1..close].to_string();
+        let x: f64 = svg_attribute(tag, "x").and_then(|value| value.parse().ok()).unwrap_or(0.0);
+        let y: f64 = svg_attribute(tag, "y").and_then(|value| value.parse().ok()).unwrap_or(0.0);
+        let size: f64 = svg_attribute(tag, "font-size").and_then(|value| value.parse().ok()).unwrap_or(2.4);
+        let anchor = svg_attribute(tag, "text-anchor").unwrap_or("start").to_string();
+        texts.push((text, x, y, size, anchor));
+        rest = &rest[close + 7..];
+    }
+    texts
+}
+
+/// Bounding box of every stroke and polygon point of one sheet.
+fn svg_ink_bounds(svg: &str) -> (f64, f64, f64, f64) {
+    let mut min = [f64::INFINITY, f64::INFINITY];
+    let mut max = [f64::NEG_INFINITY, f64::NEG_INFINITY];
+    let mut include = |x: f64, y: f64| {
+        min[0] = min[0].min(x);
+        min[1] = min[1].min(y);
+        max[0] = max[0].max(x);
+        max[1] = max[1].max(y);
+    };
+    for marker in ["<path", "<polygon", "<line"] {
+        let mut rest = svg;
+        while let Some(start) = rest.find(marker) {
+            let end = rest[start..].find('>').expect("a tag") + start;
+            let tag = &rest[start..end];
+            let numbers = |value: &str| -> Vec<f64> {
+                let cleaned: String = value
+                    .chars()
+                    .map(
+                        |character| {
+                            if character.is_ascii_digit() || character == '.' || character == '-' { character } else { ' ' }
+                        },
+                    )
+                    .collect();
+                cleaned.split_whitespace().filter_map(|number| number.parse().ok()).collect()
+            };
+            if let Some(data) = svg_attribute(tag, "d").or_else(|| svg_attribute(tag, "points")) {
+                let values = numbers(data);
+                for pair in values.as_chunks::<2>().0 {
+                    include(pair[0], pair[1]);
+                }
+            }
+            for (x_name, y_name) in [("x1", "y1"), ("x2", "y2")] {
+                if let (Some(x), Some(y)) = (svg_attribute(tag, x_name), svg_attribute(tag, y_name))
+                    && let (Ok(x), Ok(y)) = (x.parse::<f64>(), y.parse::<f64>())
+                {
+                    include(x, y);
+                }
+            }
+            rest = &rest[end..];
+        }
+    }
+    (min[0], min[1], max[0], max[1])
+}
+
+/// Adds one two-pad resistor so assembly sheets carry silk, pads and a label.
+fn add_resistor(handle: u64, reference: &str, x: f64, y: f64) {
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some(reference.to_string()),
+            value: Some("10k".to_string()),
+            footprint: Some("0402".to_string()),
+            x: Some(x),
+            y: Some(y),
+            rotation: Some(0.0),
+            layer: Some("F.Cu".to_string()),
+        },
+    )
+    .expect("the resistor is placed");
+    let footprint = summary(handle).expect("the summary is readable")["counts"]["footprints"].as_u64().expect("a count");
+    for (number, offset) in [("1", -0.4), ("2", 0.4)] {
+        add_pad(
+            handle,
+            AddPadRequest {
+                footprint: format!("fp-{footprint}"),
+                number: number.to_string(),
+                x: offset,
+                y: 0.0,
+                w: 0.5,
+                h: 0.9,
+                net: None,
+                drill: None,
+            },
+        )
+        .expect("the pad is added");
+    }
+}
+
+#[test]
+fn every_sheet_text_stays_inside_the_page_and_its_title_cell() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_resistor(handle, "R1", 10.0, 40.0);
+    add_resistor(handle, "R2", 14.0, 40.0);
+
+    let mut sheets: Vec<(String, String)> = Vec::new();
+    let layers = directory.join("layers");
+    export(handle, "layers", &layers).expect("the layer views write");
+    for entry in fs::read_dir(&layers).expect("the layer directory is readable") {
+        let path = entry.expect("a directory entry").path();
+        if path.extension().is_some_and(|extension| extension == "svg") {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            sheets.push((format!("layers/{name}"), fs::read_to_string(&path).expect("the view is readable")));
+        }
+    }
+    let map = directory.join("board.drill-map.svg");
+    export(handle, "drill_map", &map).expect("the drill map writes");
+    sheets.push(("drill_map".to_string(), fs::read_to_string(&map).expect("the map is readable")));
+    for (format, file, name) in [
+        ("asm", "F_Asm.svg", "asm"),
+        ("stackup", "Stackup.svg", "stackup"),
+        ("panel", "Panel.svg", "panel"),
+        ("drc", "Drc.svg", "drc"),
+        ("drill", "Drill.svg", "drill"),
+    ] {
+        let target = directory.join(name);
+        export(handle, format, &target).expect("the sheet writes");
+        sheets.push((name.to_string(), fs::read_to_string(target.join(file)).expect("the sheet is readable")));
+    }
+
+    for (name, svg) in &sheets {
+        let (width, height) = svg_page(svg);
+        for (text, x, baseline, size, anchor) in svg_texts(svg) {
+            let advance = text.chars().count() as f64 * size * 0.6;
+            let (left, right) = if anchor == "end" { (x - advance, x) } else { (x, x + advance) };
+            assert!(left >= 0.5, "{name}: `{text}` starts at {left:.2} on a {width:.2} mm page");
+            assert!(right <= width - 0.5, "{name}: `{text}` ends at {right:.2} on a {width:.2} mm page");
+            assert!(baseline >= 0.5, "{name}: `{text}` sits above the page top ({baseline:.2})");
+            assert!(baseline <= height - 0.5, "{name}: `{text}` sits below the page bottom ({baseline:.2})");
+            if baseline < 16.0 {
+                assert!(right <= width - 3.0, "{name}: title run `{text}` leaves its cell at {right:.2}");
+                assert!(baseline >= 3.0, "{name}: title run `{text}` is clipped by the band top ({baseline:.2})");
+            }
+        }
+    }
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn layer_views_fill_most_of_the_page() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    let target = directory.join("layers");
+    export(handle, "layers", &target).expect("the layer views write");
+    for name in ["F_Cu.svg", "F_SilkS.svg", "Edge_Cuts.svg", "Drill.svg"] {
+        let svg = fs::read_to_string(target.join(name)).expect("the view is readable");
+        let (width, height) = svg_page(&svg);
+        let (min_x, min_y, max_x, max_y) = svg_ink_bounds(&svg);
+        assert!(max_x - min_x >= width * 0.6, "{name} covers {:.0}% of the page width", (max_x - min_x) / width * 100.0);
+        assert!(
+            max_y - min_y >= (height - 30.0) * 0.6,
+            "{name} covers {:.0}% of the drawable height",
+            (max_y - min_y) / (height - 30.0) * 100.0
+        );
+    }
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn assembly_references_never_overlap() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    for (reference, x) in [("R1", 8.0), ("R2", 11.0), ("D1", 14.0), ("U2", 17.0)] {
+        add_resistor(handle, reference, x, 40.0);
+    }
+    let target = directory.join("asm");
+    export(handle, "asm", &target).expect("the assembly sheet writes");
+    for name in ["F_Asm.svg", "B_Asm.svg"] {
+        let svg = fs::read_to_string(target.join(name)).expect("the sheet is readable");
+        let labels: Vec<(String, f64, f64, f64)> = svg_texts(&svg)
+            .into_iter()
+            .filter(|(_, _, _, size, _)| (*size - 2.6).abs() < 1e-6)
+            .map(|(text, x, baseline, size, _)| {
+                let width = text.chars().count() as f64 * size * 0.6;
+                (text, x, baseline, width)
+            })
+            .collect();
+        for left in 0..labels.len() {
+            for right in left + 1..labels.len() {
+                let (left_text, left_x, left_y, left_w) = (&labels[left].0, labels[left].1, labels[left].2, labels[left].3);
+                let (right_text, right_x, right_y, right_w) =
+                    (&labels[right].0, labels[right].1, labels[right].2, labels[right].3);
+                let overlap =
+                    left_x < right_x + right_w && right_x < left_x + left_w && left_y - 3.2 < right_y && right_y - 3.2 < left_y;
+                assert!(!overlap, "{name}: `{left_text}` overlaps `{right_text}`");
+            }
+        }
+    }
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn png_preview_prints_on_white_paper() {
+    use std::io::Read as _;
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    let path = directory.join("board.png");
+    export(handle, "png", &path).expect("the PNG preview writes");
+    let bytes = fs::read(&path).expect("the PNG is readable");
+    let mut offset = 8usize;
+    let mut idat = Vec::new();
+    while offset + 8 <= bytes.len() {
+        let length = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+        let kind = &bytes[offset + 4..offset + 8];
+        if kind == b"IDAT" {
+            idat.extend_from_slice(&bytes[offset + 8..offset + 8 + length]);
+        }
+        offset += 12 + length;
+    }
+    let mut raw = Vec::new();
+    flate2::read::ZlibDecoder::new(&idat[..]).read_to_end(&mut raw).expect("the image data inflates");
+    assert_eq!(raw[0], 0, "the first scanline uses the None filter");
+    assert_eq!(&raw[1..4], &[255, 255, 255], "the first pixel is white paper");
+}
+
+#[test]
+fn drc_and_drill_sheets_list_their_findings() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    let drc = directory.join("drc");
+    let report = export(handle, "drc", &drc).expect("the DRC sheet writes");
+    assert_eq!(report["format"], "drc");
+    let artifacts: Vec<&str> =
+        report["artifacts"].as_array().expect("artifacts").iter().filter_map(|item| item["name"].as_str()).collect();
+    assert_eq!(artifacts, ["Drc.svg", "Drc.pdf"]);
+    let svg = fs::read_to_string(drc.join("Drc.svg")).expect("the DRC sheet is readable");
+    assert!(svg.contains("Design-rule check - findings"), "the DRC sheet is titled");
+    assert!(svg.contains("Severity") && svg.contains("Findings by layer"), "the DRC sheet carries its table and chart");
+
+    let drill = directory.join("drill");
+    let report = export(handle, "drill", &drill).expect("the drill chart writes");
+    assert_eq!(report["format"], "drill");
+    let svg = fs::read_to_string(drill.join("Drill.svg")).expect("the drill sheet is readable");
+    assert!(svg.contains("Drill chart - aperture distribution"), "the chart is titled");
+    assert!(svg.contains("Diameter") && svg.contains("Holes per aperture"), "the chart carries its table and bars");
+    close(handle).expect("the board closes");
+}

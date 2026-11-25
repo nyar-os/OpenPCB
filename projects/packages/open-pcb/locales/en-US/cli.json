@@ -109,13 +109,13 @@
             "gui": "Open the OpenPCB Studio window on the native board"
         },
         "opt": {
-            "out": "File or directory to write; gbr, layers, stackup, panel and asm exports write a directory of files",
+            "out": "File or directory to write; gbr, layers, stackup, panel, drc, drill and asm exports write a directory of files",
             "import-out": "Native .opcb document to write",
             "title": "Board title",
             "template": "Template the board starts from; blank is the only implemented value",
             "overwrite": "Replace the output file when it already exists",
             "checks": "Comma-separated checks: drc, connectivity, clearance, annular_rings, annular-ring, track-width, unrouted, stackup, outline, silkscreen, courtyard, netlist, hole-to-hole, hole-to-track, hole-to-pad, via-to-pad, copper-to-edge, edge-clearance, silkscreen-over-pad, diffpair, dangling-copper, netclass, keepout, via-in-pad, testpoints",
-            "format": "Export target: gbr, drl, drill_map, dxf, layers, stackup, panel, bom, pos, placement, asm, testpoints, ipc_d_356, svg, pdf, png, kicad_pcb and ipc2581 are implemented; step is not",
+            "format": "Export target: gbr, drl, drill_map, dxf, layers, stackup, panel, drc, drill, bom, pos, placement, asm, testpoints, ipc_d_356, svg, pdf, png, kicad_pcb and ipc2581 are implemented; step is not",
             "ref": "Reference designator",
             "id": "Stable object id, for example fp-1",
             "value": "Component value",

@@ -27,6 +27,8 @@ pub(crate) const SUPPORTED_EXPORTS: &[&str] = &[
     "layers",
     "stackup",
     "panel",
+    "drc",
+    "drill",
     "svg",
     "pdf",
     "kicad_pcb",
@@ -352,6 +354,12 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
     }
     if format == "panel" {
         return panel_sheet(board, path);
+    }
+    if format == "drc" {
+        return drc_sheet(board, path);
+    }
+    if format == "drill" {
+        return drill_sheet(board, path);
     }
     if format == "png" {
         return png(board, path);
@@ -3394,6 +3402,453 @@ fn panel_drawing(board: &Board, scale: f64, y_up: bool) -> Result<Drawing, Servi
         x += 6.0 + label.chars().count() as f64 * 2.5 * 0.6 + 6.0;
     }
     Ok(drawing)
+}
+
+/// One finding of the inspection report, flattened for the DRC sheet.
+struct DrcFinding {
+    severity: String,
+    code: String,
+    layer: String,
+    message: String,
+}
+
+/// Writes the design-rule check result sheet as SVG and PDF.
+fn drc_sheet(board: &Board, path: &Path) -> Result<Value, ServiceError> {
+    export_directory("drc", path)?;
+    let mut artifacts = Vec::new();
+    let mut total = 0u64;
+    for (name, scale, y_up) in [("Drc.svg", 1.0, false), ("Drc.pdf", PT_PER_MM, true)] {
+        let drawing = drc_drawing(board, scale, y_up);
+        let bytes = if name.ends_with(".svg") {
+            let content = drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the DRC sheet: {error}")))?;
+            let content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
+            crate::atomic_write(&path.join(name), content.as_bytes())?
+        }
+        else {
+            let content = drawing.to_pdf().map_err(|error| crate::invalid(format!("cannot render the DRC PDF: {error}")))?;
+            crate::atomic_write(&path.join(name), &content)?
+        };
+        total += bytes;
+        artifacts.push(json!({ "name": name, "bytes": bytes }));
+    }
+    Ok(json!({ "path": path.to_string_lossy(), "format": "drc", "bytes": total, "artifacts": artifacts }))
+}
+
+/// Draws the inspection findings as a table and a per-layer bar chart.
+fn drc_drawing(board: &Board, scale: f64, y_up: bool) -> Drawing {
+    let report = crate::inspect::run(board, None).unwrap_or_else(|_| json!({ "issues": [] }));
+    let findings: Vec<DrcFinding> = report["issues"]
+        .as_array()
+        .map(|issues| {
+            issues
+                .iter()
+                .map(|issue| DrcFinding {
+                    severity: issue["severity"].as_str().unwrap_or("info").to_string(),
+                    code: issue["code"].as_str().unwrap_or("unknown").to_string(),
+                    layer: issue["layerId"].as_str().unwrap_or("board").to_string(),
+                    message: issue["message"].as_str().unwrap_or("").to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let width = 220.0;
+    let margin = 8.0;
+    let font = 2.4;
+    let gap = 4.0;
+    let headers = ["Severity", "Code", "Layer", "Message"];
+    let fixed = [20.0, 66.0, 28.0];
+    let message_width = width - margin * 2.0 - fixed.iter().sum::<f64>() - gap * 3.0;
+    let columns = [fixed[0], fixed[1], fixed[2], message_width];
+    let mut column_x = Vec::with_capacity(columns.len());
+    let mut cursor = margin;
+    for (column, column_width) in columns.iter().enumerate() {
+        column_x.push(cursor);
+        cursor += column_width + if column + 1 < columns.len() { gap } else { 0.0 };
+    }
+
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for finding in &findings {
+        *counts.entry(finding.layer.clone()).or_default() += 1;
+    }
+    let max_count = counts.values().copied().max().unwrap_or(1).max(1);
+    let chart_top = SHEET_TITLE_BAND + 12.0;
+    let chart_rows = counts.len().max(if findings.is_empty() { 1 } else { 0 }) as f64;
+    let chart_height = 10.0 + chart_rows * 7.0;
+    let table_top = chart_top + chart_height + 10.0;
+    let wrapped: Vec<Vec<String>> =
+        findings.iter().map(|finding| wrap_text(&finding.message, message_width - 2.0, font)).collect();
+    let row_heights: Vec<f64> = wrapped.iter().map(|lines| (lines.len().max(1)) as f64 * font * 1.75 + 1.2).collect();
+    let table_height = if findings.is_empty() { 0.0 } else { 7.0 + row_heights.iter().sum::<f64>() + 3.0 };
+    let height = table_top + table_height + (if findings.is_empty() { 20.0 } else { 10.0 });
+
+    let map = SheetMap { scale, height, y_up };
+    let mut drawing = Drawing::new(Size::new(map.size(width), map.size(height))).with_background(SHEET_PAPER);
+    let view = format!("{} findings · {} errors", findings.len(), findings.iter().filter(|f| f.severity == "error").count());
+    sheet_chrome(
+        &mut drawing,
+        &map,
+        width,
+        height,
+        &SheetInfo { name: "Design-rule check - findings", number: &board.id, scale: "NTS", units: "mm", view: &view },
+    );
+
+    drawing.push(Element::new(
+        Shape::Text { at: map.point(margin, chart_top), text: "Findings by layer".to_string(), size: map.size(3.0) },
+        fill_style(PRINT_INK),
+    ));
+    if findings.is_empty() {
+        drawing.push(Element::new(
+            Shape::Text { at: map.point(margin, chart_top + 14.0), text: "No findings".to_string(), size: map.size(5.0) },
+            fill_style(PRINT_INK),
+        ));
+    }
+    let label_width = 40.0;
+    let bar_left = margin + label_width;
+    let bar_max = width - margin - bar_left - 18.0;
+    for (row, (layer, count)) in counts.iter().enumerate() {
+        let y = chart_top + 8.0 + row as f64 * 7.0;
+        drawing.push(Element::new(
+            Shape::Text {
+                at: map.point(margin, y + 2.0),
+                text: layer.clone(),
+                size: map.size(fit_font(layer, label_width - 3.0, 2.4)),
+            },
+            fill_style(PRINT_INK),
+        ));
+        let bar_width = (*count as f64 / max_count as f64) * bar_max;
+        drawing.push(Element::new(
+            Shape::Polygon {
+                points: vec![
+                    map.point(bar_left, y - 1.6),
+                    map.point(bar_left + bar_width.max(0.6), y - 1.6),
+                    map.point(bar_left + bar_width.max(0.6), y + 1.6),
+                    map.point(bar_left, y + 1.6),
+                ],
+            },
+            Style::both(Color::rgb(160, 160, 160), PRINT_INK, map.size(0.12)),
+        ));
+        drawing.push(Element::new(
+            Shape::Text {
+                at: map.point(bar_left + bar_width.max(0.6) + 2.0, y + 1.0),
+                text: count.to_string(),
+                size: map.size(2.2),
+            },
+            fill_style(PRINT_INK),
+        ));
+    }
+
+    if findings.is_empty() {
+        return drawing;
+    }
+    for (column, header) in headers.iter().enumerate() {
+        drawing.push(Element::new(
+            Shape::Text { at: map.point(column_x[column], table_top), text: header.to_string(), size: map.size(font) },
+            fill_style(PRINT_INK),
+        ));
+    }
+    drawing.push(Element::new(
+        Shape::Line { from: map.point(margin, table_top + 2.4), to: map.point(width - margin, table_top + 2.4) },
+        Style::stroke(PRINT_INK, map.size(0.15)),
+    ));
+    let severity_ink = |severity: &str| match severity {
+        "error" => Color::rgb(176, 58, 46),
+        "warning" => Color::rgb(138, 109, 31),
+        _ => PRINT_INK,
+    };
+    let mut y = table_top + 2.4;
+    for (index, finding) in findings.iter().enumerate() {
+        drawing.push(Element::new(
+            Shape::Text { at: map.point(column_x[0], y + font * 1.5), text: finding.severity.clone(), size: map.size(font) },
+            fill_style(severity_ink(&finding.severity)),
+        ));
+        drawing.push(Element::new(
+            Shape::Text {
+                at: map.point(column_x[1], y + font * 1.5),
+                text: finding.code.clone(),
+                size: map.size(fit_font(&finding.code, columns[1] - 1.0, font)),
+            },
+            fill_style(PRINT_INK),
+        ));
+        drawing.push(Element::new(
+            Shape::Text {
+                at: map.point(column_x[2], y + font * 1.5),
+                text: finding.layer.clone(),
+                size: map.size(fit_font(&finding.layer, columns[2] - 1.0, font)),
+            },
+            fill_style(PRINT_INK),
+        ));
+        for (line, text) in wrapped[index].iter().enumerate() {
+            drawing.push(Element::new(
+                Shape::Text {
+                    at: map.point(column_x[3], y + font * 1.5 + line as f64 * font * 1.75),
+                    text: text.clone(),
+                    size: map.size(font),
+                },
+                fill_style(PRINT_INK),
+            ));
+        }
+        y += row_heights[index];
+    }
+    drawing.push(Element::new(
+        Shape::Line { from: map.point(margin, y), to: map.point(width - margin, y) },
+        Style::stroke(PRINT_INK, map.size(0.15)),
+    ));
+    drawing
+}
+
+/// One drill tool row of the drill chart.
+struct DrillChartTool {
+    diameter: f64,
+    holes: usize,
+    plated: bool,
+    note: String,
+}
+
+/// Writes the drill chart as SVG and PDF: aperture bars, a symbol per tool and
+/// the same symbols the drill map puts on every hole.
+fn drill_sheet(board: &Board, path: &Path) -> Result<Value, ServiceError> {
+    export_directory("drill", path)?;
+    let mut artifacts = Vec::new();
+    let mut total = 0u64;
+    for (name, scale, y_up) in [("Drill.svg", 1.0, false), ("Drill.pdf", PT_PER_MM, true)] {
+        let drawing = drill_drawing(board, scale, y_up);
+        let bytes = if name.ends_with(".svg") {
+            let content =
+                drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the drill chart: {error}")))?;
+            let content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
+            crate::atomic_write(&path.join(name), content.as_bytes())?
+        }
+        else {
+            let content = drawing.to_pdf().map_err(|error| crate::invalid(format!("cannot render the drill PDF: {error}")))?;
+            crate::atomic_write(&path.join(name), &content)?
+        };
+        total += bytes;
+        artifacts.push(json!({ "name": name, "bytes": bytes }));
+    }
+    Ok(json!({ "path": path.to_string_lossy(), "format": "drill", "bytes": total, "artifacts": artifacts }))
+}
+
+/// Draws the aperture distribution chart and the tool table.
+fn drill_drawing(board: &Board, scale: f64, y_up: bool) -> Drawing {
+    let factor = board.millimetres();
+    let mut tools: BTreeMap<String, DrillChartTool> = BTreeMap::new();
+    for via in &board.vias {
+        let entry = tools.entry(format!("{:.3}", via.drill * factor)).or_insert(DrillChartTool {
+            diameter: via.drill * factor,
+            holes: 0,
+            plated: true,
+            note: String::new(),
+        });
+        entry.holes += 1;
+        if via.back_drill.is_some() {
+            entry.note = "back drilled".to_string();
+        }
+    }
+    for pad in board.placed_pads() {
+        if let Some(drill) = pad.drill.filter(|drill| *drill > 0.0) {
+            let entry = tools.entry(format!("{:.3}", drill * factor)).or_insert(DrillChartTool {
+                diameter: drill * factor,
+                holes: 0,
+                plated: true,
+                note: String::new(),
+            });
+            entry.holes += 1;
+        }
+    }
+    let mut rows: Vec<(&String, &DrillChartTool)> = tools.iter().collect();
+    rows.sort_by(|left, right| left.1.diameter.total_cmp(&right.1.diameter));
+    let slot_rows = board.slots.len();
+
+    let width = 210.0;
+    let margin = 8.0;
+    let font = 2.5;
+    let head_top = SHEET_TITLE_BAND + 12.0;
+    let plot_left = margin + 10.0;
+    let plot_right = width - margin - 10.0;
+    let plot_top = head_top + 10.0;
+    let plot_height = 40.0;
+    let max_holes = rows.iter().map(|(_, tool)| tool.holes).max().unwrap_or(1).max(1);
+    let table_top = plot_top + plot_height + 20.0;
+    let table_height = 8.0 + (rows.len() + if slot_rows > 0 { 1 } else { 0 }) as f64 * 6.0 + 3.0;
+    let height = table_top + table_height + 12.0;
+
+    let map = SheetMap { scale, height, y_up };
+    let mut drawing = Drawing::new(Size::new(map.size(width), map.size(height))).with_background(SHEET_PAPER);
+    let total_holes: usize = rows.iter().map(|(_, tool)| tool.holes).sum::<usize>() + slot_rows;
+    let view = format!("{} {} · {} holes", rows.len(), if rows.len() == 1 { "tool" } else { "tools" }, total_holes);
+    sheet_chrome(
+        &mut drawing,
+        &map,
+        width,
+        height,
+        &SheetInfo { name: "Drill chart - aperture distribution", number: &board.id, scale: "NTS", units: "mm", view: &view },
+    );
+
+    drawing.push(Element::new(
+        Shape::Text { at: map.point(margin, head_top), text: "Holes per aperture".to_string(), size: map.size(3.0) },
+        fill_style(PRINT_INK),
+    ));
+    drawing.push(Element::new(
+        Shape::Line { from: map.point(plot_left, plot_top + plot_height), to: map.point(plot_right, plot_top + plot_height) },
+        Style::stroke(PRINT_INK, map.size(0.15)),
+    ));
+    let count = rows.len().max(1);
+    let slot = (plot_right - plot_left) / count as f64;
+    let bar_width = (slot * 0.6).min(14.0);
+    for (index, (_, tool)) in rows.iter().enumerate() {
+        let center = plot_left + slot * (index as f64 + 0.5);
+        let bar_height = tool.holes as f64 / max_holes as f64 * plot_height;
+        drawing.push(Element::new(
+            Shape::Polygon {
+                points: vec![
+                    map.point(center - bar_width / 2.0, plot_top + plot_height - bar_height.max(0.4)),
+                    map.point(center + bar_width / 2.0, plot_top + plot_height - bar_height.max(0.4)),
+                    map.point(center + bar_width / 2.0, plot_top + plot_height),
+                    map.point(center - bar_width / 2.0, plot_top + plot_height),
+                ],
+            },
+            Style::both(Color::rgb(200, 200, 200), PRINT_INK, map.size(0.12)),
+        ));
+        drawing.push(Element::new(
+            Shape::Text {
+                at: map.point(center, plot_top + plot_height - bar_height.max(0.4) - 1.4),
+                text: tool.holes.to_string(),
+                size: map.size(2.2),
+            },
+            fill_style(PRINT_INK),
+        ));
+        if slot >= 8.0 {
+            drawing.push(Element::new(
+                Shape::Text {
+                    at: map.point(center - 2.4, plot_top + plot_height + 4.0),
+                    text: format!("T{}", index + 1),
+                    size: map.size(2.2),
+                },
+                fill_style(PRINT_INK),
+            ));
+        }
+    }
+
+    let has_note = slot_rows > 0 || rows.iter().any(|(_, tool)| !tool.note.is_empty());
+    let mut headers = vec!["Symbol", "Tool", "Diameter", "Holes", "Plated"];
+    let mut columns = vec![18.0, 18.0, 32.0, 20.0, 20.0];
+    if has_note {
+        headers.push("Note");
+        let used: f64 = columns.iter().sum::<f64>() + 5.0 * 4.0;
+        columns.push((width - margin * 2.0 - used).max(20.0));
+    }
+    let mut column_x = Vec::with_capacity(columns.len());
+    let mut cursor = margin;
+    for (column, column_width) in columns.iter().enumerate() {
+        column_x.push(cursor);
+        cursor += column_width + if column + 1 < columns.len() { 4.0 } else { 0.0 };
+    }
+    for (column, header) in headers.iter().enumerate() {
+        drawing.push(Element::new(
+            Shape::Text { at: map.point(column_x[column], table_top), text: header.to_string(), size: map.size(font) },
+            fill_style(PRINT_INK),
+        ));
+    }
+    drawing.push(Element::new(
+        Shape::Line { from: map.point(margin, table_top + 2.4), to: map.point(width - margin, table_top + 2.4) },
+        Style::stroke(PRINT_INK, map.size(0.15)),
+    ));
+    let mut y = table_top + 2.4;
+    for (index, (_, tool)) in rows.iter().enumerate() {
+        push_tool_symbol(&mut drawing, &map, column_x[0] + 4.0, y + font * 1.3, 3.0, index);
+        let mut cells = vec![
+            format!("T{}", index + 1),
+            format!("{:.3} mm", tool.diameter),
+            tool.holes.to_string(),
+            if tool.plated { "yes".to_string() } else { "no".to_string() },
+        ];
+        if has_note {
+            cells.push(tool.note.clone());
+        }
+        for (cell_index, cell) in cells.iter().enumerate() {
+            let column = cell_index + 1;
+            if cell.is_empty() {
+                continue;
+            }
+            let anchor = if column == 3 || column == 4 { "end" } else { "start" };
+            let x = if anchor == "end" { column_x[column] + columns[column] - 1.0 } else { column_x[column] };
+            drawing.push(Element::new(
+                Shape::Text { at: map.point(x, y + font * 1.5), text: cell.clone(), size: map.size(font) },
+                fill_style(PRINT_INK),
+            ));
+        }
+        y += 6.0;
+    }
+    if slot_rows > 0 {
+        drawing.push(Element::new(
+            Shape::Line {
+                from: map.point(column_x[0] - 1.0, y + font * 1.0),
+                to: map.point(column_x[0] + 9.0, y + font * 1.0),
+            },
+            Style::stroke(PRINT_INK, map.size(0.7)),
+        ));
+        drawing.push(Element::new(
+            Shape::Text { at: map.point(column_x[1], y + font * 1.5), text: "slots".to_string(), size: map.size(font) },
+            fill_style(PRINT_INK),
+        ));
+        drawing.push(Element::new(
+            Shape::Text { at: map.point(column_x[2], y + font * 1.5), text: "routed".to_string(), size: map.size(font) },
+            fill_style(PRINT_INK),
+        ));
+        drawing.push(Element::new(
+            Shape::Text {
+                at: map.point(column_x[3] + columns[3] - 1.0, y + font * 1.5),
+                text: slot_rows.to_string(),
+                size: map.size(font),
+            },
+            fill_style(PRINT_INK),
+        ));
+        y += 6.0;
+    }
+    drawing.push(Element::new(
+        Shape::Line { from: map.point(margin, y), to: map.point(width - margin, y) },
+        Style::stroke(PRINT_INK, map.size(0.15)),
+    ));
+    drawing
+}
+
+/// Draws one tool symbol of the drill chart and the drill map.
+fn push_tool_symbol(drawing: &mut Drawing, map: &SheetMap, x: f64, y: f64, radius: f64, index: usize) {
+    let style = Style::stroke(PRINT_INK, map.size(0.16));
+    let polygon = |drawing: &mut Drawing, points: Vec<[f64; 2]>| {
+        drawing.push(Element::new(
+            Shape::Polygon { points: points.iter().map(|point| map.point(point[0], point[1])).collect() },
+            style.clone(),
+        ));
+    };
+    match drill_symbol_name(index) {
+        "square" => polygon(
+            drawing,
+            vec![[x - radius, y - radius], [x + radius, y - radius], [x + radius, y + radius], [x - radius, y + radius]],
+        ),
+        "diamond" => polygon(drawing, vec![[x, y - radius], [x + radius, y], [x, y + radius], [x - radius, y]]),
+        "triangle" => {
+            polygon(drawing, vec![[x, y - radius], [x + radius * 0.9, y + radius * 0.8], [x - radius * 0.9, y + radius * 0.8]])
+        }
+        "cross" => {
+            drawing.push(Element::new(
+                Shape::Line { from: map.point(x - radius, y), to: map.point(x + radius, y) },
+                style.clone(),
+            ));
+            drawing.push(Element::new(Shape::Line { from: map.point(x, y - radius), to: map.point(x, y + radius) }, style));
+        }
+        "hexagon" => {
+            let points = (0..6)
+                .map(|corner| {
+                    let angle = std::f64::consts::PI / 3.0 * corner as f64;
+                    [x + radius * angle.cos(), y + radius * angle.sin()]
+                })
+                .collect();
+            polygon(drawing, points);
+        }
+        _ => drawing.push(Element::new(Shape::Circle { center: map.point(x, y), radius: map.size(radius) }, style)),
+    }
 }
 
 /// Reads a two-element JSON array of millimetres.

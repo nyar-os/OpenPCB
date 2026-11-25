@@ -277,6 +277,15 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         assert.match(fs.readFileSync(path.join(directory, 'blinker.placement'), 'utf8'), /"placements"/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.svg'), 'utf8'), /<svg/);
 
+        const drcDir = path.join(directory, 'blinker.drc');
+        const drc = await board.export({ format: 'drc', target: drcDir });
+        assert.equal(drc.format, 'drc');
+        assert.match(fs.readFileSync(path.join(drcDir, 'Drc.svg'), 'utf8'), /Design-rule check - findings/);
+        const drillDir = path.join(directory, 'blinker.drill');
+        const drill = await board.export({ format: 'drill', target: drillDir });
+        assert.equal(drill.format, 'drill');
+        assert.match(fs.readFileSync(path.join(drillDir, 'Drill.svg'), 'utf8'), /Drill chart - aperture distribution/);
+
         const gerber = path.join(directory, 'gerber');
         const artifacts = await board.export({ format: 'gbr', target: gerber });
         assert.equal(artifacts.artifacts?.length, 9);

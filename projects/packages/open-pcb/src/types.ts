@@ -867,6 +867,8 @@ export type ExportTarget =
     | 'layers'
     | 'stackup'
     | 'panel'
+    | 'drc'
+    | 'drill'
     | 'pos'
     | 'placement'
     | 'asm'

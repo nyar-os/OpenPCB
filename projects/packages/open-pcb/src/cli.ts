@@ -157,6 +157,8 @@ const exportTargets: readonly ExportTarget[] = [
     'layers',
     'stackup',
     'panel',
+    'drc',
+    'drill',
     'pos',
     'placement',
     'asm',
@@ -2830,7 +2832,7 @@ cli
         const format = asExportTarget(text(options, 'format'));
         if (format === undefined) {
             ctx.fail('open-pcb.cli.format-required', {
-                message: '`--format` must be one of kicad_pcb, gbr, drl, drill_map, dxf, layers, pos, placement, asm, bom, testpoints, ipc_d_356, step, ipc2581, pdf, svg',
+                message: '`--format` must be one of kicad_pcb, gbr, drl, drill_map, dxf, layers, stackup, panel, drc, drill, pos, placement, asm, bom, testpoints, ipc_d_356, step, ipc2581, pdf, svg',
             });
             return 2;
         }
