@@ -76,6 +76,7 @@ export type InspectCheck =
     | 'hole-to-hole'
     | 'hole-to-track'
     | 'hole-to-pad'
+    | 'via-to-pad'
     | 'copper-to-edge'
     | 'edge-clearance'
     | 'silkscreen-over-pad'

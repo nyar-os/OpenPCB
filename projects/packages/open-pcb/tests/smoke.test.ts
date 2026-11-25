@@ -178,6 +178,7 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.checks.silkscreen, 'supported');
     assert.equal(matrix.checks.courtyard, 'supported');
     assert.equal(matrix.checks.stencil, 'supported');
+    assert.equal(matrix.checks['via-to-pad'], 'supported');
     assert.equal(matrix.renderers.svg, 'supported');
     assert.equal(matrix.renderers.png, 'unsupported');
     assert.equal(matrix.designRules, 'supported');

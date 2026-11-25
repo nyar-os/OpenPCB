@@ -252,6 +252,8 @@ fn capability_matrix_matches_the_implemented_pack() {
         "netlist",
         "hole-to-hole",
         "hole-to-track",
+        "hole-to-pad",
+        "via-to-pad",
         "copper-to-edge",
         "edge-clearance",
         "silkscreen-over-pad",
@@ -894,6 +896,107 @@ fn via_in_pad_flags_a_via_whose_centre_lands_inside_a_pad() {
     let clean = inspect(handle, Some(vec!["via-in-pad".to_string()])).expect("the check runs again");
     assert_eq!(codes(&clean), ["via-in-pad/via-in-pad"], "only the on-pad via is flagged");
     assert_eq!(clean["issues"].as_array().expect("issues is an array").len(), 1);
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn via_to_pad_flags_copper_that_reaches_another_net() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    place_footprint(handle, "U1", "F.Cu", 0.0, 10.0, 10.0);
+    add_net_pad(handle, "fp-1", "1", [0.0, 0.0], [1.0, 1.0], "GND");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [10.9, 10.0], diameter: 0.4, drill: 0.2, ..Default::default() },
+    )
+    .expect("the via is placed");
+
+    let check = || Some(vec!["via-to-pad".to_string()]);
+    let clean = inspect(handle, check()).expect("the check runs");
+    assert!(codes(&clean).is_empty(), "a 0.2 mm copper gap meets the 0.2 mm baseline");
+
+    update_via(handle, UpdateViaRequest { id: "via-1".to_string(), at: Some([10.8, 10.0]), ..Default::default() })
+        .expect("the via moves closer");
+    let revision = summary(handle).expect("the board is listed")["revision"].clone();
+    let report = inspect(handle, check()).expect("the check runs again");
+    assert_eq!(codes(&report), ["drc/via-to-pad"]);
+    assert_eq!(report["issues"][0]["severity"], "error");
+    assert_eq!(report["issues"][0]["layerId"], "F.Cu");
+    assert_eq!(report["issues"][0]["objectId"], "via-1+fp-1:1");
+    let message = report["issues"][0]["message"].as_str().expect("the issue carries a message");
+    assert!(message.contains("via `via-1` copper is"), "the message names the via; got {message}");
+    assert!(message.contains("pad `1` of `U1`"), "the message names the pad; got {message}");
+    assert_eq!(report["passed"], false);
+    assert_eq!(report["revision"], revision);
+    assert_eq!(summary(handle).expect("the board is listed")["revision"], revision, "inspection never bumps the revision");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn via_to_pad_skips_same_net_and_layers_the_via_does_not_reach() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    place_footprint(handle, "U1", "F.Cu", 0.0, 10.0, 10.0);
+    add_net_pad(handle, "fp-1", "1", [0.0, 0.0], [1.0, 1.0], "GND");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("GND".to_string()), at: [10.0, 10.0], diameter: 0.4, drill: 0.2, ..Default::default() },
+    )
+    .expect("the same-net via is placed");
+    add_layer(handle, AddLayerRequest { name: "Inner1".to_string(), kind: Some("copper".to_string()), color: None })
+        .expect("an inner copper layer is added");
+    add_via(
+        handle,
+        AddViaRequest {
+            net: Some("VCC".to_string()),
+            at: [10.0, 10.0],
+            diameter: 0.4,
+            drill: 0.2,
+            from_layer: Some("Inner1".to_string()),
+            to_layer: Some("B.Cu".to_string()),
+            kind: None,
+        },
+    )
+    .expect("the buried via is placed");
+
+    let check = || Some(vec!["via-to-pad".to_string()]);
+    let covered = inspect(handle, check()).expect("the check runs");
+    assert!(codes(&covered).is_empty(), "same-net copper and a span that misses F.Cu stay clean");
+
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [10.8, 10.0], diameter: 0.4, drill: 0.2, ..Default::default() },
+    )
+    .expect("the through via is placed");
+    let report = inspect(handle, check()).expect("the check runs again");
+    assert_eq!(codes(&report), ["drc/via-to-pad"], "only the through via reaches the pad layer");
+    assert_eq!(report["issues"][0]["objectId"], "via-3+fp-1:1");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn via_to_pad_uses_the_strictest_net_class_clearance() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "VCC".to_string() }).expect("the net is declared");
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    add_net_class(handle, AddNetClassRequest { name: "HV".to_string(), clearance: Some(0.4), ..Default::default() })
+        .expect("the net class is declared");
+    assign_net_class(handle, AssignNetClassRequest { net: "VCC".to_string(), class: "HV".to_string() })
+        .expect("the net joins the class");
+    place_footprint(handle, "U1", "F.Cu", 0.0, 10.0, 10.0);
+    add_net_pad(handle, "fp-1", "1", [0.0, 0.0], [1.0, 1.0], "GND");
+    add_via(
+        handle,
+        AddViaRequest { net: Some("VCC".to_string()), at: [11.0, 10.0], diameter: 0.4, drill: 0.2, ..Default::default() },
+    )
+    .expect("the via is placed");
+
+    let report = inspect(handle, Some(vec!["via-to-pad".to_string()])).expect("the check runs");
+    assert_eq!(codes(&report), ["drc/via-to-pad"], "a 0.3 mm gap is under the class clearance");
+    let message = report["issues"][0]["message"].as_str().expect("the issue carries a message");
+    assert!(message.contains("requires 0.4 mm"), "the message states the class clearance; got {message}");
     close(handle).expect("the board closes");
 }
 

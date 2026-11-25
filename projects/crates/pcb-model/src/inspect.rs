@@ -59,6 +59,7 @@ pub(crate) const CHECKS: &[&str] = &[
     "hole-to-hole",
     "hole-to-track",
     "hole-to-pad",
+    "via-to-pad",
     "copper-to-edge",
     "edge-clearance",
     "silkscreen-over-pad",
@@ -90,6 +91,7 @@ pub(crate) const SUPPORTED_CHECKS: &[&str] = &[
     "hole-to-hole",
     "hole-to-track",
     "hole-to-pad",
+    "via-to-pad",
     "copper-to-edge",
     "edge-clearance",
     "silkscreen-over-pad",
@@ -134,6 +136,7 @@ pub(crate) fn run(board: &Board, checks: Option<Vec<String>>) -> Result<Value, S
             "hole-to-hole" => hole_to_hole(board, &mut report),
             "hole-to-track" => hole_to_track(board, &mut report),
             "hole-to-pad" => hole_to_pad(board, &mut report),
+            "via-to-pad" => via_to_pad(board, &mut report),
             "copper-to-edge" => copper_to_edge(board, &mut report),
             "edge-clearance" => edge_clearance(board, &mut report),
             "silkscreen-over-pad" => silkscreen_over_pad(board, &mut report),
@@ -858,6 +861,14 @@ fn polygons_overlap(left: &[[f64; 2]], right: &[[f64; 2]]) -> bool {
     left.iter().any(|point| point_in_polygon(*point, right))
         || right.iter().any(|point| point_in_polygon(*point, left))
         || polygon_edges(left).any(|(a, b)| polygon_edges(right).any(|(c, d)| segment_distance(a, b, c, d) <= 1e-9))
+}
+
+/// Distance from a point to a closed polygon, or zero when the point is inside.
+fn point_polygon_distance(point: [f64; 2], polygon: &[[f64; 2]]) -> f64 {
+    if point_in_polygon(point, polygon) {
+        return 0.0;
+    }
+    polygon_edges(polygon).map(|(start, end)| point_segment_distance(point, start, end)).fold(f64::INFINITY, f64::min)
 }
 
 /// Iterates the ordered edges of a closed polygon.
@@ -1617,6 +1628,53 @@ fn hole_to_pad(board: &Board, issues: &mut CheckReport) {
                     format!(
                         "drill hole `{}` is {gap:.3} mm from pad `{}`; the clearance rule requires {rule} mm",
                         hole.id, pad.key
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+/// Checks copper spacing between every via annulus and every pad of another
+/// net.
+///
+/// Unlike `hole-to-pad`, which measures the finished drill against a pad box,
+/// this check measures the via's copper diameter: a via whose barrel clears a
+/// pad can still short through its annulus. Each via is compared with every pad
+/// whose copper layer the via reaches, using the rotated pad rectangle, so a
+/// rotated pad is measured by its true corners. A via and a pad on the same net
+/// are connected by design and skipped, including two unassigned objects. The
+/// required gap is the strictest net-class clearance of the pair, falling back
+/// to the 0.2 mm baseline.
+fn via_to_pad(board: &Board, issues: &mut CheckReport) {
+    let scale = board.millimetres();
+    let pads: Vec<(&Footprint, &Pad)> =
+        board.footprints.iter().flat_map(|footprint| footprint.pads.iter().map(move |pad| (footprint, pad))).collect();
+    for via in &board.vias {
+        if !via.diameter.is_finite() || via.diameter <= 0.0 {
+            continue;
+        }
+        for (footprint, pad) in &pads {
+            if !board.layer(&footprint.layer).is_some_and(|layer| layer.kind == LayerKind::Copper) {
+                continue;
+            }
+            if !board.via_covers(via, &footprint.layer) || via.net == pad.net {
+                continue;
+            }
+            let centres = point_polygon_distance(via.at, &pad_corners(footprint, pad)) * scale;
+            let gap = centres - via.diameter * scale / 2.0;
+            let rule = required_clearance(board, via.net.as_deref(), pad.net.as_deref());
+            if gap < rule {
+                let object = format!("{}+{}:{}", via.id, footprint.id, pad.number);
+                issues.push(finding(
+                    "drc/via-to-pad",
+                    Severity::Error,
+                    board,
+                    Some(&footprint.layer),
+                    Some(&object),
+                    format!(
+                        "via `{}` copper is {gap:.3} mm from pad `{}` of `{}`; the clearance rule requires {rule} mm",
+                        via.id, pad.number, footprint.ref_
                     ),
                 ));
             }
