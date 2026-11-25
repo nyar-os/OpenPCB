@@ -22,7 +22,7 @@ use crate::{
     UpdateTrackRequest, UpdateViaRequest, UpdateZoneRequest, WidthRequest, add_differential_pair, add_fiducial, add_footprint,
     add_keepout, add_layer, add_net, add_net_class, add_pad, add_slot, add_teardrops, add_test_point, add_text, add_track,
     add_via, add_waiver, add_zone, assign_net_class,
-    board::{Board, Document, Footprint, Net, Outline, Pad, Track, Via},
+    board::{Board, Document, Footprint, Net, Outline, Pad, TextItem, Track, Via},
     capabilities, close, copper_balance, create, delete_differential_pair, delete_fiducial, delete_footprint, delete_keepout,
     delete_net_class, delete_severity, delete_slot, delete_test_point, delete_text, delete_track, delete_via, delete_waiver,
     delete_zone, drill_report, export, fab_manifest, fiducial_report, impedance_report, impedance_table, import, inspect,
@@ -3253,6 +3253,69 @@ fn pdf_grows_the_page_for_a_board_larger_than_a4() {
 }
 
 #[test]
+fn pdf_fit_reserves_rotated_silkscreen_text() {
+    let (flat_min, flat_max) = crate::export::preview_bounds(&outlined_board(80.0, 60.0));
+    assert_eq!(flat_min, [0.0, 0.0], "an outlined board without text fits its outline");
+    assert_eq!(flat_max, [80.0, 60.0], "an outlined board without text fits its outline");
+
+    let mut board = outlined_board(80.0, 60.0);
+    board.texts.push(TextItem {
+        id: "text-1".to_string(),
+        text: "SIDE".to_string(),
+        layer: "F.SilkS".to_string(),
+        at: [70.0, 5.0],
+        rotation: 90.0,
+        size: 4.0,
+        thickness: 0.15,
+    });
+    let (min, max) = crate::export::preview_bounds(&board);
+    assert!(min[1] < 0.0, "the 90-degree label grows the fit above the outline: {min:?}");
+    assert!(
+        max[0] <= 80.0 + 1e-9 && max[1] >= 60.0 - 1e-9 && min[0] >= -1e-9,
+        "the rotated box stays inside the outline in the other directions: {min:?} {max:?}"
+    );
+}
+
+#[test]
+fn pdf_rotates_silkscreen_text_as_glyph_strokes() {
+    let directory = TempDir::new();
+    let handle = created();
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [80.0, 60.0] }).expect("the outline is set");
+    add_text(
+        handle,
+        AddTextRequest {
+            text: "VERT".to_string(),
+            layer: "F.SilkS".to_string(),
+            at: [70.0, 30.0],
+            rotation: Some(90.0),
+            size: Some(4.0),
+            thickness: None,
+        },
+    )
+    .expect("the rotated label is added");
+    add_text(
+        handle,
+        AddTextRequest {
+            text: "FLAT".to_string(),
+            layer: "F.SilkS".to_string(),
+            at: [10.0, 55.0],
+            rotation: None,
+            size: Some(4.0),
+            thickness: None,
+        },
+    )
+    .expect("the flat label is added");
+
+    let path = directory.join("rotated.pdf");
+    export(handle, "pdf", &path).expect("PDF export writes");
+    let text = String::from_utf8_lossy(&fs::read(&path).expect("the PDF is readable")).to_string();
+    assert!(text.contains("FLAT"), "unrotated text stays a searchable text element");
+    assert!(!text.contains("VERT"), "the rotated label is drawn as strokes, not as a horizontal text run");
+
+    close(handle).expect("the board closes");
+}
+
+#[test]
 fn print_ink_replaces_only_the_pale_layer_colours() {
     use document_drawing::Color;
 
@@ -3375,6 +3438,29 @@ fn drill_map_writes_holes_tool_legend_and_back_drill_marks() {
         assert!(text.contains(marker), "drill map contains {marker}");
     }
     assert_eq!(text.matches("<circle").count(), 3, "two holes and one back-drill ring");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn drill_map_legend_sorts_tools_numerically_and_keeps_slots_separate() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    for (at, diameter, drill) in [([20.0, 20.0], 3.0, 2.0), ([40.0, 20.0], 11.0, 10.0), ([30.0, 40.0], 0.8, 0.4)] {
+        add_via(handle, AddViaRequest { net: Some("GND".to_string()), at, diameter, drill, ..Default::default() })
+            .expect("the via is placed");
+    }
+    add_slot(handle, AddSlotRequest { net: None, from: [10.0, 50.0], to: [25.0, 50.0], width: 1.5 })
+        .expect("the slot is routed");
+
+    let map = directory.join("tools.drill-map.svg");
+    export(handle, "drill_map", &map).expect("the drill map writes");
+    let map = fs::read_to_string(&map).expect("the drill map is readable");
+    assert!(map.contains("T1 dia 0.400 mm plated x1"), "the smallest tool is T1; got {map}");
+    assert!(map.contains("T2 dia 2.000 mm plated x1"), "the 2 mm tool sorts before the 10 mm one; got {map}");
+    assert!(map.contains("T3 dia 10.000 mm plated x1"), "the largest tool is T3; got {map}");
+    assert!(!map.contains("dia 1.500 mm"), "the routed slot is not counted as a circular tool; got {map}");
+    assert!(map.contains("routed slots x1 (line)"), "the slot keeps its own legend row; got {map}");
     close(handle).expect("the board closes");
 }
 

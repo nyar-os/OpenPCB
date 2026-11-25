@@ -716,11 +716,12 @@ fn drill_map(board: &Board) -> String {
             map_x(slot.to[0] * scale),
             map_y(slot.to[1] * scale)
         );
-        tools.entry(format!("{width:.3}")).or_insert((width, 0)).1 += 1;
     }
 
     let mut line = 0usize;
-    for (index, (_, (diameter, count))) in tools.iter().enumerate() {
+    let mut circles: Vec<(f64, usize)> = tools.values().copied().collect();
+    circles.sort_by(|left, right| left.0.total_cmp(&right.0));
+    for (index, (diameter, count)) in circles.iter().enumerate() {
         let _ = writeln!(
             out,
             "<text x=\"4\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#111111\">T{} dia {:.3} mm plated x{}</text>",
@@ -1250,9 +1251,10 @@ impl PdfPage {
 /// millimetre, in which case it grows to hold the board plus the margins and
 /// both bands. The board is then scaled to fill the printable area and centred
 /// in both directions, so a 72 x 52 mm board uses the page instead of a small
-/// patch in its middle.
+/// patch in its middle. The fit uses [`preview_bounds`], so silkscreen text
+/// and reference designators stay clear of the title and legend bands.
 pub(crate) fn pdf_page(board: &Board) -> PdfPage {
-    let (min, max) = drawing_bounds(board);
+    let (min, max) = preview_bounds(board);
     let width_mm = (max[0] - min[0]).max(1e-6);
     let height_mm = (max[1] - min[1]).max(1e-6);
     let page_width = A4_LANDSCAPE_PT[0].max(width_mm * PT_PER_MM + PDF_MARGIN_PT * 2.0);
@@ -1343,7 +1345,9 @@ impl Layout {
 /// Lowers the board onto a `document-drawing` canvas.
 ///
 /// `with_text_items` adds silkscreen text items; the SVG preview appends them
-/// itself so it can keep their rotation, while the PDF writer takes them here.
+/// itself so it can rotate its `<text>` elements, while the PDF writer takes
+/// them here and lowers a non-zero rotation to glyph strokes because its text
+/// primitive cannot rotate.
 /// `ink` adapts every layer colour it draws, which lets the PDF writer swap
 /// pale ink for print-safe dark ink without touching the stored palette.
 fn build_drawing(
@@ -1470,6 +1474,11 @@ fn build_drawing(
     }
     if with_text_items {
         for text in &board.texts {
+            let rotation = text.rotation.rem_euclid(360.0);
+            if rotation > 1e-9 && rotation < 360.0 - 1e-9 {
+                draw_rotated_text(board, &mut drawing, layout, ink, text);
+                continue;
+            }
             drawing.push(Element::new(
                 Shape::Text {
                     at: layout.point(text.at[0] * scale, text.at[1] * scale),
@@ -1481,6 +1490,55 @@ fn build_drawing(
         }
     }
     drawing
+}
+
+/// Draws one rotated silkscreen text item as 5×7 glyph strokes.
+///
+/// The PDF text primitive carries no rotation, so a rotated item is lowered
+/// to line segments with the same bitmap font the PNG raster uses: every run
+/// of lit pixels in a glyph row becomes one segment, rotated about the text
+/// anchor exactly as the SVG preview rotates its `<text>` element. Unrotated
+/// text stays a searchable text element.
+fn draw_rotated_text(
+    board: &Board,
+    drawing: &mut Drawing,
+    layout: &Layout,
+    ink: fn(Color) -> Color,
+    text: &crate::board::TextItem,
+) {
+    let scale = board.millimetres();
+    let unit = text.size * scale / 7.0;
+    let advance = 6.0 * unit;
+    let angle = text.rotation.to_radians();
+    let (sin, cos) = (angle.sin(), angle.cos());
+    let at = [text.at[0] * scale, text.at[1] * scale];
+    let point = |x: f64, y: f64| layout.point(at[0] + x * cos + y * sin, at[1] - x * sin + y * cos);
+    let stroke = Style::stroke(ink(layer_color_value(board, &text.layer)), unit * layout.scale);
+    for (index, character) in text.text.chars().enumerate() {
+        let Some(rows) = glyph(character)
+        else {
+            continue;
+        };
+        let left = index as f64 * advance;
+        for (row, bits) in rows.iter().enumerate() {
+            let mut column = 0;
+            while column < 5 {
+                if bits & (0b10000 >> column) == 0 {
+                    column += 1;
+                    continue;
+                }
+                let start = column;
+                while column < 5 && bits & (0b10000 >> column) != 0 {
+                    column += 1;
+                }
+                let y = (row as f64 - 7.0) * unit + unit / 2.0;
+                drawing.push(Element::new(
+                    Shape::Line { from: point(left + start as f64 * unit, y), to: point(left + column as f64 * unit, y) },
+                    stroke.clone(),
+                ));
+            }
+        }
+    }
 }
 
 /// Filled paint with no outline.
@@ -1631,6 +1689,46 @@ fn drawing_bounds(board: &Board) -> ([f64; 2], [f64; 2]) {
     (min, max)
 }
 
+/// Bounds for the fitted preview pages: every drawn object plus the
+/// silkscreen text items and the footprint reference designators.
+///
+/// [`drawing_bounds`] measures only geometry, which lets a rotated label or
+/// a long reference run into the title or legend band of a fitted page. This
+/// rotates the four corners of every text box about its anchor, so the box a
+/// reader sees is the box the fit reserves.
+pub(crate) fn preview_bounds(board: &Board) -> ([f64; 2], [f64; 2]) {
+    let scale = board.millimetres();
+    let (mut min, mut max) = drawing_bounds(board);
+    for text in &board.texts {
+        let rotation = text.rotation.rem_euclid(360.0);
+        let stroked = rotation > 1e-9 && rotation < 360.0 - 1e-9;
+        let chars = text.text.chars().count() as f64;
+        // A stroked rotation uses the 5×7 font, which advances 6/7 of the
+        // cap height per character; the text writers estimate 0.6.
+        let width = if stroked { chars * text.size * 6.0 / 7.0 } else { chars * text.size * 0.6 };
+        let angle = text.rotation.to_radians();
+        let (sin, cos) = (angle.sin(), angle.cos());
+        for [x, y] in [[0.0, -text.size], [width, -text.size], [width, text.size], [0.0, text.size]] {
+            include(&mut min, &mut max, (text.at[0] + x * cos + y * sin) * scale, (text.at[1] - x * sin + y * cos) * scale);
+        }
+    }
+    for footprint in &board.footprints {
+        let Some((silk_min, silk_max)) = footprint_silk(footprint)
+        else {
+            continue;
+        };
+        include(&mut min, &mut max, silk_max[0] * scale, silk_max[1] * scale);
+        if footprint.ref_.is_empty() {
+            continue;
+        }
+        let width = footprint.ref_.chars().count() as f64 * REFERENCE_SIZE * 0.6;
+        let baseline = silk_min[1] - 0.6;
+        include(&mut min, &mut max, silk_min[0] * scale, (baseline - REFERENCE_SIZE) * scale);
+        include(&mut min, &mut max, (silk_min[0] + width) * scale, baseline * scale);
+    }
+    (min, max)
+}
+
 /// Pixels per board millimetre used as the root size of the exported SVG.
 const SVG_PREVIEW_PX_PER_MM: f64 = 10.0;
 
@@ -1675,24 +1773,7 @@ fn scale_svg_attribute(tag: &str, attribute: &str, factor: f64) -> String {
 /// Renders the composite and reports the canvas size the same viewBox used.
 pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceError> {
     let scale = board.millimetres();
-    let (mut min, mut max) = drawing_bounds(board);
-    for text in &board.texts {
-        let width = text.text.chars().count() as f64 * text.size * 0.6;
-        include(&mut min, &mut max, text.at[0] * scale, (text.at[1] - text.size) * scale);
-        include(&mut min, &mut max, (text.at[0] + width) * scale, (text.at[1] + text.size) * scale);
-    }
-    for footprint in &board.footprints {
-        let Some((silk_min, silk_max)) = footprint_silk(footprint)
-        else {
-            continue;
-        };
-        include(&mut min, &mut max, silk_min[0] * scale, (silk_min[1] - REFERENCE_SIZE - 0.6) * scale);
-        include(&mut min, &mut max, silk_max[0] * scale, silk_max[1] * scale);
-    }
-    if !min[0].is_finite() || !min[1].is_finite() || !max[0].is_finite() || !max[1].is_finite() {
-        min = [0.0, 0.0];
-        max = [100.0, 60.0];
-    }
+    let (min, max) = preview_bounds(board);
     let margin = 5.0;
     let width = (max[0] - min[0]).max(1.0) + margin * 2.0;
     let height = (max[1] - min[1]).max(1.0) + margin * 2.0;
