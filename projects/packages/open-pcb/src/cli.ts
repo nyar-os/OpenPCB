@@ -1122,6 +1122,9 @@ zone
     .option('--layer <layer>', 'cli.opt.layer')
     .option('--net <name>', 'cli.opt.net')
     .option('--points <list>', 'cli.opt.points')
+    .option('--fill <style>', 'cli.opt.fill')
+    .option('--grid-spacing <units>', 'cli.opt.grid-spacing')
+    .option('--grid-width <units>', 'cli.opt.grid-width')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         const layer = text(options, 'layer');
@@ -1141,7 +1144,14 @@ zone
             return 2;
         }
         await withBoard(file, async (board) => {
-            const result = await board.addZone({ layer, net: text(options, 'net'), points });
+            const result = await board.addZone({
+                layer,
+                net: text(options, 'net'),
+                points,
+                fill: text(options, 'fill') as 'solid' | 'grid' | undefined,
+                gridSpacing: numberOption(text(options, 'grid-spacing')),
+                gridWidth: numberOption(text(options, 'grid-width')),
+            });
             ctx.emitResult(result, `added ${result.object?.id ?? 'zone'} on ${layer}`);
             return 0;
         });
@@ -1176,12 +1186,18 @@ zone
     .option('--layer <layer>', 'cli.opt.layer')
     .option('--net <name>', 'cli.opt.net')
     .option('--points <list>', 'cli.opt.points')
+    .option('--fill <style>', 'cli.opt.fill')
+    .option('--grid-spacing <units>', 'cli.opt.grid-spacing')
+    .option('--grid-width <units>', 'cli.opt.grid-width')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
         const id = text(options, 'id');
         const layer = text(options, 'layer');
         const net = text(options, 'net');
         const points = polygon(text(options, 'points'));
+        const fill = text(options, 'fill') as 'solid' | 'grid' | undefined;
+        const gridSpacing = numberOption(text(options, 'grid-spacing'));
+        const gridWidth = numberOption(text(options, 'grid-width'));
         if (file === undefined) {
             ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
             return 2;
@@ -1190,9 +1206,9 @@ zone
             ctx.fail('open-pcb.cli.id-required', { message: '`--id <id>` is required' });
             return 2;
         }
-        if (layer === undefined && net === undefined && text(options, 'points') === undefined) {
+        if (layer === undefined && net === undefined && text(options, 'points') === undefined && fill === undefined && gridSpacing === undefined && gridWidth === undefined) {
             ctx.fail('open-pcb.cli.zone-update-empty', {
-                message: 'a zone update needs `--layer`, `--net` or `--points`',
+                message: 'a zone update needs `--layer`, `--net`, `--points` or a fill option',
             });
             return 2;
         }
@@ -1203,7 +1219,7 @@ zone
             return 2;
         }
         await withBoard(file, async (board) => {
-            const result = await board.updateZone({ id, layer, net, points });
+            const result = await board.updateZone({ id, layer, net, points, fill, gridSpacing, gridWidth });
             ctx.emitResult(result, `updated ${result.object?.id ?? id}`);
             return 0;
         });

@@ -393,6 +393,7 @@ fn copper_zones_persist_and_write_gerber_regions() {
             layer: "F.Cu".to_string(),
             net: Some("VCC".to_string()),
             points: vec![[10.0, 10.0], [20.0, 10.0], [20.0, 20.0], [10.0, 20.0]],
+            ..Default::default()
         },
     )
     .expect("the copper pour is added");
@@ -402,14 +403,24 @@ fn copper_zones_persist_and_write_gerber_regions() {
 
     let silk = add_zone(
         handle,
-        AddZoneRequest { layer: "F.SilkS".to_string(), net: None, points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]] },
+        AddZoneRequest {
+            layer: "F.SilkS".to_string(),
+            net: None,
+            points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            ..Default::default()
+        },
     )
     .expect_err("a zone needs a copper layer");
     assert_eq!(silk.code, "session/argument-invalid");
 
     let flat = add_zone(
         handle,
-        AddZoneRequest { layer: "F.Cu".to_string(), net: None, points: vec![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]] },
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: None,
+            points: vec![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]],
+            ..Default::default()
+        },
     )
     .expect_err("a zone must enclose an area");
     assert_eq!(flat.code, "session/argument-invalid");
@@ -609,6 +620,7 @@ fn copper_zones_resize_in_place_and_report_area_and_perimeter() {
             layer: "F.Cu".to_string(),
             net: None,
             points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            ..Default::default()
         },
     )
     .expect("the zone is added");
@@ -653,6 +665,131 @@ fn copper_zones_resize_in_place_and_report_area_and_perimeter() {
     .expect_err("a zone needs a copper layer");
     update_zone(handle, UpdateZoneRequest { id: "zone-404".to_string(), net: Some("GND".to_string()), ..Default::default() })
         .expect_err("an unknown zone is rejected");
+}
+
+#[test]
+fn zone_grid_fill_hatches_gerber_preview_and_validates_parameters() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "GND".to_string() }).expect("the net is declared");
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [100.0, 80.0] }).expect("the outline is set");
+
+    let unknown = add_zone(
+        handle,
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: None,
+            points: vec![[10.0, 10.0], [20.0, 10.0], [20.0, 20.0], [10.0, 20.0]],
+            fill: Some("hatch".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect_err("an unknown fill style is rejected");
+    assert_eq!(unknown.code, "session/argument-invalid");
+
+    let wide = add_zone(
+        handle,
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: None,
+            points: vec![[10.0, 10.0], [20.0, 10.0], [20.0, 20.0], [10.0, 20.0]],
+            fill: Some("grid".to_string()),
+            grid_spacing: Some(0.5),
+            grid_width: Some(0.8),
+        },
+    )
+    .expect_err("a hatch line must stay narrower than the spacing");
+    assert_eq!(wide.code, "session/argument-invalid");
+
+    let solid_grid = add_zone(
+        handle,
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: None,
+            points: vec![[10.0, 10.0], [20.0, 10.0], [20.0, 20.0], [10.0, 20.0]],
+            grid_spacing: Some(2.0),
+            ..Default::default()
+        },
+    )
+    .expect_err("hatch parameters need a grid fill");
+    assert_eq!(solid_grid.code, "session/argument-invalid");
+    assert_eq!(summary(handle).expect("the board is listed")["counts"]["zones"], 0, "rejected requests add nothing");
+
+    let added = add_zone(
+        handle,
+        AddZoneRequest {
+            layer: "F.Cu".to_string(),
+            net: Some("GND".to_string()),
+            points: vec![[10.0, 10.0], [20.0, 10.0], [20.0, 20.0], [10.0, 20.0]],
+            fill: Some("grid".to_string()),
+            grid_spacing: Some(2.0),
+            grid_width: Some(0.4),
+        },
+    )
+    .expect("the grid pour is added");
+    assert_eq!(added["object"]["fill"], "grid");
+    assert_eq!(added["object"]["gridSpacing"], 2.0);
+    assert_eq!(added["object"]["gridWidth"], 0.4);
+
+    let report = zone_report(handle).expect("the zone report is built");
+    assert_eq!(report["zones"][0]["fill"], "grid");
+    assert_eq!(report["zones"][0]["gridSpacing"], 2.0);
+    assert_eq!(report["zones"][0]["gridWidth"], 0.4);
+    assert_eq!(report["zones"][0]["area"], 100.0, "the area measures the pour extent");
+
+    let path = directory.join("grid.opcb");
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    let report = zone_report(reopened).expect("the report survives the round trip");
+    assert_eq!(report["zones"][0]["fill"], "grid");
+
+    let gbr = directory.join("gerber");
+    export(reopened, "gbr", &gbr).expect("Gerber export writes");
+    let copper = fs::read_to_string(gbr.join("F_Cu.gbr")).expect("the copper layer is readable");
+    assert!(!copper.contains("G36*"), "a grid pour writes no solid region");
+    assert!(copper.contains("%ADDC,0.400000*%") || copper.contains("%ADD10C,0.400000*%"), "the hatch uses its stroke aperture");
+    assert!(copper.contains("X10000000Y10000000D02*\nX20000000Y10000000D01*"), "the boundary hatch line spans the polygon");
+    assert!(
+        copper.contains("X10000000Y12000000D02*\nX20000000Y12000000D01*"),
+        "an interior hatch line is clipped to the polygon"
+    );
+    assert!(copper.contains("X12000000Y10000000D02*\nX12000000Y20000000D01*"), "vertical hatch lines cross the polygon");
+    let hatch_lines = copper.matches("D02*\nX").count();
+    assert_eq!(hatch_lines, 10, "five horizontal and five vertical lines cover the 10 mm square at 2 mm spacing");
+
+    let svg = directory.join("grid.svg");
+    export(reopened, "svg", &svg).expect("SVG export writes");
+    let preview = fs::read_to_string(&svg).expect("the SVG is readable");
+    assert!(preview.matches("<line x1=").count() >= 10, "the preview draws the hatch lines instead of one solid polygon");
+
+    let keepout = add_keepout(
+        reopened,
+        AddKeepoutRequest {
+            layer: Some("F.Cu".to_string()),
+            points: vec![[15.0, 15.0], [25.0, 15.0], [25.0, 25.0], [15.0, 25.0]],
+        },
+    )
+    .expect("the keepout is added");
+    assert_eq!(keepout["object"]["id"], "keepout-1");
+    let report = inspect(reopened, Some(vec!["keepout".to_string()])).expect("the keepout check runs");
+    assert!(
+        codes(&report).contains(&"drc/keepout-violation"),
+        "a grid pour still occupies its polygon for the keepout check: {report}"
+    );
+
+    let solid = update_zone(
+        reopened,
+        UpdateZoneRequest { id: "zone-1".to_string(), fill: Some("solid".to_string()), ..Default::default() },
+    )
+    .expect("the pour switches back to solid");
+    assert_eq!(solid["object"]["fill"], "solid");
+    assert!(solid["object"]["gridSpacing"].is_null(), "solid fills drop the hatch parameters");
+    let gbr = directory.join("gerber-solid");
+    export(reopened, "gbr", &gbr).expect("the solid Gerber export writes");
+    let copper = fs::read_to_string(gbr.join("F_Cu.gbr")).expect("the copper layer is readable");
+    assert!(copper.contains("G36*") && copper.contains("G37*"), "the solid pour writes one region again");
+    close(reopened).expect("the reopened board closes");
 }
 
 #[test]
@@ -1071,6 +1208,7 @@ fn copper_balance_sums_layers_and_reports_coverage_imbalance() {
             layer: "F.Cu".to_string(),
             net: Some("VCC".to_string()),
             points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            ..Default::default()
         },
     )
     .expect("the pour is added");
@@ -7934,6 +8072,7 @@ fn zone_audit_separates_connected_isolated_and_unassigned_pours() {
             layer: "F.Cu".to_string(),
             net: Some("GND".to_string()),
             points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            ..Default::default()
         },
     )
     .expect("the connected pour is added");
@@ -7943,6 +8082,7 @@ fn zone_audit_separates_connected_isolated_and_unassigned_pours() {
             layer: "F.Cu".to_string(),
             net: Some("VCC".to_string()),
             points: vec![[20.0, 20.0], [30.0, 20.0], [30.0, 30.0], [20.0, 30.0]],
+            ..Default::default()
         },
     )
     .expect("the isolated pour is added");
@@ -7952,6 +8092,7 @@ fn zone_audit_separates_connected_isolated_and_unassigned_pours() {
             layer: "F.Cu".to_string(),
             net: None,
             points: vec![[40.0, 40.0], [50.0, 40.0], [50.0, 50.0], [40.0, 50.0]],
+            ..Default::default()
         },
     )
     .expect("the unassigned pour is added");

@@ -470,10 +470,13 @@ impl Fiducial {
 
 /// One copper pour region on a copper layer.
 ///
-/// A zone is a closed polygon with at least three vertices. It carries no fill
-/// pattern: the Gerber writer emits the polygon as one `G36`/`G37` region, so
-/// fabrication sees solid copper on the declared layer.
+/// A zone is a closed polygon with at least three vertices. `fill` selects the
+/// copper inside the outline: `solid` (the default) lets the Gerber writer emit
+/// one `G36`/`G37` region, while `grid` emits a hatch of axis-aligned strokes
+/// clipped to the polygon, spaced `gridSpacing` apart and `gridWidth` wide,
+/// both in board units.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Zone {
     /// Stable zone id.
     pub(crate) id: String,
@@ -484,6 +487,38 @@ pub(crate) struct Zone {
     pub(crate) net: Option<String>,
     /// Polygon vertices in board units, in drawing order.
     pub(crate) points: Vec<[f64; 2]>,
+    /// Fill style: `solid` or `grid`.
+    #[serde(default = "default_zone_fill")]
+    pub(crate) fill: String,
+    /// Hatch line spacing in board units; only meaningful for `grid`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) grid_spacing: Option<f64>,
+    /// Hatch line stroke width in board units; only meaningful for `grid`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) grid_width: Option<f64>,
+}
+
+/// The fill style a stored zone without one keeps.
+fn default_zone_fill() -> String {
+    "solid".to_string()
+}
+
+/// Default hatch line spacing in board units.
+pub(crate) const DEFAULT_GRID_SPACING: f64 = 0.5;
+
+/// Default hatch line stroke width in board units.
+pub(crate) const DEFAULT_GRID_WIDTH: f64 = 0.2;
+
+impl Zone {
+    /// The resolved hatch spacing of a `grid` zone.
+    pub(crate) fn grid_spacing(&self) -> f64 {
+        self.grid_spacing.unwrap_or(DEFAULT_GRID_SPACING)
+    }
+
+    /// The resolved hatch stroke width of a `grid` zone.
+    pub(crate) fn grid_width(&self) -> f64 {
+        self.grid_width.unwrap_or(DEFAULT_GRID_WIDTH)
+    }
 }
 
 /// One silkscreen text item.
@@ -1896,7 +1931,7 @@ impl Board {
     /// Adds one copper pour region and returns its public object shape.
     ///
     /// A zone needs a copper layer, at least three vertices and a non-zero
-    /// enclosed area. The writer emits it as one solid Gerber region.
+    /// enclosed area. `fill` selects solid copper or a clipped `grid` hatch.
     pub(crate) fn add_zone(&mut self, request: AddZoneRequest) -> Result<Value, ServiceError> {
         let layer = request.layer.trim();
         if layer.is_empty() {
@@ -1914,18 +1949,22 @@ impl Board {
         if polygon_area(&points) <= 1e-9 {
             return Err(crate::argument("a zone polygon must enclose a non-zero area"));
         }
+        let (fill, grid_spacing, grid_width) = zone_fill(request.fill.as_deref(), request.grid_spacing, request.grid_width)?;
         let id = format!("zone-{}", self.next_zone);
         self.next_zone += 1;
-        let zone = Zone { id, layer: layer.to_string(), net, points };
+        let zone = Zone { id, layer: layer.to_string(), net, points, fill, grid_spacing, grid_width };
         let object = json!(zone);
         self.zones.push(zone);
         self.revision += 1;
         Ok(object)
     }
 
-    /// Updates the layer, net or polygon of one copper pour region.
+    /// Updates the layer, net, polygon or fill of one copper pour region.
     ///
     /// The zone keeps its id, so existing references and reports stay valid.
+    /// Fill values merge with the stored ones: switching to `solid` clears the
+    /// hatch parameters, and a `grid` update keeps the stored spacing or width
+    /// unless the request replaces them.
     pub(crate) fn update_zone(&mut self, request: UpdateZoneRequest) -> Result<Value, ServiceError> {
         let index = self
             .zones
@@ -1947,8 +1986,14 @@ impl Board {
             }
             None => None,
         };
-        if layer.is_none() && request.net.is_none() && request.points.is_none() {
-            return Err(crate::argument("a zone update needs `layer`, `net` or `points`"));
+        if layer.is_none()
+            && request.net.is_none()
+            && request.points.is_none()
+            && request.fill.is_none()
+            && request.grid_spacing.is_none()
+            && request.grid_width.is_none()
+        {
+            return Err(crate::argument("a zone update needs `layer`, `net`, `points` or a fill option"));
         }
         let net = self.declared_net(request.net.as_deref())?;
         let points = match request.points {
@@ -1965,6 +2010,12 @@ impl Board {
             None => None,
         };
         let zone = &mut self.zones[index];
+        let keep_grid =
+            request.fill.as_deref().map(str::trim).map(str::to_ascii_lowercase).unwrap_or_else(|| zone.fill.clone()) == "grid";
+        let grid_spacing = if keep_grid { request.grid_spacing.or(zone.grid_spacing) } else { request.grid_spacing };
+        let grid_width = if keep_grid { request.grid_width.or(zone.grid_width) } else { request.grid_width };
+        let (fill, grid_spacing, grid_width) =
+            zone_fill(request.fill.as_deref().or(Some(&zone.fill)), grid_spacing, grid_width)?;
         if let Some(layer) = layer {
             zone.layer = layer;
         }
@@ -1974,6 +2025,9 @@ impl Board {
         if let Some(points) = points {
             zone.points = points;
         }
+        zone.fill = fill;
+        zone.grid_spacing = grid_spacing;
+        zone.grid_width = grid_width;
         self.revision += 1;
         Ok(json!(self.zones[index]))
     }
@@ -2946,6 +3000,59 @@ pub(crate) fn polygon_area(points: &[[f64; 2]]) -> f64 {
     (sum / 2.0).abs()
 }
 
+/// Axis-aligned hatch segments clipped to a closed polygon.
+///
+/// Horizontal and vertical lines run at multiples of `spacing` across the
+/// polygon bounding box. Each line is cut at the polygon boundary with the
+/// half-open edge rule, so shared vertices count once, and the inside spans are
+/// returned as segments in board units. Horizontal segments come first, ordered
+/// by ascending `y`, then vertical ones by ascending `x`, keeping the output
+/// deterministic.
+pub(crate) fn grid_lines(points: &[[f64; 2]], spacing: f64) -> Vec<([f64; 2], [f64; 2])> {
+    if points.len() < 3 || !spacing.is_finite() || spacing <= 0.0 {
+        return Vec::new();
+    }
+    let mut min = [f64::INFINITY, f64::INFINITY];
+    let mut max = [f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for point in points {
+        min[0] = min[0].min(point[0]);
+        min[1] = min[1].min(point[1]);
+        max[0] = max[0].max(point[0]);
+        max[1] = max[1].max(point[1]);
+    }
+    let mut segments = Vec::new();
+    for axis in [1.0, 0.0] {
+        let (lo, hi) = if axis == 1.0 { (min[1], max[1]) } else { (min[0], max[0]) };
+        let start = (lo / spacing).ceil() * spacing;
+        let mut line = start;
+        while line <= hi + 1e-9 {
+            let mut crossings: Vec<f64> = Vec::new();
+            for index in 0..points.len() {
+                let from = points[index];
+                let to = points[(index + 1) % points.len()];
+                let (from_along, to_along) = if axis == 1.0 { (from[1], to[1]) } else { (from[0], to[0]) };
+                if !((from_along <= line && line < to_along) || (to_along <= line && line < from_along)) {
+                    continue;
+                }
+                let t = (line - from_along) / (to_along - from_along);
+                let (from_across, to_across) = if axis == 1.0 { (from[0], to[0]) } else { (from[1], to[1]) };
+                crossings.push(from_across + (to_across - from_across) * t);
+            }
+            crossings.sort_by(f64::total_cmp);
+            let mut pair = 0;
+            while pair + 1 < crossings.len() {
+                let (enter, exit) = (crossings[pair], crossings[pair + 1]);
+                if exit - enter > 1e-12 {
+                    segments.push(if axis == 1.0 { ([enter, line], [exit, line]) } else { ([line, enter], [line, exit]) });
+                }
+                pair += 2;
+            }
+            line += spacing;
+        }
+    }
+    segments
+}
+
 /// Distance from a point to an axis-aligned box; zero inside the box.
 fn point_box_distance(point: [f64; 2], centre: [f64; 2], half: [f64; 2]) -> f64 {
     let dx = ((point[0] - centre[0]).abs() - half[0]).max(0.0);
@@ -2977,6 +3084,47 @@ fn perimeter_point(min: [f64; 2], max: [f64; 2], width: f64, height: f64, distan
 
 fn finite(value: f64, field: &str) -> Result<f64, ServiceError> {
     if value.is_finite() { Ok(value) } else { Err(crate::argument(format!("`{field}` must be a finite number"))) }
+}
+
+/// Normalises and validates one zone fill request.
+///
+/// `fill` accepts `solid` (the default) or `grid`, case-insensitively; a blank
+/// value keeps the default. Hatch parameters are positive finite numbers only
+/// for a `grid` fill, and the resolved stroke must stay narrower than the
+/// spacing so the hatch leaves open copper between the lines.
+fn zone_fill(
+    fill: Option<&str>,
+    grid_spacing: Option<f64>,
+    grid_width: Option<f64>,
+) -> Result<(String, Option<f64>, Option<f64>), ServiceError> {
+    let fill = fill
+        .map(str::trim)
+        .filter(|fill| !fill.is_empty())
+        .map(|fill| fill.to_ascii_lowercase())
+        .unwrap_or_else(|| "solid".to_string());
+    if fill != "solid" && fill != "grid" {
+        return Err(crate::argument(format!("zone fill `{fill}` is not supported; use `solid` or `grid`")));
+    }
+    if fill != "grid" {
+        if grid_spacing.is_some() || grid_width.is_some() {
+            return Err(crate::argument("`gridSpacing` and `gridWidth` need `fill: \"grid\"`"));
+        }
+        return Ok((fill, None, None));
+    }
+    let spacing = match grid_spacing {
+        Some(value) if value.is_finite() && value > 0.0 => Some(value),
+        Some(_) => return Err(crate::argument("`gridSpacing` must be a finite number greater than zero")),
+        None => None,
+    };
+    let width = match grid_width {
+        Some(value) if value.is_finite() && value > 0.0 => Some(value),
+        Some(_) => return Err(crate::argument("`gridWidth` must be a finite number greater than zero")),
+        None => None,
+    };
+    if width.unwrap_or(DEFAULT_GRID_WIDTH) >= spacing.unwrap_or(DEFAULT_GRID_SPACING) {
+        return Err(crate::argument("`gridWidth` must be smaller than `gridSpacing`"));
+    }
+    Ok((fill, spacing, width))
 }
 
 fn finite_pair(value: [f64; 2], field: &str) -> Result<[f64; 2], ServiceError> {
@@ -3342,6 +3490,20 @@ pub(crate) fn validate(board: &Board) -> Result<(), ServiceError> {
             && !net_names.contains(net)
         {
             return Err(crate::invalid(format!("zone `{}` references undeclared net `{net}`", zone.id)));
+        }
+        if zone.fill != "solid" && zone.fill != "grid" {
+            return Err(crate::invalid(format!("zone `{}` has unsupported fill `{}`", zone.id, zone.fill)));
+        }
+        if zone.fill == "grid" {
+            if zone.grid_spacing.is_some_and(|spacing| !spacing.is_finite() || spacing <= 0.0) {
+                return Err(crate::invalid(format!("zone `{}` has an invalid grid spacing", zone.id)));
+            }
+            if zone.grid_width.is_some_and(|width| !width.is_finite() || width <= 0.0) {
+                return Err(crate::invalid(format!("zone `{}` has an invalid grid width", zone.id)));
+            }
+            if zone.grid_width() >= zone.grid_spacing() {
+                return Err(crate::invalid(format!("zone `{}` grid width is not smaller than its spacing", zone.id)));
+            }
         }
     }
 
@@ -3709,7 +3871,7 @@ pub struct AddFiducialRequest {
 }
 
 /// Request of [`crate::add_zone`].
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddZoneRequest {
     /// Copper layer id that receives the pour.
@@ -3719,6 +3881,15 @@ pub struct AddZoneRequest {
     pub net: Option<String>,
     /// Polygon vertices in board units, in drawing order.
     pub points: Vec<[f64; 2]>,
+    /// Fill style `solid` (default) or `grid`.
+    #[serde(default)]
+    pub fill: Option<String>,
+    /// Hatch line spacing in board units; defaults to 0.5 for `grid`.
+    #[serde(default)]
+    pub grid_spacing: Option<f64>,
+    /// Hatch line stroke width in board units; defaults to 0.2 for `grid`.
+    #[serde(default)]
+    pub grid_width: Option<f64>,
 }
 
 /// Request of [`crate::add_text`].
@@ -3783,6 +3954,15 @@ pub struct UpdateZoneRequest {
     /// New polygon vertices in board units.
     #[serde(default)]
     pub points: Option<Vec<[f64; 2]>>,
+    /// New fill style `solid` or `grid`.
+    #[serde(default)]
+    pub fill: Option<String>,
+    /// New hatch line spacing in board units.
+    #[serde(default)]
+    pub grid_spacing: Option<f64>,
+    /// New hatch line stroke width in board units.
+    #[serde(default)]
+    pub grid_width: Option<f64>,
 }
 
 /// Request of [`crate::add_keepout`].

@@ -223,6 +223,7 @@ pub fn capabilities() -> Value {
             "chamfer45": "supported",
         },
         "zones": "supported",
+        "zoneGridFill": "supported",
         "texts": "supported",
         "keepouts": "supported",
         "viaStitching": "supported",

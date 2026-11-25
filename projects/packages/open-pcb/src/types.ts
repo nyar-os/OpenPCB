@@ -501,7 +501,12 @@ export interface ZoneAreaEntry {
     readonly layer: LayerId;
     readonly net: string | null;
     readonly vertices: number;
-    /** Enclosed pour area, in square millimetres. */
+    readonly fill: 'solid' | 'grid';
+    /** Hatch line spacing in millimetres; only for a `grid` fill. */
+    readonly gridSpacing?: number;
+    /** Hatch line stroke width in millimetres; only for a `grid` fill. */
+    readonly gridWidth?: number;
+    /** Enclosed pour area, in square millimetres; the outline extent for any fill. */
     readonly area: number;
     /** Polygon perimeter, in millimetres. */
     readonly perimeter: number;
@@ -870,6 +875,8 @@ export interface BoardCapabilities {
     readonly routing: SupportLevel;
     /** Whether copper pour regions can be declared, previewed and written as Gerber regions. */
     readonly zones: SupportLevel;
+    /** Whether a pour can be filled with a clipped grid hatch instead of solid copper. */
+    readonly zoneGridFill: SupportLevel;
     /** Whether silkscreen text items can be declared and written to KiCad and the preview. */
     readonly texts: SupportLevel;
     /** Whether a copper pour area and perimeter report can be produced. */
@@ -1265,6 +1272,12 @@ export interface AddZoneOptions {
     readonly net?: string;
     /** Closed polygon in board units, in drawing order; at least three points. */
     readonly points: readonly (readonly [number, number])[];
+    /** Copper inside the outline; `solid` writes one region, `grid` a clipped hatch. */
+    readonly fill?: 'solid' | 'grid';
+    /** Hatch line spacing in board units; only for `grid`, default 0.5. */
+    readonly gridSpacing?: number;
+    /** Hatch line stroke width in board units; only for `grid`, default 0.2. */
+    readonly gridWidth?: number;
 }
 
 /** Options of `board.updateZone()`. At least one field is required. */
@@ -1276,6 +1289,12 @@ export interface UpdateZoneOptions {
     readonly net?: string;
     /** New closed polygon in board units; at least three points. */
     readonly points?: readonly (readonly [number, number])[];
+    /** New fill style; switching to `solid` clears the hatch parameters. */
+    readonly fill?: 'solid' | 'grid';
+    /** New hatch line spacing in board units; only for `grid`. */
+    readonly gridSpacing?: number;
+    /** New hatch line stroke width in board units; only for `grid`. */
+    readonly gridWidth?: number;
 }
 
 /** One silkscreen text item. */

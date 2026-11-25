@@ -52,6 +52,9 @@ pub(crate) fn zones(board: &Board) -> Value {
                 "layer": zone.layer,
                 "net": zone.net,
                 "vertices": zone.points.len(),
+                "fill": zone.fill,
+                "gridSpacing": (zone.fill == "grid").then(|| round6(zone.grid_spacing() * scale)),
+                "gridWidth": (zone.fill == "grid").then(|| round6(zone.grid_width() * scale)),
                 "area": round6(polygon_area(&zone.points).abs() * factor),
                 "perimeter": round6(perimeter),
             })

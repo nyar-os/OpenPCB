@@ -417,7 +417,15 @@ fn copper(board: &Board, layer: &str) -> (String, bool) {
         );
     }
     for zone in board.zones.iter().filter(|zone| zone.layer == layer) {
-        gerber.region(&zone.points, scale, &[]);
+        if zone.fill == "grid" {
+            let definition = format!("C,{:.6}", zone.grid_width() * scale);
+            for (from, to) in crate::board::grid_lines(&zone.points, zone.grid_spacing()) {
+                gerber.draw(definition.clone(), [from[0] * scale, from[1] * scale], [to[0] * scale, to[1] * scale]);
+            }
+        }
+        else {
+            gerber.region(&zone.points, scale, &[]);
+        }
     }
     let stack = board.copper_stack();
     let index = stack.iter().position(|id| *id == layer).unwrap_or(0);
@@ -1366,6 +1374,19 @@ fn build_drawing(
         ));
     }
     for zone in &board.zones {
+        if zone.fill == "grid" {
+            let stroke = Style::stroke(layer_ink(&zone.layer), zone.grid_width() * scale * layout.scale);
+            for (from, to) in crate::board::grid_lines(&zone.points, zone.grid_spacing()) {
+                drawing.push(Element::new(
+                    Shape::Line {
+                        from: layout.point(from[0] * scale, from[1] * scale),
+                        to: layout.point(to[0] * scale, to[1] * scale),
+                    },
+                    stroke.clone(),
+                ));
+            }
+            continue;
+        }
         let points = zone.points.iter().map(|point| layout.point(point[0] * scale, point[1] * scale)).collect();
         let mut style = fill_style(layer_ink(&zone.layer));
         style.opacity = 0.35;
