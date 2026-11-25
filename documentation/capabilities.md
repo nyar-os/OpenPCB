@@ -127,6 +127,7 @@ rectangle; there is no round or polygon aperture geometry to approximate.
 | Net class, width and clearance audit (`net audit`, `Board.netAudit`) | `supported` |
 | Test point coverage report (`testpoint coverage`, `Board.testpointCoverage`) | `supported` |
 | Copper pour connectivity audit (`zone audit`, `Board.zoneAudit`) | `supported` |
+| Grid hatch pour fill (`fill: "grid"`) | `supported` |
 | Fabrication file manifest (`fab manifest`, `Board.fabManifest`) | `supported` |
 | Panelization (`panel`, `Board.panelize`) | `supported` |
 | Solder-mask aperture check (`solder-mask`) | `supported` |
@@ -301,10 +302,17 @@ being approximated.
 - Back-drill depth and stub live in `.opcb` and IPC-2581 and appear in the
   Excellon file as `;Back drill` comments and as dashed rings in the drill map.
   KiCad PCB import and export keep the via but not the back-drill information.
-- Copper pours are stored as closed polygons and written as `G36`/`G37` regions
-  in their layer's Gerber file and in the SVG/PDF previews. KiCad PCB and
-  IPC-2581 exchange do not carry them, and the PNG raster omits the fill.
-- The copper pour audit is a connectivity measure, not a fill calculation. A
+- Copper pours are stored as closed polygons and written in their layer's Gerber
+  file and in the SVG/PDF previews. The default `solid` fill writes one
+  `G36`/`G37` region per pour; a `grid` fill writes an axis-aligned hatch clipped
+  to the polygon instead, with line spacing and stroke width in board units
+  (defaults 0.5 and 0.2) and the stroke required to stay narrower than the
+  spacing. Hatch parameters merge on update, and switching back to `solid`
+  clears them. KiCad PCB and IPC-2581 exchange do not carry pours, and the PNG
+  raster omits the fill.
+- The copper pour audit is a connectivity measure, not a fill calculation, and a
+  hatch changes only the drawn copper: audit anchors and zone-report areas always
+  measure the polygon extent for any fill. A
   pour is connected when its polygon touches a same-net pad box, via circle or
   track segment on its own layer; a pour with no anchor is `isolated`, and a
   pour with no net is `unassigned`. Each stored polygon is measured alone, so

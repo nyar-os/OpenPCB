@@ -233,8 +233,8 @@ only.
 ## Zones and keepouts
 
 ```bash
-open-pcb zone add <file> --layer <layer> --points <list> [--net <name>]
-open-pcb zone update <file> --id <id> [--layer <layer>] [--net <name>] [--points <list>]
+open-pcb zone add <file> --layer <layer> --points <list> [--net <name>] [--fill <style>] [--grid-spacing <units>] [--grid-width <units>]
+open-pcb zone update <file> --id <id> [--layer <layer>] [--net <name>] [--points <list>] [--fill <style>] [--grid-spacing <units>] [--grid-width <units>]
 open-pcb zone delete <file> --id <id>
 open-pcb zone list <file>
 open-pcb zone audit <file>
@@ -250,6 +250,15 @@ open-pcb keepout list <file>
 `zone add` requires `--layer` and `--points`. `keepout add` requires `--points`;
 omitting `--layer` means every layer (`*`). `zone list` prints per-layer and total
 copper area. `keepout list` prints count and total declared area.
+
+`--fill` selects the copper inside the pour outline: `solid` (the default) writes
+one Gerber region, `grid` writes a hatch of axis-aligned strokes clipped to the
+polygon. `--grid-spacing` and `--grid-width` set the hatch line pitch and stroke
+in board units (defaults 0.5 and 0.2) and are only valid with `--fill grid`; the
+stroke must stay narrower than the pitch. `zone update` merges fill values, and
+switching back to `--fill solid` clears the hatch parameters. `zone list` shows
+each zone's fill and resolved hatch values; the reported area always measures the
+polygon extent.
 
 `zone audit` reports whether each pour touches copper of its own net on its own
 layer: a pad whose box touches the polygon, a via whose circle touches it, or a
