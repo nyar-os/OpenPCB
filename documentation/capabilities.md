@@ -109,7 +109,7 @@ rectangle; there is no round or polygon aperture geometry to approximate.
 | Micro vias | `supported` |
 | Differential pairs | `supported` |
 | Back drill | `supported` |
-| Teardrops | `linear` supported; `arc` unsupported |
+| Teardrops | `linear` and `arc` supported |
 | Design rules | `supported` |
 | Solder-mask Gerber layers | `supported` |
 | Solder-paste Gerber layers | `supported` |
@@ -382,8 +382,15 @@ being approximated.
   the finding from the report. Overrides apply before waivers, so `passed` is
   false only while a non-waived error remains. There is no waiver expiry or
   reviewer approval workflow.
-- Teardrops are linear only and become ordinary copper tracks, so they are
-  indistinguishable from hand-routed segments after export.
+- Teardrops come in two shapes and become ordinary copper tracks, so they are
+  indistinguishable from hand-routed segments after export. `linear` draws each
+  side as one straight track from the pad edge to the tip; `arc` samples a
+  quadratic Bézier that is tangent to the pad edge at its start and to the track
+  at its tip into eight chord tracks per side. A side whose tip already carries
+  teardrop copper is skipped, so repeated runs and a linear-then-arc sequence
+  stay idempotent, and one call bumps a single revision. Same-net teardrop
+  chords are treated as connected copper in `clearance`, because the chords of
+  one fillet merge by design.
 
 ### Stackup and impedance
 

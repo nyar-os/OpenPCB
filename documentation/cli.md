@@ -336,7 +336,7 @@ The summary prints the covered share and the status.
 ```bash
 open-pcb route <file> [--width <mm>] [--clearance <mm>] [--via <mm>] [--net <name>] [--netclass]
     [--style orthogonal|chamfer45]
-open-pcb teardrop <file> [--shape linear] [--length <mm>]
+open-pcb teardrop <file> [--shape linear|arc] [--length <mm>]
 open-pcb stitch <file> --net <name> --spacing <mm> [--inset <mm>]
     [--diameter <mm>] [--drill <mm>]
 open-pcb copper balance <file>
@@ -350,7 +350,8 @@ per field, falling back to the explicit arguments and then to those defaults.
 `--style` defaults to `orthogonal`; `chamfer45` joins two axis-aligned segments
 with a 45-degree diagonal and falls back to an orthogonal path per edge when no
 clear diagonal fits, reporting the reason in the JSON `edges` array.
-`teardrop` implements `linear` only. `stitch` requires a net and a positive spacing and
+`teardrop` implements `linear` (one straight chord per side) and `arc` (each side
+curved as eight chord tracks along a pad-tangent Bézier). `stitch` requires a net and a positive spacing and
 reports how many vias it placed and skipped. `copper balance` prints per-layer
 area, coverage when an outline exists, and the imbalance between copper sides.
 `drill report` prints hole count, pad hole count, slot count, tool count and
