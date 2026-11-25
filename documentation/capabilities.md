@@ -59,10 +59,10 @@ them.
 drc              connectivity       clearance          annular_rings
 annular-ring     track-width        unrouted           stackup
 outline          silkscreen         courtyard          netlist
-hole-to-hole     hole-to-track      hole-to-pad        copper-to-edge
-edge-clearance   silkscreen-over-pad diffpair          dangling-copper
-netclass         keepout            via-in-pad         pad-overlap
-solder-mask      testpoints         stencil
+hole-to-hole     hole-to-track      hole-to-pad        via-to-pad
+copper-to-edge   edge-clearance     silkscreen-over-pad diffpair
+dangling-copper  netclass           keepout            via-in-pad
+pad-overlap      solder-mask        testpoints         stencil
 ```
 
 `annular_rings` and `annular-ring` are both accepted spellings.
@@ -79,6 +79,15 @@ is not measured against its own pad, same-net pairs are skipped (including two
 unassigned objects), and the check uses the strictest clearance of the two nets,
 including net-class clearance. Pads are compared on every layer, so each drill
 hole is a through-hole feature and there is no per-layer filtering.
+
+`via-to-pad` measures every via's copper annulus against every pad. A via is
+compared only on the copper layers it reaches, so a blind or buried via is
+skipped outside its span; the pad is the rotated rectangle its footprint places.
+Same-net pairs are skipped, including two unassigned objects, and the required
+gap is the strictest clearance of the two nets, including net-class clearance.
+The check uses the via's copper diameter rather than its drill, so it catches a
+short that `hole-to-pad` misses when the barrel clears the pad but the annulus
+does not. A gap of exactly 0.2 mm with no class clearance is accepted.
 
 `diffpair` compares declared pairs against their width, gap and skew targets and
 also infers pairs from net names for nets that no declared pair covers. Two nets
@@ -138,6 +147,7 @@ rectangle; there is no round or polygon aperture geometry to approximate.
 | Panelization (`panel`, `Board.panelize`) | `supported` |
 | Solder-mask aperture check (`solder-mask`) | `supported` |
 | Stencil aperture check (`stencil`) | `supported` |
+| Via-to-pad copper clearance check (`via-to-pad`) | `supported` |
 | Panel tooling holes and breakaway report (`panel`) | `supported` |
 | Polygon outline geometry (`Board.outlineGeometry`, SDK only) | `supported` |
 | Net classes (checks and opt-in routing targets, editable in place) | `supported` |
@@ -355,6 +365,14 @@ being approximated.
   different nets that share copper report `drc/pad-overlap`; a shared edge is
   contact, not overlap, so tangent pads in one footprint stay clean. A pad with
   no net and a pad with one count as different nets.
+- `via-to-pad` compares a via's copper annulus with rotated pad rectangles, not
+  drill holes. Only pads on a copper layer the via reaches are compared, so a
+  blind or buried via is skipped outside its span, and same-net copper is
+  skipped. The gap is the distance from the via centre to the pad border minus
+  half the via diameter; a value below the strictest net-class clearance of the
+  pair (or 0.2 mm) reports `drc/via-to-pad` as an error. `hole-to-pad` still
+  measures the drill, so the two checks can report the same physical short from
+  different geometry.
 - `solder-mask` reads the apertures the mask writer implies: each outer pad's
   rotated copper box grown by the document expansion per side. Openings of
   different nets that overlap or touch report `drc/solder-mask-bridge`, and a

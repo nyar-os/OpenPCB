@@ -93,7 +93,9 @@ open-pcb inspect <file> [--checks <list>]
 Exit code is `1` when `passed` is false. `solder-mask` reports merged mask
 openings of different nets as errors and mask webs under 0.1 mm as warnings.
 `stencil` reports outer-layer paste openings whose area ratio or aspect ratio is
-below the stencil design-rule minimum; both are warnings.
+below the stencil design-rule minimum; both are warnings. `via-to-pad` reports a
+via whose copper annulus is closer to another net's pad than the required
+clearance, measured on every copper layer the via reaches.
 
 ```bash
 open-pcb inspect board.opcb --checks drc,connectivity,unrouted
