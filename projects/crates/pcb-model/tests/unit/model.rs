@@ -185,9 +185,12 @@ fn capability_matrix_matches_the_implemented_pack() {
         "gbr",
         "drl",
         "drill_map",
+        "dxf",
+        "layers",
         "bom",
         "pos",
         "placement",
+        "asm",
         "testpoints",
         "ipc_d_356",
         "svg",
@@ -199,7 +202,7 @@ fn capability_matrix_matches_the_implemented_pack() {
         assert_eq!(matrix["formats"][format]["export"], "supported", "{format} export");
         assert_eq!(matrix["formats"][format]["edit"], "unsupported", "{format} edit");
     }
-    for format in ["gbr", "drl", "drill_map", "bom", "pos", "placement", "svg", "pdf", "png"] {
+    for format in ["gbr", "drl", "drill_map", "dxf", "layers", "asm", "bom", "pos", "placement", "svg", "pdf", "png"] {
         assert_eq!(matrix["formats"][format]["import"], "unsupported", "{format} import");
     }
     assert_eq!(matrix["formats"]["kicad_pcb"]["import"], "supported", "KiCad import is implemented");
@@ -261,9 +264,12 @@ fn capability_matrix_matches_the_implemented_pack() {
         "gbr",
         "drl",
         "drill_map",
+        "dxf",
+        "layers",
         "bom",
         "pos",
         "placement",
+        "asm",
         "testpoints",
         "ipc_d_356",
         "svg",
@@ -3478,6 +3484,194 @@ fn gerber_rejects_a_board_without_outline_and_a_file_target() {
     fs::write(&file, "occupied").expect("a file exists at the target");
     let refused = export(handle, "gbr", &file).expect_err("a file target is rejected");
     assert_eq!(refused.code, "format/invalid");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn dxf_writes_the_board_outline_as_r12_line_entities() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    let path = directory.join("outline.dxf");
+    let report = export(handle, "dxf", &path).expect("DXF export writes the outline");
+    assert_eq!(report["format"], "dxf");
+    assert_eq!(report["path"], path.display().to_string());
+    assert_eq!(report["editable"], false);
+    assert!(report["bytes"].as_u64().expect("a byte count") > 0);
+    let text = fs::read_to_string(&path).expect("the DXF is readable");
+    assert!(text.contains("AC1009"), "the header declares the R12 version");
+    assert!(text.contains("ENTITIES"), "the file carries an entities section");
+    assert_eq!(text.matches("LINE").count(), 4, "the rectangle is four line entities");
+    assert_eq!(text.matches("Edge.Cuts").count(), 4, "every line lives on the edge layer");
+    for marker in ["100.000", "80.000", "EOF"] {
+        assert!(text.contains(marker), "the DXF contains {marker}");
+    }
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn dxf_rejects_a_board_without_outline() {
+    let directory = TempDir::new();
+    let handle = created();
+    let path = directory.join("missing.dxf");
+    let refused = export(handle, "dxf", &path).expect_err("DXF needs an outline");
+    assert_eq!(refused.code, "format/invalid");
+    assert!(!path.exists());
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn layers_writes_aligned_single_layer_views() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_text(
+        handle,
+        AddTextRequest {
+            text: "REV A".to_string(),
+            layer: "F.SilkS".to_string(),
+            at: [10.0, 20.0],
+            rotation: None,
+            size: None,
+            thickness: None,
+        },
+    )
+    .expect("the silk text is added");
+    let target = directory.join("layers");
+    let report = export(handle, "layers", &target).expect("the layer view directory writes");
+    assert_eq!(report["format"], "layers");
+    let artifacts = report["artifacts"].as_array().expect("artifacts is an array");
+    let names: Vec<&str> = artifacts.iter().map(|item| item["name"].as_str().expect("a name")).collect();
+    assert_eq!(names, ["F_Cu.svg", "B_Cu.svg", "F_SilkS.svg", "B_SilkS.svg"]);
+    assert_eq!(
+        report["bytes"].as_u64().expect("a byte count"),
+        artifacts.iter().map(|i| i["bytes"].as_u64().unwrap()).sum::<u64>()
+    );
+
+    let read = |name: &str| fs::read_to_string(target.join(name)).expect("the view is readable");
+    let front = read("F_Cu.svg");
+    assert!(front.contains("<line"), "the front copper view keeps the front track");
+    assert!(!front.contains(">U1<"), "the front copper view draws no silkscreen reference");
+    assert!(!front.contains("REV A"), "the front copper view draws no silk text");
+    let back = read("B_Cu.svg");
+    assert!(!back.contains("<line"), "the back copper view holds no front track");
+    assert!(back.contains("<ellipse"), "the back copper view keeps the via that reaches it");
+    let silk = read("F_SilkS.svg");
+    assert!(silk.contains(">U1<"), "the silkscreen view keeps the footprint reference");
+    assert!(silk.contains("REV A"), "the silkscreen view keeps the silk text");
+    assert!(!silk.contains("<line"), "the silkscreen view holds no copper track");
+    let back_silk = read("B_SilkS.svg");
+    assert!(!back_silk.contains(">U1<"), "a front footprint is not drawn on the back silkscreen");
+    let view_box = |name: &str| {
+        let text = read(name);
+        let start = text.find("viewBox=\"").expect("a viewBox") + 9;
+        text[start..].split('"').next().expect("a viewBox value").to_string()
+    };
+    for name in &names[1..] {
+        assert_eq!(view_box(name), view_box(names[0]), "{name} shares the canvas of the other views");
+    }
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn asm_writes_both_sides_with_polarity_and_bom() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    add_pad(
+        handle,
+        AddPadRequest {
+            footprint: "fp-1".to_string(),
+            number: "1".to_string(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+            net: None,
+            drill: None,
+        },
+    )
+    .expect("the pad is added");
+    add_footprint(
+        handle,
+        AddFootprintRequest {
+            reference: Some("R1".to_string()),
+            value: Some("10k".to_string()),
+            footprint: Some("0402".to_string()),
+            x: Some(10.0),
+            y: Some(5.0),
+            rotation: Some(90.0),
+            layer: Some("B.Cu".to_string()),
+        },
+    )
+    .expect("the second footprint is placed");
+    for (number, x) in [("1", -0.4), ("2", 0.4)] {
+        add_pad(
+            handle,
+            AddPadRequest {
+                footprint: "fp-2".to_string(),
+                number: number.to_string(),
+                x,
+                y: 0.0,
+                w: 0.5,
+                h: 0.9,
+                net: None,
+                drill: None,
+            },
+        )
+        .expect("the pad is added");
+    }
+    let target = directory.join("asm");
+    let report = export(handle, "asm", &target).expect("the assembly directory writes");
+    assert_eq!(report["format"], "asm");
+    let artifacts = report["artifacts"].as_array().expect("artifacts is an array");
+    let names: Vec<&str> = artifacts.iter().map(|item| item["name"].as_str().expect("a name")).collect();
+    assert_eq!(names, ["F_Asm.svg", "B_Asm.svg"]);
+
+    let front = fs::read_to_string(target.join("F_Asm.svg")).expect("the front sheet is readable");
+    let back = fs::read_to_string(target.join("B_Asm.svg")).expect("the back sheet is readable");
+    for (name, sheet) in [("front", &front), ("back", &back)] {
+        assert!(sheet.starts_with("<?xml"), "{name} sheet is an SVG document");
+        assert!(sheet.contains("Assembly drawing"), "{name} sheet is titled");
+        assert!(sheet.contains("#8a6d1f"), "{name} sheet draws the board outline");
+        assert!(sheet.contains(">Item<") && sheet.contains(">Designators<"), "{name} sheet carries the BOM table");
+        assert!(sheet.contains(">MCU<") && sheet.contains(">QFN32<"), "{name} sheet lists the front part");
+        assert!(sheet.contains(">10k<") && sheet.contains(">0402<"), "{name} sheet lists the back part");
+        assert!(sheet.contains("r=\"0.45\""), "{name} sheet carries a polarity mark");
+        assert!(sheet.contains("r=\"1.5\""), "{name} sheet carries an item bubble");
+    }
+    assert!(front.contains("Top side"), "the front sheet names its side");
+    assert!(back.contains("Bottom side"), "the back sheet names its side");
+    assert_eq!(front.matches("<polygon").count(), 2, "the front sheet draws one pad and one outline");
+    assert_eq!(back.matches("<polygon").count(), 3, "the back sheet draws two pads and one outline");
+    close(handle).expect("the board closes");
+}
+
+#[test]
+fn view_directory_exports_reject_a_file_target() {
+    let directory = TempDir::new();
+    let handle = created();
+    add_full_board(handle);
+    for format in ["asm", "layers"] {
+        let file = directory.join(&format!("occupied-{format}.dir"));
+        fs::write(&file, "occupied").expect("a file exists at the target");
+        let refused = export(handle, format, &file).expect_err("a file target is rejected");
+        assert_eq!(refused.code, "format/invalid", "{format} rejects a file target");
+    }
     close(handle).expect("the board closes");
 }
 
@@ -8681,9 +8875,12 @@ fn empty_board_exports_every_supported_format_without_panic() {
         "gbr",
         "drl",
         "drill_map",
+        "dxf",
+        "layers",
         "bom",
         "pos",
         "placement",
+        "asm",
         "testpoints",
         "ipc_d_356",
         "svg",
@@ -8694,7 +8891,7 @@ fn empty_board_exports_every_supported_format_without_panic() {
     ] {
         let target = dir.join(&format!("empty.{format}"));
         let result = export(handle, format, &target);
-        if matches!(format, "gbr" | "png") {
+        if matches!(format, "gbr" | "png" | "dxf") {
             let error = result.expect_err("`{format}` should need an outline");
             assert_eq!(error.code, "format/invalid", "{format} error code");
         }

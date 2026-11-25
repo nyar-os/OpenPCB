@@ -189,6 +189,9 @@ test('capability matrix reports the implemented pack', { skip: withAddon }, asyn
     assert.equal(matrix.drillReport, 'supported');
     assert.equal(matrix.exportTargets.drl, 'supported');
     assert.equal(matrix.exportTargets.gbr, 'supported');
+    assert.equal(matrix.exportTargets.dxf, 'supported');
+    assert.equal(matrix.exportTargets.layers, 'supported');
+    assert.equal(matrix.exportTargets.asm, 'supported');
     assert.equal(matrix.exportTargets.pdf, 'supported');
     assert.equal(matrix.exportTargets.png, 'supported');
     assert.equal(matrix.exportTargets.kicad_pcb, 'supported');
@@ -253,7 +256,7 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         assert.ok(fs.existsSync(file));
         assert.equal(fs.existsSync(`${file}.history.json`), false, 'the default memory session writes no sidecar');
 
-        for (const format of ['drl', 'drill_map', 'bom', 'pos', 'placement', 'svg'] as const) {
+        for (const format of ['drl', 'drill_map', 'dxf', 'bom', 'pos', 'placement', 'svg'] as const) {
             const target = path.join(directory, `blinker.${format}`);
             const exported = await board.export({ format, target });
             assert.equal(exported.format, format);
@@ -262,6 +265,8 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         }
         assert.match(fs.readFileSync(path.join(directory, 'blinker.drl'), 'utf8'), /M48/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.drill_map'), 'utf8'), /OpenPCB drill map/);
+        assert.match(fs.readFileSync(path.join(directory, 'blinker.dxf'), 'utf8'), /AC1009/);
+        assert.equal(fs.readFileSync(path.join(directory, 'blinker.dxf'), 'utf8').match(/LINE/g)?.length, 4, 'the outline is four lines');
         assert.match(fs.readFileSync(path.join(directory, 'blinker.pos'), 'utf8'), /Designator/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.placement'), 'utf8'), /"placements"/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.svg'), 'utf8'), /<svg/);
@@ -279,6 +284,22 @@ test('board edits, saves, reopens, inspects and exports', { skip: withAddon }, a
         assert.match(frontCopper, /%TO\.N,VCC\*%/, 'copper objects declare their net');
         assert.match(frontCopper, /%TD\*%/, 'object attribute blocks are closed');
         assert.match(frontCopper, /%TA\.AperFunction,Conductor\*%/, 'file and aperture attributes stay');
+
+        const layerViews = path.join(directory, 'layers');
+        const views = await board.export({ format: 'layers', target: layerViews });
+        assert.equal(views.format, 'layers');
+        assert.deepEqual(views.artifacts?.map((item) => item.name), ['F_Cu.svg', 'B_Cu.svg', 'F_SilkS.svg', 'B_SilkS.svg']);
+        for (const name of ['F_Cu.svg', 'B_Cu.svg', 'F_SilkS.svg', 'B_SilkS.svg']) {
+            assert.match(fs.readFileSync(path.join(layerViews, name), 'utf8'), /<svg/, `${name} is an SVG view`);
+        }
+
+        const assembly = path.join(directory, 'asm');
+        const sheets = await board.export({ format: 'asm', target: assembly });
+        assert.equal(sheets.format, 'asm');
+        assert.deepEqual(sheets.artifacts?.map((item) => item.name), ['F_Asm.svg', 'B_Asm.svg']);
+        for (const name of ['F_Asm.svg', 'B_Asm.svg']) {
+            assert.match(fs.readFileSync(path.join(assembly, name), 'utf8'), /Assembly drawing/, `${name} is an assembly sheet`);
+        }
 
         const vector = await board.export({ format: 'pdf', target: path.join(directory, 'blinker.pdf') });
         assert.ok(vector.bytes > 0);
@@ -1180,11 +1201,12 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
         assert.match(run('rules', 'show', document), /stencilThickness=0\.1 stencilAreaRatio=0\.5/);
         assert.match(run('inspect', document, '--checks', 'stencil'), /passed=true/);
 
-        for (const format of ['drl', 'drill_map', 'bom', 'pos', 'placement', 'svg'] as const) {
+        for (const format of ['drl', 'drill_map', 'dxf', 'bom', 'pos', 'placement', 'svg'] as const) {
             run('export', document, '--format', format, '--out', path.join(directory, `blinker.${format}`));
         }
         assert.match(fs.readFileSync(path.join(directory, 'blinker.drl'), 'utf8'), /M48/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.drill_map'), 'utf8'), /OpenPCB drill map/);
+        assert.match(fs.readFileSync(path.join(directory, 'blinker.dxf'), 'utf8'), /AC1009/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.bom'), 'utf8'), /^Quantity,/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.pos'), 'utf8'), /^Designator,/);
         assert.match(fs.readFileSync(path.join(directory, 'blinker.placement'), 'utf8'), /"placements"/);
@@ -1197,6 +1219,10 @@ test('CLI creates, edits, inspects and exports in place', { skip: withAddon }, (
             assert.match(content, /%FSLAX46Y46\*%/, `${name} declares the coordinate format`);
             assert.match(content, /M02\*/, `${name} ends with M02`);
         }
+        run('export', document, '--format', 'layers', '--out', path.join(directory, 'layers'));
+        assert.ok(fs.existsSync(path.join(directory, 'layers', 'F_Cu.svg')), 'the layer view directory is written');
+        run('export', document, '--format', 'asm', '--out', path.join(directory, 'asm'));
+        assert.ok(fs.existsSync(path.join(directory, 'asm', 'B_Asm.svg')), 'the assembly directory is written');
         const failed = runFail('export', document, '--format', 'step', '--out', path.join(directory, 'blinker.step'));
         assert.match(failed, /capability\/not-implemented/);
         assert.equal(fs.existsSync(path.join(directory, 'blinker.step')), false);

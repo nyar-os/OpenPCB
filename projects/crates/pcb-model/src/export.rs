@@ -17,11 +17,14 @@ pub(crate) const SUPPORTED_EXPORTS: &[&str] = &[
     "gbr",
     "drl",
     "drill_map",
+    "dxf",
     "bom",
     "pos",
     "placement",
+    "asm",
     "testpoints",
     "ipc_d_356",
+    "layers",
     "svg",
     "pdf",
     "kicad_pcb",
@@ -61,6 +64,12 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
     if format == "gbr" {
         return gerber(board, path);
     }
+    if format == "asm" {
+        return assembly(board, path);
+    }
+    if format == "layers" {
+        return layer_views(board, path);
+    }
     if format == "png" {
         return png(board, path);
     }
@@ -77,6 +86,7 @@ pub(crate) fn run(board: &Board, format: &str, path: &Path) -> Result<Value, Ser
             drill(board).into_bytes()
         }
         "drill_map" => drill_map(board).into_bytes(),
+        "dxf" => dxf(board)?.into_bytes(),
         "bom" => bom(board).into_bytes(),
         "pos" => position(board).into_bytes(),
         "testpoints" => testpoints(board).into_bytes(),
@@ -121,15 +131,7 @@ fn gerber(board: &Board, path: &Path) -> Result<Value, ServiceError> {
     let outline = board
         .outline
         .ok_or_else(|| crate::invalid("the board has no outline; set one with `board.outline set` before exporting Gerber"))?;
-    if path.exists() && !path.is_dir() {
-        return Err(crate::invalid(format!(
-            "`{}` exists and is not a directory; Gerber export writes a directory of layer files",
-            path.display()
-        )));
-    }
-    if !path.is_dir() {
-        fs::create_dir_all(path).map_err(|error| crate::invalid(format!("cannot create `{}`: {error}", path.display())))?;
-    }
+    export_directory("gbr", path)?;
 
     let mut drafts = board.copper_stack().into_iter().map(|id| (gerber_name(id), copper(board, id))).collect::<Vec<_>>();
     drafts.push(("F_SilkS.gbr".to_string(), silkscreen(board, "F.SilkS")));
@@ -752,6 +754,346 @@ fn drill_map(board: &Board) -> String {
     out
 }
 
+/// Creates or validates one export target directory shared by the multi-file writers.
+fn export_directory(format: &str, path: &Path) -> Result<(), ServiceError> {
+    if path.exists() && !path.is_dir() {
+        return Err(crate::invalid(format!(
+            "`{}` exists and is not a directory; {format} export writes a directory of files",
+            path.display()
+        )));
+    }
+    if !path.is_dir() {
+        fs::create_dir_all(path).map_err(|error| crate::invalid(format!("cannot create `{}`: {error}", path.display())))?;
+    }
+    Ok(())
+}
+
+/// Writes one SVG file per view into a directory and reports every artifact.
+fn write_views(
+    board: &Board,
+    format: &str,
+    path: &Path,
+    views: &[(&str, &str)],
+    render: fn(&Board, &str) -> Result<String, ServiceError>,
+) -> Result<Value, ServiceError> {
+    export_directory(format, path)?;
+    let mut artifacts = Vec::new();
+    let mut total = 0u64;
+    for (name, view) in views {
+        let content = render(board, view)?;
+        let bytes = crate::atomic_write(&path.join(name), content.as_bytes())?;
+        total += bytes;
+        artifacts.push(json!({ "name": name, "bytes": bytes }));
+    }
+    Ok(json!({
+        "revision": board.revision,
+        "format": format,
+        "path": path.display().to_string(),
+        "bytes": total,
+        "editable": false,
+        "artifacts": artifacts,
+    }))
+}
+
+/// Writes the board outline as an AutoCAD R12 DXF with four `LINE` entities.
+///
+/// The file carries the minimal header and entities sections a reader expects;
+/// every corner is written in millimetres on the `Edge.Cuts` layer, so a
+/// panel router or milling host can cut the board without a Gerber reader.
+fn dxf(board: &Board) -> Result<String, ServiceError> {
+    let outline = board
+        .outline
+        .ok_or_else(|| crate::invalid("the board has no outline; set one with `board.outline set` before exporting DXF"))?;
+    let scale = board.millimetres();
+    let corners = [
+        [outline.from[0] * scale, outline.from[1] * scale],
+        [outline.to[0] * scale, outline.from[1] * scale],
+        [outline.to[0] * scale, outline.to[1] * scale],
+        [outline.from[0] * scale, outline.to[1] * scale],
+    ];
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", dxf_pair(0, "SECTION"));
+    let _ = writeln!(out, "{}", dxf_pair(2, "HEADER"));
+    let _ = writeln!(out, "{}", dxf_pair(9, "$ACADVER"));
+    let _ = writeln!(out, "{}", dxf_pair(1, "AC1009"));
+    let _ = writeln!(out, "{}", dxf_pair(0, "ENDSEC"));
+    let _ = writeln!(out, "{}", dxf_pair(0, "SECTION"));
+    let _ = writeln!(out, "{}", dxf_pair(2, "ENTITIES"));
+    for index in 0..4 {
+        let from = corners[index];
+        let to = corners[(index + 1) % 4];
+        let _ = writeln!(out, "{}", dxf_pair(0, "LINE"));
+        let _ = writeln!(out, "{}", dxf_pair(8, "Edge.Cuts"));
+        let _ = writeln!(out, "{}", dxf_pair(10, &number(from[0])));
+        let _ = writeln!(out, "{}", dxf_pair(20, &number(from[1])));
+        let _ = writeln!(out, "{}", dxf_pair(30, "0.000"));
+        let _ = writeln!(out, "{}", dxf_pair(11, &number(to[0])));
+        let _ = writeln!(out, "{}", dxf_pair(21, &number(to[1])));
+        let _ = writeln!(out, "{}", dxf_pair(31, "0.000"));
+    }
+    let _ = writeln!(out, "{}", dxf_pair(0, "ENDSEC"));
+    let _ = writeln!(out, "{}", dxf_pair(0, "EOF"));
+    Ok(out)
+}
+
+/// Writes one DXF group code and its value as the two lines the format expects.
+fn dxf_pair(code: u32, value: &str) -> String {
+    format!("{code:>3}\n{value}")
+}
+
+/// Writes one assembly drawing per board side and reports each artifact.
+fn assembly(board: &Board, path: &Path) -> Result<Value, ServiceError> {
+    write_views(board, "asm", path, &[("F_Asm.svg", "Top"), ("B_Asm.svg", "Bottom")], assembly_view)
+}
+
+/// Writes one single-layer fabrication view per outer layer and reports each artifact.
+fn layer_views(board: &Board, path: &Path) -> Result<Value, ServiceError> {
+    write_views(
+        board,
+        "layers",
+        path,
+        &[("F_Cu.svg", "F.Cu"), ("B_Cu.svg", "B.Cu"), ("F_SilkS.svg", "F.SilkS"), ("B_SilkS.svg", "B.SilkS")],
+        layer_view,
+    )
+}
+
+/// Renders one layer in isolation on the canvas the composite preview uses.
+///
+/// All four views share one canvas and one coordinate mapping, so a reader can
+/// stack them like Gerber layers: copper views carry tracks, pads, zones and the
+/// vias that reach the layer, silkscreen views carry the legend and the footprint
+/// outlines and references of the matching copper side, and every view keeps the
+/// board outline.
+fn layer_view(board: &Board, view: &str) -> Result<String, ServiceError> {
+    let (min, max) = preview_bounds(board);
+    let margin = 5.0;
+    let width = (max[0] - min[0]).max(1.0) + margin * 2.0;
+    let height = (max[1] - min[1]).max(1.0) + margin * 2.0;
+    let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: min[1] - margin, width, height, y_up: false };
+    let drawing = build_drawing(board, &layout, Some(PREVIEW_BACKGROUND), true, preview_ink, Some(view));
+    let mut content =
+        drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the `{view}` layer view: {error}")))?;
+    content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
+    Ok(add_view_title(board, content, width, height, view))
+}
+
+/// Renders one assembly sheet: outline, component outlines, references,
+/// polarity marks, BOM item bubbles and the BOM table below the board.
+///
+/// The sheet is a standalone white SVG in millimetres. Item numbers follow the
+/// global bill of materials, so the same part on either side carries the same
+/// bubble number. Coordinates keep the document's Y direction, matching the
+/// composite preview and the layer views.
+fn assembly_view(board: &Board, side: &str) -> Result<String, ServiceError> {
+    let scale = board.millimetres();
+    let bottom = side == "Bottom";
+    let parts: Vec<&crate::board::Footprint> =
+        board.footprints.iter().filter(|footprint| footprint.layer.starts_with(if bottom { "B." } else { "F." })).collect();
+
+    let mut groups: BTreeMap<(String, String), Vec<&str>> = BTreeMap::new();
+    for footprint in &board.footprints {
+        groups.entry((footprint.value.clone(), footprint.footprint.clone())).or_default().push(footprint.ref_.as_str());
+    }
+    let item_of: BTreeMap<(String, String), usize> =
+        groups.keys().enumerate().map(|(index, key)| (key.clone(), index + 1)).collect();
+
+    let (mut min, mut max) = match board.outline {
+        Some(outline) => ([outline.from[0] * scale, outline.from[1] * scale], [outline.to[0] * scale, outline.to[1] * scale]),
+        None => drawing_bounds(board),
+    };
+    for footprint in &parts {
+        if let Some((silk_min, silk_max)) = footprint_silk(footprint) {
+            include(&mut min, &mut max, (silk_min[0] - 1.0) * scale, (silk_min[1] - 3.5) * scale);
+            include(&mut min, &mut max, (silk_max[0] + 3.5) * scale, (silk_max[1] + 1.0) * scale);
+        }
+    }
+    let span_x = (max[0] - min[0]).max(1.0);
+    let span_y = (max[1] - min[1]).max(1.0);
+    let margin = 6.0;
+    let title_band = 8.0;
+    let width = span_x + margin * 2.0;
+    let row_height = 2.6;
+    let table_top = title_band + span_y + 6.0;
+    let height = table_top + (groups.len() + 1) as f64 * row_height + 4.0;
+    let map_x = |x: f64| x - min[0] + margin;
+    let map_y = |y: f64| y - min[1] + title_band;
+
+    let mut out = String::new();
+    let _ = writeln!(out, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+    let _ = writeln!(
+        out,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width:.3}mm\" height=\"{height:.3}mm\" viewBox=\"0 0 {width:.3} {height:.3}\">"
+    );
+    let _ = writeln!(out, "<rect x=\"0\" y=\"0\" width=\"{width:.3}\" height=\"{height:.3}\" fill=\"#ffffff\"/>");
+    let _ = writeln!(
+        out,
+        "<text x=\"{margin:.3}\" y=\"5.0\" font-family=\"monospace\" font-size=\"3\" fill=\"#111111\">Assembly drawing - {side} side</text>"
+    );
+    let _ = writeln!(
+        out,
+        "<text x=\"{:.3}\" y=\"5.0\" font-family=\"monospace\" font-size=\"3\" fill=\"#111111\" text-anchor=\"middle\">{}</text>",
+        width / 2.0,
+        xml(board_title(board))
+    );
+    if let Some(outline) = board.outline {
+        let _ = writeln!(
+            out,
+            "<rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"#8a6d1f\" stroke-width=\"0.2\"/>",
+            map_x(outline.from[0] * scale),
+            map_y(outline.from[1] * scale),
+            (outline.to[0] - outline.from[0]) * scale,
+            (outline.to[1] - outline.from[1]) * scale
+        );
+    }
+    for footprint in &parts {
+        for pad in &footprint.pads {
+            let points = pad_corners(footprint, pad)
+                .iter()
+                .map(|corner| format!("{:.3},{:.3}", map_x(corner[0] * scale), map_y(corner[1] * scale)))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let _ = writeln!(out, "<polygon points=\"{points}\" fill=\"none\" stroke=\"#111111\" stroke-width=\"0.12\"/>");
+            if let Some(drill) = pad.drill.filter(|drill| *drill > 0.0) {
+                let center = pad_center(footprint, pad);
+                let _ = writeln!(
+                    out,
+                    "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"none\" stroke=\"#111111\" stroke-width=\"0.1\"/>",
+                    map_x(center[0] * scale),
+                    map_y(center[1] * scale),
+                    drill * scale / 2.0
+                );
+            }
+        }
+        let Some((silk_min, silk_max)) = footprint_silk(footprint)
+        else {
+            continue;
+        };
+        let corners =
+            [[silk_min[0], silk_min[1]], [silk_max[0], silk_min[1]], [silk_max[0], silk_max[1]], [silk_min[0], silk_max[1]]];
+        let points = corners
+            .iter()
+            .map(|corner| format!("{:.3},{:.3}", map_x(corner[0] * scale), map_y(corner[1] * scale)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let _ = writeln!(out, "<polygon points=\"{points}\" fill=\"none\" stroke=\"#111111\" stroke-width=\"0.15\"/>");
+        if !footprint.ref_.is_empty() {
+            let _ = writeln!(
+                out,
+                "<text x=\"{:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"2\" fill=\"#111111\">{}</text>",
+                map_x(silk_min[0] * scale),
+                map_y((silk_min[1] - 0.6) * scale),
+                xml(&footprint.ref_)
+            );
+        }
+        if let Some(pad) = footprint.pads.iter().find(|pad| pad.number == "1") {
+            let center = pad_center(footprint, pad);
+            let _ = writeln!(
+                out,
+                "<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"0.45\" fill=\"#111111\"/>",
+                map_x(center[0] * scale),
+                map_y(center[1] * scale)
+            );
+        }
+        if let Some(item) = item_of.get(&(footprint.value.clone(), footprint.footprint.clone())) {
+            let cx = map_x((silk_max[0] + 1.8) * scale);
+            let cy = map_y((silk_min[1] - 1.8) * scale);
+            let _ = writeln!(
+                out,
+                "<circle cx=\"{cx:.3}\" cy=\"{cy:.3}\" r=\"1.5\" fill=\"#ffffff\" stroke=\"#111111\" stroke-width=\"0.12\"/>"
+            );
+            let _ = writeln!(
+                out,
+                "<text x=\"{cx:.3}\" y=\"{:.3}\" font-family=\"monospace\" font-size=\"1.6\" fill=\"#111111\" text-anchor=\"middle\">{item}</text>",
+                cy + 0.55
+            );
+        }
+    }
+
+    let _ = writeln!(
+        out,
+        "<line x1=\"{margin:.3}\" y1=\"{:.3}\" x2=\"{:.3}\" y2=\"{:.3}\" stroke=\"#111111\" stroke-width=\"0.15\"/>",
+        table_top - 2.0,
+        width - margin,
+        table_top - 2.0
+    );
+    let columns = [0.0, 8.0, 14.0, 24.0, 42.0];
+    for (x, header) in columns.iter().zip(["Item", "Qty", "Value", "Footprint", "Designators"]) {
+        let _ = writeln!(
+            out,
+            "<text x=\"{:.3}\" y=\"{table_top:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#111111\">{header}</text>",
+            margin + x
+        );
+    }
+    for (index, ((value, package), designators)) in groups.iter().enumerate() {
+        let mut designators = designators.clone();
+        designators.sort_unstable();
+        let y = table_top + (index + 1) as f64 * row_height;
+        let cells =
+            [(index + 1).to_string(), designators.len().to_string(), value.clone(), package.clone(), designators.join(" ")];
+        for (x, cell) in columns.iter().zip(cells) {
+            let _ = writeln!(
+                out,
+                "<text x=\"{:.3}\" y=\"{y:.3}\" font-family=\"monospace\" font-size=\"2.2\" fill=\"#111111\">{}</text>",
+                margin + x,
+                xml(&cell)
+            );
+        }
+    }
+    let _ = writeln!(out, "</svg>");
+    Ok(out)
+}
+
+/// Adds a title band naming one drawing view above an otherwise bare preview SVG.
+fn add_view_title(board: &Board, content: String, width: f64, height: f64, label: &str) -> String {
+    let Some(start) = content.find("<svg")
+    else {
+        return content;
+    };
+    let Some(offset) = content[start..].find('>')
+    else {
+        return content;
+    };
+    let root_end = start + offset;
+    let Some(index) = content.rfind("</svg>")
+    else {
+        return content;
+    };
+    let total = height + SVG_TITLE_BAND;
+    let mut root = content[start..=root_end].to_string();
+    root = set_svg_attribute(&root, "height", &format!("{:.0}", total * SVG_PREVIEW_PX_PER_MM));
+    root = set_svg_attribute(&root, "viewBox", &format!("0 -{SVG_TITLE_BAND} {width} {total}"));
+    let background = PREVIEW_BACKGROUND.to_css();
+    let title_size = 4.0;
+    let mut block = String::from("    <g class=\"title-block\">\n");
+    let _ = writeln!(
+        block,
+        "      <rect x=\"0\" y=\"-{SVG_TITLE_BAND}\" width=\"{width}\" height=\"{SVG_TITLE_BAND}\" fill=\"{background}\"/>"
+    );
+    let _ = writeln!(
+        block,
+        "      <text x=\"2.5\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"{title_size}\" fill=\"{}\">{}</text>",
+        title_size - 1.0,
+        layer_color(board, "Edge.Cuts"),
+        xml(label)
+    );
+    let _ = writeln!(
+        block,
+        "      <text x=\"{:.3}\" y=\"-{:.3}\" font-family=\"monospace\" font-size=\"{title_size}\" fill=\"{}\" text-anchor=\"middle\">{}</text>",
+        width / 2.0,
+        title_size - 1.0,
+        layer_color(board, "F.SilkS"),
+        xml(board_title(board))
+    );
+    block.push_str("    </g>\n");
+    let mut result = String::with_capacity(content.len() + block.len());
+    result.push_str(&content[..start]);
+    result.push_str(&root);
+    result.push_str(&content[root_end + 1..index]);
+    result.push_str(&block);
+    result.push_str(&content[index..]);
+    result
+}
+
 /// Bill of materials grouped by value and package.
 fn bom(board: &Board) -> String {
     let mut groups: BTreeMap<(String, String), Vec<&str>> = BTreeMap::new();
@@ -1194,7 +1536,7 @@ fn pdf(board: &Board) -> Result<(Vec<u8>, usize), ServiceError> {
         height: page.height,
         y_up: true,
     };
-    let mut drawing = build_drawing(board, &layout, None, true, print_color);
+    let mut drawing = build_drawing(board, &layout, None, true, print_color, None);
     draw_pdf_title_block(board, &mut drawing, page.width, page.height, &page.legend);
     let dropped = drawing
         .elements
@@ -1350,14 +1692,20 @@ impl Layout {
 /// primitive cannot rotate.
 /// `ink` adapts every layer colour it draws, which lets the PDF writer swap
 /// pale ink for print-safe dark ink without touching the stored palette.
+/// `view` restricts the drawing to one layer: only objects on that layer are
+/// lowered, a footprint contributes its copper pads to its own layer and its
+/// outline and reference to the matching silkscreen layer, and the Edge.Cuts
+/// outline is always drawn. `None` keeps the composite preview behaviour.
 fn build_drawing(
     board: &Board,
     layout: &Layout,
     background: Option<Color>,
     with_text_items: bool,
     ink: fn(Color) -> Color,
+    view: Option<&str>,
 ) -> Drawing {
     let layer_ink = |layer: &str| ink(layer_color_value(board, layer));
+    let in_view = |layer: &str| view.is_none_or(|view| view == layer);
     let scale = board.millimetres();
     let mut drawing = Drawing::new(Size::new(layout.width, layout.height));
     if let Some(background) = background {
@@ -1378,6 +1726,9 @@ fn build_drawing(
         ));
     }
     for zone in &board.zones {
+        if !in_view(&zone.layer) {
+            continue;
+        }
         if zone.fill == "grid" {
             let stroke = Style::stroke(layer_ink(&zone.layer), zone.grid_width() * scale * layout.scale);
             for (from, to) in crate::board::grid_lines(&zone.points, zone.grid_spacing()) {
@@ -1397,6 +1748,9 @@ fn build_drawing(
         drawing.push(Element::new(Shape::Polygon { points }, style));
     }
     for track in &board.tracks {
+        if !in_view(&track.layer) {
+            continue;
+        }
         drawing.push(Element::new(
             Shape::Line {
                 from: layout.point(track.from[0] * scale, track.from[1] * scale),
@@ -1406,21 +1760,31 @@ fn build_drawing(
         ));
     }
     for footprint in &board.footprints {
+        let draw_pads = view.is_none_or(|view| view == footprint.layer);
+        let draw_silk = view.is_none_or(|view| view == silk_layer(&footprint.layer));
+        if !draw_pads && !draw_silk {
+            continue;
+        }
         let color = layer_ink(&footprint.layer);
-        for pad in &footprint.pads {
-            let corners = pad_corners(footprint, pad);
-            let points = corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect();
-            drawing.push(Element::new(Shape::Polygon { points }, fill_style(color)));
-            if let Some(drill) = pad.drill.filter(|drill| *drill > 0.0) {
-                let center = pad_center(footprint, pad);
-                drawing.push(Element::new(
-                    Shape::Circle {
-                        center: layout.point(center[0] * scale, center[1] * scale),
-                        radius: (drill * scale * layout.scale / 2.0).max(0.1),
-                    },
-                    fill_style(DRILL_COLOR),
-                ));
+        if draw_pads {
+            for pad in &footprint.pads {
+                let corners = pad_corners(footprint, pad);
+                let points = corners.iter().map(|corner| layout.point(corner[0] * scale, corner[1] * scale)).collect();
+                drawing.push(Element::new(Shape::Polygon { points }, fill_style(color)));
+                if let Some(drill) = pad.drill.filter(|drill| *drill > 0.0) {
+                    let center = pad_center(footprint, pad);
+                    drawing.push(Element::new(
+                        Shape::Circle {
+                            center: layout.point(center[0] * scale, center[1] * scale),
+                            radius: (drill * scale * layout.scale / 2.0).max(0.1),
+                        },
+                        fill_style(DRILL_COLOR),
+                    ));
+                }
             }
+        }
+        if !draw_silk {
+            continue;
         }
         let Some((min, max)) = footprint_silk(footprint)
         else {
@@ -1451,6 +1815,9 @@ fn build_drawing(
         }
     }
     for via in &board.vias {
+        if view.is_some_and(|view| !board.via_covers(via, view)) {
+            continue;
+        }
         let center = layout.point(via.at[0] * scale, via.at[1] * scale);
         drawing.push(Element::new(
             Shape::Circle { center, radius: via.diameter * scale * layout.scale / 2.0 },
@@ -1474,6 +1841,9 @@ fn build_drawing(
     }
     if with_text_items {
         for text in &board.texts {
+            if !in_view(&text.layer) {
+                continue;
+            }
             let rotation = text.rotation.rem_euclid(360.0);
             if rotation > 1e-9 && rotation < 360.0 - 1e-9 {
                 draw_rotated_text(board, &mut drawing, layout, ink, text);
@@ -1778,7 +2148,7 @@ pub(crate) fn svg_preview(board: &Board) -> Result<(String, f64, f64), ServiceEr
     let width = (max[0] - min[0]).max(1.0) + margin * 2.0;
     let height = (max[1] - min[1]).max(1.0) + margin * 2.0;
     let layout = Layout { scale: 1.0, origin_x: min[0] - margin, origin_y: min[1] - margin, width, height, y_up: false };
-    let drawing = build_drawing(board, &layout, Some(PREVIEW_BACKGROUND), false, preview_ink);
+    let drawing = build_drawing(board, &layout, Some(PREVIEW_BACKGROUND), false, preview_ink, None);
     let mut content = drawing.to_svg().map_err(|error| crate::invalid(format!("cannot render the SVG preview: {error}")))?;
     content = scale_svg_root(&content, SVG_PREVIEW_PX_PER_MM);
     if !board.texts.is_empty()

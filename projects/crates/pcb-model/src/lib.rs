@@ -16,9 +16,10 @@
 //! a rectangular outline, editable design rules, waivable findings with per-code
 //! severity overrides, a copper area and balance report, a deterministic
 //! two-layer autorouter, a read-only SVG preview, and export to drill, BOM,
-//! pick-and-place, SVG, PDF, PNG, KiCad PCB, IPC-2581 and Gerber RS-274X (copper,
-//! silkscreen, solder mask and edge cuts). STEP remains declared but
-//! unimplemented and rejects with `capability/not-implemented`.
+//! pick-and-place, SVG, PDF, PNG, KiCad PCB, IPC-2581, Gerber RS-274X (copper,
+//! silkscreen, solder mask and edge cuts), board-outline DXF, per-layer SVG
+//! views and assembly drawings. STEP remains declared but unimplemented and
+//! rejects with `capability/not-implemented`.
 
 #![deny(missing_docs)]
 // The capability matrix is one large `json!` literal; leave headroom above the
@@ -74,8 +75,11 @@ pub const BOARD_FORMATS: &[&str] = &[
     "gbr",
     "drl",
     "drill_map",
+    "dxf",
+    "layers",
     "pos",
     "placement",
+    "asm",
     "bom",
     "testpoints",
     "ipc_d_356",
@@ -95,8 +99,11 @@ const EXPORT_TARGETS: &[&str] = &[
     "gbr",
     "drl",
     "drill_map",
+    "dxf",
+    "layers",
     "pos",
     "placement",
+    "asm",
     "bom",
     "testpoints",
     "ipc_d_356",
