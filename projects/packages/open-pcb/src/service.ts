@@ -435,7 +435,7 @@ export function addNet(handle: number, options: AddNetOptions): BoardEditResult 
     return decode<BoardEditResult>(() => binding('board.addNet').board_add_net(handle, JSON.stringify(options)));
 }
 
-/** Adds linear teardrop copper at every pad-track junction. */
+/** Adds linear or arc teardrop copper at every pad-track junction. */
 export function addTeardrops(handle: number, options: AddTeardropsOptions = {}): BoardEditResult {
     return decode<BoardEditResult>(() =>
         binding('board.addTeardrops').board_add_teardrops(handle, JSON.stringify(options)),

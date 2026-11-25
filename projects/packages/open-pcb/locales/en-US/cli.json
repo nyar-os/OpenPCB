@@ -181,7 +181,7 @@
             "positive": "Positive net of the differential pair",
             "negative": "Negative net of the differential pair",
             "max-skew": "Maximum allowed length skew between the pair, in millimetres",
-            "shape": "Teardrop shape: linear is the only implemented value",
+            "shape": "Teardrop shape: linear or arc",
             "length": "Teardrop length along the track, in millimetres",
             "columns": "Boards across one row of the panel",
             "rows": "Rows of boards in the panel",

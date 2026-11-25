@@ -1296,20 +1296,22 @@ impl Board {
         Ok(json!({ "first": first, "second": second }))
     }
 
-    /// Adds linear teardrop copper at every pad-track junction.
+    /// Adds linear or arc teardrop copper at every pad-track junction.
     ///
-    /// A teardrop is materialised as two ordinary copper tracks: from two
-    /// points on the pad edge to a point on the track beyond the pad. Only
-    /// same-net, same-layer junctions are considered, existing identical
-    /// segments are skipped, and the request is rejected when it repeats no
-    /// work. The `arc` shape stays unimplemented.
+    /// `linear` materialises each teardrop side as one ordinary track from a
+    /// point on the pad edge to a point on the track beyond the pad. `arc`
+    /// replaces each side with a chain of ordinary tracks sampling a quadratic
+    /// Bézier from the same pad-edge point to the same tip, tangent to the pad
+    /// edge at its start and to the track at its end. Only same-net, same-layer
+    /// junctions are considered, a side whose tip already carries teardrop
+    /// copper is skipped, and identical segments are never duplicated.
     pub(crate) fn add_teardrops(&mut self, request: AddTeardropsRequest) -> Result<Value, ServiceError> {
         let shape =
             request.shape.as_deref().map(str::trim).filter(|shape| !shape.is_empty()).unwrap_or("linear").to_ascii_lowercase();
-        if shape != "linear" {
+        if shape != "linear" && shape != "arc" {
             return Err(ServiceError::new(
                 "capability/not-implemented",
-                format!("teardrop shape `{shape}` is not implemented; only `linear` is"),
+                format!("teardrop shape `{shape}` is not implemented; only `linear` and `arc` are"),
             ));
         }
         if let Some(length) = request.length
@@ -1319,6 +1321,7 @@ impl Board {
         }
         let pads = self.placed_pads();
         let mut pending: Vec<Track> = Vec::new();
+        let mut shapes = 0usize;
         let mut skipped = 0usize;
         for track in self.tracks.clone() {
             if track.teardrop {
@@ -1364,6 +1367,18 @@ impl Board {
                     [edge[0] + side[0] * half_base, edge[1] + side[1] * half_base],
                     [edge[0] - side[0] * half_base, edge[1] - side[1] * half_base],
                 ] {
+                    if shape == "arc"
+                        && self.tracks.iter().any(|existing| {
+                            existing.teardrop
+                                && existing.net.as_deref() == Some(net.as_str())
+                                && existing.layer == track.layer
+                                && (same_point(existing.from, tip) || same_point(existing.to, tip))
+                        })
+                    {
+                        skipped += 1;
+                        continue;
+                    }
+                    let segments = if shape == "arc" { arc_side(base, edge, tip) } else { vec![(base, tip)] };
                     let exists = |from: [f64; 2], to: [f64; 2]| {
                         let matches = |existing: &Track| {
                             existing.net.as_deref() == Some(net.as_str())
@@ -1373,25 +1388,30 @@ impl Board {
                         };
                         self.tracks.iter().any(matches) || pending.iter().any(matches)
                     };
-                    if exists(base, tip) {
+                    let missing: Vec<([f64; 2], [f64; 2])> =
+                        segments.into_iter().filter(|(from, to)| !exists(*from, *to)).collect();
+                    if missing.is_empty() {
                         skipped += 1;
                         continue;
                     }
-                    pending.push(Track {
-                        id: String::new(),
-                        net: Some(net.clone()),
-                        layer: track.layer.clone(),
-                        width: track.width,
-                        from: base,
-                        to: tip,
-                        teardrop: true,
-                    });
+                    shapes += 1;
+                    for (from, to) in missing {
+                        pending.push(Track {
+                            id: String::new(),
+                            net: Some(net.clone()),
+                            layer: track.layer.clone(),
+                            width: track.width,
+                            from,
+                            to,
+                            teardrop: true,
+                        });
+                    }
                 }
             }
         }
         let added = pending.len();
         if added == 0 {
-            return Ok(json!({ "shape": "linear", "teardrops": 0, "tracks": 0, "skipped": skipped }));
+            return Ok(json!({ "shape": shape, "teardrops": 0, "tracks": 0, "skipped": skipped }));
         }
         for mut track in pending {
             track.id = format!("track-{}", self.next_track);
@@ -1399,7 +1419,7 @@ impl Board {
             self.tracks.push(track);
         }
         self.revision += 1;
-        Ok(json!({ "shape": "linear", "teardrops": added, "tracks": added, "skipped": skipped }))
+        Ok(json!({ "shape": shape, "teardrops": shapes, "tracks": added, "skipped": skipped }))
     }
 
     /// Removes one track by id and returns the removed id.
@@ -3051,6 +3071,25 @@ pub(crate) fn grid_lines(points: &[[f64; 2]], spacing: f64) -> Vec<([f64; 2], [f
         }
     }
     segments
+}
+
+/// Chord segments sampling the quadratic Bézier from `from` through `control`
+/// to `to` in eight equal steps.
+///
+/// The teardrop arc uses the pad-edge point as control so the curve leaves the
+/// pad edge tangentially and joins the track direction tangentially at the tip.
+/// Sampling is deterministic, so a repeated call reproduces identical points.
+fn arc_side(from: [f64; 2], control: [f64; 2], to: [f64; 2]) -> Vec<([f64; 2], [f64; 2])> {
+    const STEPS: usize = 8;
+    let mut points: Vec<[f64; 2]> = Vec::with_capacity(STEPS + 1);
+    for step in 0..=STEPS {
+        let t = step as f64 / STEPS as f64;
+        let a = (1.0 - t) * (1.0 - t);
+        let b = 2.0 * (1.0 - t) * t;
+        let c = t * t;
+        points.push([a * from[0] + b * control[0] + c * to[0], a * from[1] + b * control[1] + c * to[1]]);
+    }
+    points.windows(2).map(|window| (window[0], window[1])).collect()
 }
 
 /// Distance from a point to an axis-aligned box; zero inside the box.

@@ -1944,14 +1944,14 @@ cli
     .option('--length <mm>', 'cli.opt.length')
     .actionCtx(async (options, _args, ctx) => {
         const file = input(options);
-        const shape = text(options, 'shape') as 'linear' | undefined;
+        const shape = text(options, 'shape') as 'linear' | 'arc' | undefined;
         const length = numberOption(text(options, 'length'));
         if (file === undefined) {
             ctx.fail('open-pcb.cli.file-required', { message: 'a board document is required' });
             return 2;
         }
-        if (shape !== undefined && shape !== 'linear') {
-            ctx.fail('open-pcb.cli.shape-invalid', { message: 'only `--shape linear` is implemented' });
+        if (shape !== undefined && shape !== 'linear' && shape !== 'arc') {
+            ctx.fail('open-pcb.cli.shape-invalid', { message: '`--shape` must be `linear` or `arc`' });
             return 2;
         }
         if (text(options, 'length') !== undefined && (length === undefined || length <= 0)) {

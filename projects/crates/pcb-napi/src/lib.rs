@@ -482,7 +482,7 @@ fn board_keepout_report(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &value)
 }
 
-/// Adds linear teardrop copper at every pad-track junction.
+/// Adds linear or arc teardrop copper at every pad-track junction.
 #[function]
 fn board_add_teardrops(ctx: CallContext) -> Result<JsValue> {
     let handle = handle(&ctx, 0)?;

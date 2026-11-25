@@ -282,7 +282,8 @@ fn capability_matrix_matches_the_implemented_pack() {
     assert_eq!(matrix["differentialPairs"], "supported");
     assert_eq!(matrix["backDrill"], "supported");
     assert_eq!(matrix["teardrops"]["linear"], "supported");
-    assert_eq!(matrix["teardrops"]["arc"], "unsupported");
+    assert_eq!(matrix["teardrops"]["arc"], "supported");
+    assert_eq!(matrix["zoneGridFill"], "supported");
     assert_eq!(matrix["designRules"], "supported");
     assert_eq!(matrix["solderMask"], "supported");
     assert_eq!(matrix["solderPaste"], "supported");
@@ -7371,9 +7372,9 @@ fn linear_teardrops_materialise_without_drc_false_positives() {
     assert!(report["passed"].as_bool().expect("passed is a boolean"), "{report}");
     assert_eq!(codes(&report), Vec::<&str>::new());
 
-    let arc = add_teardrops(handle, AddTeardropsRequest { shape: Some("arc".to_string()), length: None })
-        .expect_err("the arc shape stays unimplemented");
-    assert_eq!(arc.code, "capability/not-implemented");
+    let round = add_teardrops(handle, AddTeardropsRequest { shape: Some("round".to_string()), length: None })
+        .expect_err("an unknown teardrop shape is rejected");
+    assert_eq!(round.code, "capability/not-implemented");
 
     let directory = TempDir::new();
     let path = directory.join("teardrops.opcb");
@@ -7383,6 +7384,119 @@ fn linear_teardrops_materialise_without_drc_false_positives() {
     let third = add_teardrops(reopened, AddTeardropsRequest::default()).expect("the saved teardrops are recognised");
     assert_eq!(third["object"]["tracks"], 0);
     assert_eq!(third["object"]["skipped"], 4);
+    close(reopened).expect("the reopened board closes");
+}
+
+#[test]
+fn arc_teardrops_curve_into_pads_with_one_revision() {
+    let handle = created();
+    add_net(handle, AddNetRequest { name: "SIG".to_string() }).expect("the net is declared");
+    for (reference, x) in [("J1", 10.0), ("J2", 30.0)] {
+        add_footprint(
+            handle,
+            AddFootprintRequest {
+                reference: Some(reference.to_string()),
+                x: Some(x),
+                y: Some(10.0),
+                layer: Some("F.Cu".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("the footprint is placed");
+        add_pad(
+            handle,
+            AddPadRequest {
+                footprint: format!("fp-{}", if reference == "J1" { 1 } else { 2 }),
+                number: "1".to_string(),
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+                net: Some("SIG".to_string()),
+                drill: None,
+            },
+        )
+        .expect("the pad is placed");
+    }
+    add_track(
+        handle,
+        AddTrackRequest {
+            net: Some("SIG".to_string()),
+            layer: "F.Cu".to_string(),
+            width: 0.3,
+            from: [10.0, 10.0],
+            to: [30.0, 10.0],
+        },
+    )
+    .expect("the pads are routed");
+    set_outline(handle, SetOutlineRequest { from: [0.0, 0.0], to: [40.0, 20.0] }).expect("the outline is set");
+
+    let revision = summary(handle).expect("the board is listed")["revision"].as_u64().expect("revision is a number");
+    let first = add_teardrops(handle, AddTeardropsRequest { shape: Some("arc".to_string()), length: None })
+        .expect("arc teardrops are generated");
+    assert_eq!(first["object"]["shape"], "arc");
+    assert_eq!(first["object"]["teardrops"], 4, "four curved sides across two junctions");
+    assert_eq!(first["object"]["tracks"], 32, "each side samples eight chord segments");
+    assert_eq!(first["object"]["skipped"], 0);
+    assert_eq!(first["board"]["counts"]["tracks"], 33);
+    let after = summary(handle).expect("the board is listed")["revision"].as_u64().expect("revision is a number");
+    assert_eq!(after, revision + 1, "one call bumps exactly one revision");
+
+    let chains = store::read(handle, |board| {
+        let at = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9;
+        let teardrops: Vec<_> = board.tracks.iter().filter(|track| track.teardrop).collect();
+        let ends_at_tip = teardrops
+            .iter()
+            .filter(|track| {
+                at(track.to, [8.9, 10.0])
+                    || at(track.to, [31.1, 10.0])
+                    || at(track.from, [8.9, 10.0])
+                    || at(track.from, [31.1, 10.0])
+            })
+            .count();
+        let uniform = teardrops
+            .iter()
+            .all(|track| (track.width - 0.3).abs() < 1e-12 && track.net.as_deref() == Some("SIG") && track.layer == "F.Cu");
+        (teardrops.len(), ends_at_tip, uniform)
+    })
+    .expect("the board is readable");
+    assert_eq!(chains.0, 32, "the teardrop copper is stored as ordinary tracks");
+    assert_eq!(chains.1, 4, "each curved side ends at the tip beyond its pad");
+    assert!(chains.2, "the chords keep the junction track width, net and layer");
+
+    let second = add_teardrops(handle, AddTeardropsRequest { shape: Some("arc".to_string()), length: None })
+        .expect("a repeated arc run is harmless");
+    assert_eq!(second["object"]["tracks"], 0);
+    assert_eq!(second["object"]["skipped"], 4);
+    assert_eq!(
+        summary(handle).expect("the board is listed")["revision"].as_u64(),
+        Some(after),
+        "a no-op run does not bump the revision"
+    );
+
+    let report = inspect(
+        handle,
+        Some(vec!["drc".to_string(), "clearance".to_string(), "connectivity".to_string(), "dangling-copper".to_string()]),
+    )
+    .expect("the checks run");
+    assert!(report["passed"].as_bool().expect("passed is a boolean"), "{report}");
+    assert_eq!(codes(&report), Vec::<&str>::new());
+
+    let directory = TempDir::new();
+    let path = directory.join("arc.opcb");
+    save(handle, &path, false).expect("the board saves");
+    close(handle).expect("the board closes");
+    let reopened = handle_of(&open(&path).expect("the document reopens"));
+    let third = add_teardrops(reopened, AddTeardropsRequest { shape: Some("arc".to_string()), length: None })
+        .expect("the saved arc teardrops are recognised");
+    assert_eq!(third["object"]["tracks"], 0);
+    assert_eq!(third["object"]["skipped"], 4);
+
+    let gbr = directory.join("gerber");
+    export(reopened, "gbr", &gbr).expect("Gerber export writes");
+    let copper = fs::read_to_string(gbr.join("F_Cu.gbr")).expect("the copper layer is readable");
+    let strokes = copper.matches("D01*").count();
+    assert!(strokes >= 33, "every chord segment is visible Gerber copper: {strokes}");
     close(reopened).expect("the reopened board closes");
 }
 

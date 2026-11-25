@@ -412,9 +412,13 @@ fn clearance(board: &Board, issues: &mut CheckReport) {
                 continue;
             }
             let centres = segment_distance(track.from, track.to, other.from, other.to);
-            if track.net == other.net && (shares_endpoint(track, other) || centres <= 1e-6) {
+            if track.net == other.net
+                && (shares_endpoint(track, other) || centres <= 1e-6 || (track.teardrop && other.teardrop))
+            {
                 // Two segments of one net that meet or cross are connected; a
                 // shared endpoint or a T-junction is not a clearance violation.
+                // Teardrop chords of one net are generated fillet copper whose
+                // strokes merge by design, so they are connected as well.
                 continue;
             }
             let gap = (centres - (track.width + other.width) / 2.0) * scale;

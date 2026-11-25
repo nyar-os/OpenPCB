@@ -1505,11 +1505,12 @@ export interface AddNetOptions {
  * Options of `board.addTeardrops()`.
  *
  * Teardrops are materialised as ordinary copper tracks, so they follow every
- * export and inspection path. Only the `linear` shape is implemented.
+ * export and inspection path. `linear` draws each side as one straight track;
+ * `arc` curves each side, sampling a pad-tangent Bézier as eight chord tracks.
  */
 export interface AddTeardropsOptions {
-    /** Teardrop shape; defaults to and only accepts `linear`. */
-    readonly shape?: 'linear';
+    /** Teardrop shape; defaults to `linear`. */
+    readonly shape?: 'linear' | 'arc';
     /** Length from the pad edge to the teardrop tip, in board units. */
     readonly length?: number;
 }

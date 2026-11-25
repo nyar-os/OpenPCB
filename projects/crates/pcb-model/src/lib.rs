@@ -209,7 +209,7 @@ pub fn capabilities() -> Value {
         "backDrill": "supported",
         "teardrops": {
             "linear": "supported",
-            "arc": "unsupported",
+            "arc": "supported",
         },
         "designRules": "supported",
         "solderMask": "supported",
@@ -757,7 +757,7 @@ pub fn keepout_report(handle: u64) -> Result<Value, ServiceError> {
     store::read(handle, |board| board.keepout_report())
 }
 
-/// Adds linear teardrop copper at every pad-track junction.
+/// Adds linear or arc teardrop copper at every pad-track junction.
 pub fn add_teardrops(handle: u64, request: AddTeardropsRequest) -> Result<Value, ServiceError> {
     let mut report = Value::Null;
     store::mutate(handle, |board| {
